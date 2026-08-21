@@ -1,9 +1,4 @@
-name: caPOS Security & Quality Audit
 
-# Jalan otomatis di cloud (GitHub-hosted runner) setiap ada push/PR ke main,
-# plus jadwal mingguan. Tidak ada satupun tools di sini yang perlu di-install
-# di laptop kamu — semuanya "terinstal sementara" di server GitHub lalu
-# dibuang lagi setelah job selesai.
 on:
   push:
     branches: [main]
