@@ -46,5 +46,5 @@ jobs:
       - name: ZAP Baseline Scan
         uses: zaproxy/action-baseline@v0.12.0
         with:
-          target: "https://capos.vercel.app" # ganti dengan URL Vercel-mu
+          target: "https://ca-pos-sooty.vercel.app" # ganti dengan URL Vercel-mu
           fail_action: false # set true kalau mau job gagal saat ada temuan
