@@ -27,6 +27,8 @@ export interface Profile {
   tenant_id: string;
   role: UserRole;
   full_name: string | null;
+  email: string | null;
+  is_active: boolean;
   created_at: string;
 }
 

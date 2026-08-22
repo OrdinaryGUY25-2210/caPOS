@@ -1,17 +1,34 @@
-import DashboardSidebar from "@/components/DashboardSidebar";
-import TrialBanner from "@/components/TrialBanner";
+import DashboardShell from "@/components/DashboardShell";
+import { createClient } from "@/lib/supabase/server";
+import { daysRemaining } from "@/lib/utils";
 
-export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  // In production, fetch daysRemaining(subscription.trial_ends_at) server-side.
-  const demoDaysLeft = 2;
+export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  return (
-    <div className="flex h-screen overflow-hidden bg-neutral-50">
-      <DashboardSidebar />
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <TrialBanner daysLeft={demoDaysLeft} />
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
-      </div>
-    </div>
-  );
+  let daysLeft = 999; // default aman: banner tidak muncul kalau data tidak ditemukan
+
+  if (user) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("tenant_id")
+      .eq("id", user.id)
+      .single();
+
+    if (profile?.tenant_id) {
+      const { data: subscription } = await supabase
+        .from("subscriptions")
+        .select("trial_ends_at, status")
+        .eq("tenant_id", profile.tenant_id)
+        .single();
+
+      if (subscription?.status === "trial" && subscription.trial_ends_at) {
+        daysLeft = daysRemaining(subscription.trial_ends_at);
+      }
+    }
+  }
+
+  return <DashboardShell daysLeft={daysLeft}>{children}</DashboardShell>;
 }

@@ -1,0 +1,53 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-inter: "Inter", system-ui, sans-serif;
+}
+
+body {
+  @apply bg-neutral-50 text-neutral-900 antialiased;
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-primary hover:bg-primary-dark text-white font-semibold rounded-xl px-4 py-2.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-outline {
+    @apply border border-neutral-200 hover:bg-neutral-100 text-neutral-700 font-medium rounded-xl px-4 py-2.5 transition-colors;
+  }
+  .btn-danger {
+    @apply bg-urgent hover:bg-red-600 text-white font-semibold rounded-xl px-4 py-2.5 transition-colors;
+  }
+  .card {
+    @apply bg-white border border-neutral-200 rounded-2xl shadow-sm;
+  }
+  .input-field {
+    @apply w-full rounded-xl border border-neutral-200 px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary;
+  }
+  .badge-active {
+    @apply inline-flex items-center gap-1 rounded-full bg-primary-light text-primary-dark text-xs font-medium px-2.5 py-1;
+  }
+  .badge-urgent {
+    @apply inline-flex items-center gap-1 rounded-full bg-urgent-light text-urgent text-xs font-medium px-2.5 py-1;
+  }
+  .badge-warning {
+    @apply inline-flex items-center gap-1 rounded-full bg-warning-light text-warning text-xs font-medium px-2.5 py-1;
+  }
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #receipt-print, #receipt-print * {
+    visibility: visible;
+  }
+  #receipt-print {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 80mm;
+  }
+}

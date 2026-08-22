@@ -1,0 +1,87 @@
+# Audit Keamanan & Performa caPOS + Panduan Deteksi Spaghetti Code
+
+## Bagian 1 — Temuan Celah (OWASP Top 10)
+
+| # | Celah | Kategori OWASP | Tingkat |
+|---|-------|-----------------|---------|
+| 1 | Tabel `invite_codes` tidak pernah diaktifkan RLS-nya → bisa dibaca bebas lewat anon key REST API Supabase (`GET /rest/v1/invite_codes`), membocorkan semua kode aktif dan sisa kuotanya. | A01: Broken Access Control | **Kritis** |
+| 2 | View `daily_sales_analytics` dibuat tanpa `security_invoker`. Di Postgres, VIEW default berjalan dengan hak akses **pemilik view**, bukan pemanggil — artinya RLS di tabel `transactions` bisa ter-*bypass* dan omzet tenant lain ikut terbaca. | A01: Broken Access Control | **Kritis** |
+| 3 | `total_amount` transaksi kasir dihitung & dipercaya penuh dari **browser** (`handleCheckout` mengirim `total` langsung ke `insert()`). Klien yang dimodifikasi (DevTools/Burp Suite) bisa mengubah nilai sebelum sampai server → kecurangan laporan omzet. | A04: Insecure Design (business logic flaw) | **Kritis** |
+| 4 | API `/api/register` tidak validasi email/password di server — hanya `required`/`minLength` di HTML, yang mudah dilewati dengan `curl`/Postman langsung ke endpoint. | A04: Insecure Design / A03: Injection-adjacent (input tak tersanitasi) | Tinggi |
+| 5 | Tidak ada rate limiting di `/api/register` → kode akses (mis. `CAPOSVIRAL`) bisa di-*brute force* / kuota 100 slot dihabiskan skrip otomatis dalam hitungan detik. | A07: Identification & Authentication Failures | Tinggi |
+| 6 | `member_code` dibuat berurutan (`MBR-2026-0001`, `0002`, …) → mudah ditebak untuk mencuri diskon member orang lain lewat kolom "Kode Member / Scan QR" di `/pos`. | A01: Broken Access Control (IDOR-like) | Sedang |
+| 7 | Fungsi `SECURITY DEFINER` (`redeem_invite_code`, `is_super_admin`) tidak mengunci `search_path` → berpotensi "search_path hijacking" bila ada schema lain yang disisipkan pengguna jahat. | A05: Security Misconfiguration | Sedang |
+| 8 | Tidak ada header keamanan (`CSP`, `X-Frame-Options`, dll) → aplikasi rawan clickjacking dan tak punya lapisan pertahanan XSS tambahan. | A05: Security Misconfiguration | Sedang |
+| 9 | Pesan error API sebelumnya meneruskan `error.message` mentah dari Supabase ke client → membocorkan detail struktur DB dan bisa dipakai enumerasi akun terdaftar. | A09: Security Logging & Monitoring Failures (info leak) | Rendah–Sedang |
+| 10 | Field `synced: boolean` di IndexedDB (Dexie) — IndexedDB **tidak bisa mengindeks boolean**, jadi query offline jatuh ke full table scan meski "terlihat" ada index. | Performa (bukan OWASP, tapi berdampak nyata di skala) | Sedang |
+| 11 | Tidak ada indeks di kolom yang sering difilter (`transactions.tenant_id + created_at`, `products.tenant_id + category`, dst.) → sequential scan makin lambat seiring data bertambah. | Performa | Sedang |
+
+## Bagian 2 — Perbaikan yang Sudah Diterapkan
+
+Semua sudah dimasukkan ke `capos.zip` yang baru:
+
+- **`supabase/schema.sql`**
+  - `ALTER TABLE invite_codes ENABLE ROW LEVEL SECURITY` + policy khusus `super_admin`.
+  - View `daily_sales_analytics` dibuat ulang dengan `WITH (security_invoker = true)`.
+  - `SET search_path = public, pg_temp` ditambahkan ke semua fungsi `SECURITY DEFINER`.
+  - `member_code` sekarang mendapat akhiran acak (`MBR-2026-0001-A9F3`), tidak murni sekuensial.
+  - Fungsi baru **`checkout_transaction()`**: menerima `product_id` + `qty` saja, lalu **menghitung ulang harga & diskon dari database**, memvalidasi kasir memang anggota tenant tsb, dan baru menyimpan `transactions` + `transaction_items` dalam satu transaksi atomik.
+  - Indeks tambahan di `transactions`, `products`, `memberships`, `profiles`, `transaction_items`.
+- **`app/api/register/route.ts`**: validasi regex email/nama/kode akses di server, aturan password minimal 8 karakter + kombinasi huruf-angka, rate limit 5 percobaan/menit per IP, pesan error digeneralisasi (tidak lagi meneruskan pesan mentah dari Supabase).
+- **`app/pos/page.tsx`**: checkout sekarang memanggil RPC `checkout_transaction` (server-authoritative total), bukan `insert` langsung dengan total dari state React.
+- **`lib/dexie.ts`**: `synced` diubah dari `boolean` ke `0 | 1` agar index benar-benar terpakai, query sync pakai `.where("synced").equals(0)` (indexed) alih-alih `.filter()` (full scan).
+- **`next.config.js`**: header `Content-Security-Policy`, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Permissions-Policy`.
+
+### Yang masih perlu kamu lakukan secara manual
+- Jalankan ulang `supabase/schema.sql` di project Supabase (atau migrasi bertahap jika sudah ada data).
+- Ganti rate limiter in-memory di `/api/register` dengan penyimpanan bersama (Upstash Redis / Vercel KV) sebelum deploy ke banyak instance serverless — versi in-memory hanya efektif di satu instance.
+- Terapkan pola RPC `checkout_transaction` yang sama untuk fungsi `syncPendingTransactions` (saat ini contoh `insertFn` di halaman lain masih perlu disambungkan ke RPC ini, bukan `insert` langsung).
+- Tambahkan `zod` (atau library validasi lain) bila form bertambah banyak, agar aturan validasi tidak ditulis manual berulang-ulang.
+
+---
+
+## Bagian 3 — Cara Mendeteksi "Spaghetti Code"
+
+Spaghetti code adalah kode yang alur logikanya saling silang tanpa struktur jelas, sulit dites, dan setiap perubahan kecil berisiko merusak bagian lain. Cara mendeteksinya:
+
+### A. Tanda-tanda manual (code smell)
+1. **Fungsi/komponen sangat panjang** — satu file `page.tsx` berisi fetch data, validasi, state, dan render sekaligus (mis. jangan biarkan `/pos/page.tsx` tumbuh melebihi ~300–400 baris tanpa dipecah ke hook/komponen).
+2. **Nested condition dalam** (`if` di dalam `if` di dalam `if`) lebih dari 3 level — biasanya tanda logika bisnis perlu diekstrak ke fungsi terpisah.
+3. **State saling bergantung tanpa arah jelas** — banyak `useState` yang saling meng-update satu sama lain di `useEffect` berantai (efek domino).
+4. **Duplikasi logika** — validasi yang sama ditulis ulang di beberapa halaman (contoh sebelum diperbaiki: aturan password hanya ada di client, tidak konsisten dengan server).
+5. **"Magic values"** tersebar (harga, ID tenant "demo", angka diskon) yang di-hardcode di banyak tempat, bukan di satu sumber kebenaran (constants/env/DB).
+
+### B. Alat otomatis untuk mengukur & mendeteksi
+| Tools | Fungsi | Cara pakai singkat |
+|---|---|---|
+| **ESLint** (`next lint`) + `eslint-plugin-sonarjs` | Deteksi kompleksitas siklomatik tinggi, kode duplikat, kondisi berlebih | `npm i -D eslint-plugin-sonarjs`, aktifkan rule `sonarjs/cognitive-complexity` |
+| **SonarQube / SonarCloud** | Skor "maintainability", deteksi *code smells*, duplikasi antar file, technical debt dalam jam kerja | Hubungkan repo GitHub → laporan otomatis tiap push |
+| **CodeClimate** | Mirip SonarQube, plus grade A–F per file | Integrasi via GitHub App |
+| **`ts-prune` / `depcheck`** | Cari kode/`export` yang tidak pernah dipakai (dead code) | `npx ts-prune`, `npx depcheck` |
+| **Madge** | Visualisasi graf dependensi antar file — spaghetti sering terlihat sebagai "circular dependency" | `npx madge --circular --extensions ts,tsx app lib components` |
+| **`eslint-plugin-react-hooks`** | Deteksi `useEffect`/state yang salah dependency (sumber bug efek berantai) | Sudah bawaan `next lint`, pastikan tidak ada warning yang diabaikan |
+
+**Aturan praktis:** kalau *cognitive complexity* satu fungsi > 15 (dilaporkan Sonar/`sonarjs`), atau satu file diimpor oleh >10 file lain sekaligus mengimpor balik salah satunya (circular dependency dari Madge), itu kandidat kuat spaghetti code yang perlu direfaktor jadi fungsi/hook/modul lebih kecil.
+
+---
+
+## Bagian 4 — Alat yang "Berperan Sebagai Hacker" (Security Testing Tools) & Cara Mencegahnya
+
+Tools ini dipakai *penetration tester* untuk mensimulasikan serangan ke aplikasi seperti caPOS — gunakan di environment staging, **jangan pernah** ke production tanpa izin/tanpa data asli:
+
+| Tools | Simulasi Serangan | Celah yang Dites di caPOS | Pencegahan |
+|---|---|---|---|
+| **Burp Suite / OWASP ZAP** | Proxy untuk mengubah request sebelum sampai server (mis. ganti `total_amount` transaksi, ganti `role` di payload) | Skenario #3 di atas — mengubah total transaksi kasir | Selalu hitung ulang nilai kritis (harga, diskon, total) **di server/DB**, jangan percaya angka dari body request |
+| **sqlmap** | Otomatis mencoba injeksi SQL di setiap parameter form/URL | Karena semua query pakai Supabase client (parameterized) & RPC dengan tipe eksplisit, risiko rendah — tapi tetap wajib dites tiap ada raw SQL baru | Jangan pernah membangun query dengan string concatenation; selalu gunakan parameter binding / RPC bertipe |
+| **OWASP ZAP Active Scan / Nikto** | Pemindaian otomatis header keamanan, cookie tanpa `HttpOnly`/`Secure`, endpoint yang bocor informasi | Header keamanan yang tadinya belum ada (celah #8) | Set header via `next.config.js` `headers()` seperti yang sudah ditambahkan, gunakan cookie `Secure; HttpOnly; SameSite=Lax` (default Supabase SSR sudah begini) |
+| **Postman / curl / Insecure Direct API calls** | Memanggil endpoint langsung tanpa lewat UI, melewati validasi client-side | Celah #4 — validasi hanya di HTML form | Validasi **selalu diulang di server**, seperti yang sudah diterapkan di `/api/register` |
+| **Hydra / ffuf (brute force & fuzzing)** | Mencoba ribuan kombinasi kode akses/password secara otomatis | Celah #5 — kuota kode akses bisa dihabiskan skrip | Rate limiting per-IP + CAPTCHA (mis. Cloudflare Turnstile) untuk endpoint publik seperti `/register` |
+| **Supabase REST API langsung (`curl` ke `*.supabase.co/rest/v1/...`)** | Mengecek apakah tabel bisa diakses tanpa lewat aplikasi sama sekali, memakai anon key dari kode frontend (selalu publik!) | Celah #1 dan #2 — RLS yang lupa diaktifkan | **RLS wajib aktif di SEMUA tabel** tanpa kecuali, dan selalu tes tabel baru dengan: `curl <url>/rest/v1/nama_tabel -H "apikey: <anon_key>"` sebelum deploy — kalau data ikut keluar tanpa login, RLS-nya salah |
+| **npm audit / Snyk / Dependabot** | Memindai dependency (`package.json`) yang punya CVE publik | `next@14.2.5` yang dipakai awalnya punya kerentanan yang sudah diperbaiki di `14.2.35` | Aktifkan Dependabot/`npm audit` di CI, update dependency rutin, jangan pin versi lama tanpa alasan |
+
+### Rutinitas pencegahan yang disarankan
+1. **Sebelum setiap deploy**: jalankan `npm audit`, `npx madge --circular`, dan `next lint` sebagai bagian dari CI (GitHub Actions).
+2. **Tes RLS manual** tiap ada tabel baru: coba `curl` REST API Supabase pakai anon key dari akun yang *bukan* pemilik data — harus dapat error/array kosong, bukan data orang lain.
+3. **Semua nilai uang/diskon/kuota** yang menentukan berapa yang dibayar/berapa slot tersisa **wajib dihitung ulang di server/RPC**, tidak pernah dipercaya dari body request.
+4. **Pentest berkala** pakai OWASP ZAP (gratis) minimal sebelum rilis besar, terutama setelah menambah form/endpoint baru.
+5. **Log & monitoring**: aktifkan Supabase log + alert untuk lonjakan request ke `/api/register` atau RPC `checkout_transaction`, sebagai tanda dini percobaan abuse.

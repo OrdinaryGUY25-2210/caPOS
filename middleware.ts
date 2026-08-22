@@ -53,13 +53,21 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(new URL(roleHome[profile.role] ?? "/pos", request.url));
     }
 
-    // Guard cross-role access (super_admin bypasses all restrictions)
+    // Guard cross-role access (super_admin bypasses all restrictions).
+    // Saat memblokir, tambahkan query param `?access_denied=<path-tujuan>`
+    // ke URL redirect — ini dibaca oleh komponen AccessDeniedNotice di sisi
+    // client untuk menampilkan notifikasi singkat ("Anda tidak punya akses
+    // ke halaman itu") alih-alih diam-diam melempar user tanpa penjelasan.
     if (profile?.role && profile.role !== "super_admin") {
       if (path.startsWith("/admin")) {
-        return NextResponse.redirect(new URL(roleHome[profile.role], request.url));
+        const url = new URL(roleHome[profile.role], request.url);
+        url.searchParams.set("access_denied", path);
+        return NextResponse.redirect(url);
       }
       if (path.startsWith("/dashboard") && profile.role !== "owner") {
-        return NextResponse.redirect(new URL(roleHome[profile.role], request.url));
+        const url = new URL(roleHome[profile.role], request.url);
+        url.searchParams.set("access_denied", path);
+        return NextResponse.redirect(url);
       }
     }
   }

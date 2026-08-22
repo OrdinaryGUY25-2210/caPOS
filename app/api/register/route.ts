@@ -1,13 +1,27 @@
 import { NextResponse } from "next/server";
-import { createClient as createServiceClient } from "@supabase/supabase-js";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
-// Uses the service-role key because redeeming an invite code and creating
-// the auth user + tenant must happen atomically on the server — never
-// exposed to the browser.
+// Service-role client: dipakai untuk redeem kode akses (atomic) dan
+// membuat tenant/profile — operasi yang harus bisa menulis ke DB SEBELUM
+// user punya sesi login sendiri. Kunci ini tidak pernah dikirim ke browser.
 function serviceClient() {
-  return createServiceClient(
+  return createSupabaseClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+}
+
+// Anon client: dipakai KHUSUS untuk memanggil auth.signUp(). Ini penting —
+// auth.admin.createUser() (lewat service role) TIDAK mengirim email
+// verifikasi sama sekali walau email_confirm diset false (ini perilaku
+// resmi Supabase, sering bikin bingung developer). Yang benar-benar
+// mengirim email konfirmasi adalah auth.signUp() biasa, dan itu tidak
+// butuh service role — anon key sudah cukup, sama seperti kalau signUp
+// dipanggil langsung dari browser.
+function anonClient() {
+  return createSupabaseClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 }
 
@@ -130,30 +144,49 @@ export async function POST(request: Request) {
   // 2. Create trial subscription (28 days, defaults handled by DB)
   await supabase.from("subscriptions").insert({ tenant_id: tenant.id });
 
-  // 3. Create auth user
-  const { data: authUser, error: authError } = await supabase.auth.admin.createUser({
+  // 3. Create auth user DAN kirim email verifikasi asli.
+  //
+  // Memakai auth.signUp() (bukan auth.admin.createUser()) karena hanya
+  // signUp() yang benar-benar mengirim email konfirmasi ke alamat yang
+  // didaftarkan. User baru bisa login setelah klik link di email tersebut
+  // (selama "Confirm email" masih aktif di Supabase Dashboard →
+  // Authentication → Providers → Email, yang merupakan default).
+  const { data: authUser, error: authError } = await anonClient().auth.signUp({
     email,
     password,
-    email_confirm: true,
   });
 
   if (authError || !authUser.user) {
     // Generic message: confirming/denying "email already registered" makes
     // it trivial to enumerate valid user accounts (OWASP A07).
-    console.error("auth create failed", authError);
+    console.error("auth signUp failed", authError);
+    // Rollback: jangan sampai ada tenant "yatim" tanpa pemilik kalau
+    // pembuatan akun gagal di tengah jalan (kuota invite_code yang sudah
+    // terpakai tidak dikembalikan otomatis — itu trade-off sederhana yang
+    // masih perlu perbaikan lanjutan kalau mau benar-benar strict).
+    await supabase.from("tenants").delete().eq("id", tenant.id);
     return NextResponse.json(
       { reason: "AUTH_ERROR", message: "Pendaftaran gagal. Periksa kembali data Anda atau gunakan email lain." },
       { status: 400 }
     );
   }
 
-  // 4. Create owner profile
+  // 4. Create owner profile lewat service client (user belum punya sesi
+  // login sendiri sampai email dikonfirmasi, jadi insert ini butuh hak
+  // akses elevated, bukan RLS milik user biasa). Email disalin di sini
+  // supaya halaman Manajemen Kasir bisa menampilkan daftar tanpa perlu
+  // memanggil admin API setiap kali.
   await supabase.from("profiles").insert({
     id: authUser.user.id,
     tenant_id: tenant.id,
     role: "owner",
     full_name: ownerName,
+    email,
   });
 
-  return NextResponse.json({ success: true, tenant_id: tenant.id });
+  return NextResponse.json({
+    success: true,
+    tenant_id: tenant.id,
+    requiresEmailConfirmation: true,
+  });
 }

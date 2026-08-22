@@ -1,32 +1,70 @@
 "use client";
 
-import { useState } from "react";
-import { Plus, Pencil, ImagePlus, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Plus, Pencil, ImagePlus, Loader2 } from "lucide-react";
 import { formatRupiah, cx } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/client";
+import { getCurrentProfile } from "@/lib/getCurrentProfile";
+import Modal from "@/components/Modal";
 import type { Product } from "@/lib/types";
 
 const CATEGORIES = ["Kopi", "Non-Kopi", "Makanan", "Dessert"];
 
-const DEMO_MENU: Product[] = [
-  { id: "p1", tenant_id: "demo", name: "Espresso", price: 18000, category: "Kopi", image_url: null, is_available: true, created_at: "" },
-  { id: "p2", tenant_id: "demo", name: "Cappuccino", price: 25000, category: "Kopi", image_url: null, is_available: true, created_at: "" },
-  { id: "p6", tenant_id: "demo", name: "Nasi Goreng Kafe", price: 32000, category: "Makanan", image_url: null, is_available: false, created_at: "" },
-  { id: "p8", tenant_id: "demo", name: "Tiramisu", price: 28000, category: "Dessert", image_url: null, is_available: true, created_at: "" },
-];
-
 export default function MenuPage() {
-  const [menu, setMenu] = useState<Product[]>(DEMO_MENU);
+  const [menu, setMenu] = useState<Product[]>([]);
+  const [tenantId, setTenantId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Product | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  function toggleAvailability(id: string) {
-    setMenu((prev) => prev.map((m) => (m.id === id ? { ...m, is_available: !m.is_available } : m)));
+  async function loadMenu() {
+    setLoading(true);
+    const { profile } = await getCurrentProfile();
+    if (!profile) {
+      setLoading(false);
+      return;
+    }
+    setTenantId(profile.tenant_id);
+
+    const supabase = createClient();
+    // RLS ("Access products by tenant_id") sudah membatasi query ini hanya
+    // ke produk milik tenant sendiri — tidak perlu filter manual di sini,
+    // tapi tetap ditulis eksplisit supaya query lebih cepat (pakai index).
+    const { data } = await supabase
+      .from("products")
+      .select("*")
+      .eq("tenant_id", profile.tenant_id)
+      .order("created_at", { ascending: false });
+
+    setMenu((data as Product[]) ?? []);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    loadMenu();
+  }, []);
+
+  async function toggleAvailability(product: Product) {
+    const supabase = createClient();
+    const next = !product.is_available;
+    setMenu((prev) => prev.map((m) => (m.id === product.id ? { ...m, is_available: next } : m)));
+    const { error } = await supabase
+      .from("products")
+      .update({ is_available: next })
+      .eq("id", product.id);
+    if (error) {
+      // rollback tampilan kalau gagal simpan
+      setMenu((prev) => prev.map((m) => (m.id === product.id ? { ...m, is_available: !next } : m)));
+      alert("Gagal mengubah status ketersediaan: " + error.message);
+    }
   }
 
   function openNew() {
+    if (!tenantId) return;
     setEditing({
-      id: crypto.randomUUID(),
-      tenant_id: "demo",
+      id: "",
+      tenant_id: tenantId,
       name: "",
       price: 0,
       category: "Kopi",
@@ -37,12 +75,49 @@ export default function MenuPage() {
     setShowForm(true);
   }
 
-  function saveProduct(p: Product) {
-    setMenu((prev) => {
-      const exists = prev.some((m) => m.id === p.id);
-      return exists ? prev.map((m) => (m.id === p.id ? p : m)) : [p, ...prev];
-    });
+  async function saveProduct(p: Product) {
+    setSaving(true);
+    const supabase = createClient();
+
+    if (p.id) {
+      // Update produk yang sudah ada
+      const { error } = await supabase
+        .from("products")
+        .update({ name: p.name, price: p.price, category: p.category, image_url: p.image_url })
+        .eq("id", p.id);
+      if (error) {
+        alert("Gagal menyimpan: " + error.message);
+        setSaving(false);
+        return;
+      }
+    } else {
+      // Produk baru
+      const { error } = await supabase.from("products").insert({
+        tenant_id: p.tenant_id,
+        name: p.name,
+        price: p.price,
+        category: p.category,
+        image_url: p.image_url,
+        is_available: true,
+      });
+      if (error) {
+        alert("Gagal menambah menu: " + error.message);
+        setSaving(false);
+        return;
+      }
+    }
+
+    setSaving(false);
     setShowForm(false);
+    loadMenu();
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64 text-neutral-400">
+        <Loader2 className="animate-spin mr-2" size={18} /> Memuat menu...
+      </div>
+    );
   }
 
   return (
@@ -50,7 +125,7 @@ export default function MenuPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-neutral-900">Kelola Menu & Stok</h1>
-          <p className="text-sm text-neutral-500">Tambah, edit foto, dan atur ketersediaan menu</p>
+          <p className="text-sm text-neutral-500">Tambah, edit foto, dan atur ketersediaan menu — tersimpan langsung ke database</p>
         </div>
         <button onClick={openNew} className="btn-primary flex items-center gap-2">
           <Plus size={16} /> Tambah Menu
@@ -79,7 +154,7 @@ export default function MenuPage() {
             <p className="text-sm font-bold text-primary mt-1">{formatRupiah(product.price)}</p>
 
             <button
-              onClick={() => toggleAvailability(product.id)}
+              onClick={() => toggleAvailability(product)}
               className={cx(
                 "mt-2 w-full text-xs font-medium py-1.5 rounded-lg transition-colors",
                 product.is_available ? "bg-primary-light text-primary-dark" : "bg-neutral-100 text-neutral-400"
@@ -89,11 +164,17 @@ export default function MenuPage() {
             </button>
           </div>
         ))}
+        {menu.length === 0 && (
+          <p className="col-span-full text-center text-neutral-400 py-10">
+            Belum ada menu. Klik &quot;Tambah Menu&quot; untuk mulai mengisi katalog kafe Anda.
+          </p>
+        )}
       </div>
 
       {showForm && editing && (
         <ProductForm
           product={editing}
+          saving={saving}
           onClose={() => setShowForm(false)}
           onSave={saveProduct}
         />
@@ -104,69 +185,99 @@ export default function MenuPage() {
 
 function ProductForm({
   product,
+  saving,
   onClose,
   onSave,
 }: {
   product: Product;
+  saving: boolean;
   onClose: () => void;
   onSave: (p: Product) => void;
 }) {
   const [form, setForm] = useState(product);
   const [preview, setPreview] = useState<string | null>(product.image_url);
+  const [uploading, setUploading] = useState(false);
 
-  function handleImage(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleImage(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    // In production: crop/resize client-side (e.g. via canvas) before
-    // uploading to Supabase Storage, then store the public URL.
-    const url = URL.createObjectURL(file);
-    setPreview(url);
-    setForm({ ...form, image_url: url });
+
+    setUploading(true);
+    const supabase = createClient();
+    const ext = file.name.split(".").pop();
+    const path = `${form.tenant_id}/${crypto.randomUUID()}.${ext}`;
+
+    // Butuh bucket Storage bernama "menu-images" (public) di project
+    // Supabase — buat lewat Dashboard → Storage → New bucket, set Public.
+    const { error: uploadError } = await supabase.storage
+      .from("menu-images")
+      .upload(path, file, { upsert: true });
+
+    if (uploadError) {
+      alert(
+        "Upload gambar gagal: " + uploadError.message +
+        "\n\nPastikan bucket Storage 'menu-images' sudah dibuat dan diset Public di Supabase Dashboard."
+      );
+      setUploading(false);
+      return;
+    }
+
+    const { data: publicUrl } = supabase.storage.from("menu-images").getPublicUrl(path);
+    setPreview(publicUrl.publicUrl);
+    setForm((f) => ({ ...f, image_url: publicUrl.publicUrl }));
+    setUploading(false);
   }
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="card w-full max-w-sm p-6 space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="font-bold text-lg">{product.name ? "Edit Menu" : "Tambah Menu"}</h3>
-          <button onClick={onClose}><X size={18} /></button>
-        </div>
+    <Modal
+      title={product.id ? "Edit Menu" : "Tambah Menu"}
+      onClose={onClose}
+      footer={
+        <button
+          disabled={saving || !form.name.trim() || form.price <= 0}
+          onClick={() => onSave(form)}
+          className="btn-primary w-full flex items-center justify-center gap-2"
+        >
+          {saving && <Loader2 className="animate-spin" size={16} />}
+          Simpan Menu
+        </button>
+      }
+    >
+      <label className="aspect-video rounded-xl bg-neutral-100 flex flex-col items-center justify-center text-neutral-400 cursor-pointer overflow-hidden relative">
+        {uploading ? (
+          <Loader2 className="animate-spin" size={22} />
+        ) : preview ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={preview} alt="preview" className="w-full h-full object-cover" />
+        ) : (
+          <>
+            <ImagePlus size={22} />
+            <span className="text-xs mt-1">Upload Foto Menu</span>
+          </>
+        )}
+        <input type="file" accept="image/*" onChange={handleImage} className="hidden" disabled={uploading} />
+      </label>
 
-        <label className="aspect-video rounded-xl bg-neutral-100 flex flex-col items-center justify-center text-neutral-400 cursor-pointer overflow-hidden relative">
-          {preview ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={preview} alt="preview" className="w-full h-full object-cover" />
-          ) : (
-            <>
-              <ImagePlus size={22} />
-              <span className="text-xs mt-1">Upload Foto (crop otomatis)</span>
-            </>
-          )}
-          <input type="file" accept="image/*" onChange={handleImage} className="hidden" />
-        </label>
-
-        <div>
-          <label className="text-sm font-medium text-neutral-700 mb-1 block">Nama Menu</label>
-          <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="input-field" />
-        </div>
-        <div>
-          <label className="text-sm font-medium text-neutral-700 mb-1 block">Harga</label>
-          <input
-            type="number"
-            value={form.price}
-            onChange={(e) => setForm({ ...form, price: Number(e.target.value) })}
-            className="input-field"
-          />
-        </div>
-        <div>
-          <label className="text-sm font-medium text-neutral-700 mb-1 block">Kategori</label>
-          <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className="input-field">
-            {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
-        </div>
-
-        <button onClick={() => onSave(form)} className="btn-primary w-full">Simpan Menu</button>
+      <div>
+        <label className="text-sm font-medium text-neutral-700 mb-1 block">Nama Menu</label>
+        <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="input-field" maxLength={80} />
       </div>
-    </div>
+      <div>
+        <label className="text-sm font-medium text-neutral-700 mb-1 block">Harga</label>
+        <input
+          type="number"
+          min={0}
+          value={form.price}
+          onChange={(e) => setForm({ ...form, price: Number(e.target.value) })}
+          className="input-field"
+        />
+      </div>
+      <div>
+        <label className="text-sm font-medium text-neutral-700 mb-1 block">Kategori</label>
+        <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className="input-field">
+          {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </div>
+    </Modal>
   );
 }

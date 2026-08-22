@@ -1,0 +1,17 @@
+{
+  "name": "caPOS - Point of Sale Kafe",
+  "short_name": "caPOS",
+  "description": "Aplikasi kasir & manajemen kafe oleh Studio D13",
+  "start_url": "/pos",
+  "id": "/pos",
+  "display": "standalone",
+  "background_color": "#F8FAFC",
+  "theme_color": "#10B981",
+  "orientation": "any",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -37,6 +37,9 @@ CREATE TABLE profiles (
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
   role user_role DEFAULT 'cashier',
   full_name TEXT,
+  email TEXT,             -- disalin dari auth.users saat akun dibuat, biar
+                           -- daftar kasir bisa ditampilkan tanpa perlu admin API
+  is_active BOOLEAN DEFAULT true, -- nonaktifkan akun kasir tanpa menghapusnya
   created_at TIMESTAMPTZ DEFAULT now()
 );
 

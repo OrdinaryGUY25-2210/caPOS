@@ -1,20 +1,46 @@
 "use client";
 
-import { useState } from "react";
-import { CreditCard, Sparkles, Plus, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { CreditCard, Sparkles, Plus, Loader2 } from "lucide-react";
 import { whatsappLink } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/client";
+import { getCurrentProfile } from "@/lib/getCurrentProfile";
+import Modal from "@/components/Modal";
 import type { Membership } from "@/lib/types";
 
-// Demo tenant flag — in production this comes from tenants.has_custom_website
-const DEMO_HAS_CUSTOM_WEBSITE = false;
-
-const DEMO_MEMBERS: Membership[] = [
-  { id: "m1", tenant_id: "demo", customer_name: "Andi Saputra", customer_phone: "0812xxxxxxx", member_code: "MBR-2026-0001", discount_percentage: 10, valid_until: "2027-01-01", is_active: true, created_at: "" },
-  { id: "m2", tenant_id: "demo", customer_name: "Dewi Lestari", customer_phone: "0813xxxxxxx", member_code: "MBR-2026-0002", discount_percentage: 15, valid_until: "2027-03-01", is_active: true, created_at: "" },
-];
-
 export default function MembershipPage() {
-  const [hasCustomWebsite] = useState(DEMO_HAS_CUSTOM_WEBSITE);
+  const [loading, setLoading] = useState(true);
+  const [hasCustomWebsite, setHasCustomWebsite] = useState(false);
+  const [tenantId, setTenantId] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      const { profile } = await getCurrentProfile();
+      if (!profile) {
+        setLoading(false);
+        return;
+      }
+      setTenantId(profile.tenant_id);
+
+      const supabase = createClient();
+      const { data: tenant } = await supabase
+        .from("tenants")
+        .select("has_custom_website")
+        .eq("id", profile.tenant_id)
+        .single();
+
+      setHasCustomWebsite(tenant?.has_custom_website ?? false);
+      setLoading(false);
+    })();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64 text-neutral-400">
+        <Loader2 className="animate-spin mr-2" size={18} /> Memuat...
+      </div>
+    );
+  }
 
   if (!hasCustomWebsite) {
     return (
@@ -37,37 +63,77 @@ export default function MembershipPage() {
           >
             Hubungi Developer (Studio D13) via WhatsApp
           </a>
+          <p className="text-xs text-neutral-400">
+            Sudah upgrade? Minta Studio D13 mengaktifkan kolom <code>has_custom_website</code> di tenant Anda.
+          </p>
         </div>
       </div>
     );
   }
 
-  return <MembershipPanel />;
+  return <MembershipPanel tenantId={tenantId!} />;
 }
 
-function MembershipPanel() {
-  const [members, setMembers] = useState<Membership[]>(DEMO_MEMBERS);
+function MembershipPanel({ tenantId }: { tenantId: string }) {
+  const [members, setMembers] = useState<Membership[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ customer_name: "", customer_phone: "", discount_percentage: 10 });
 
-  function addMember() {
-    const seq = String(members.length + 1).padStart(4, "0");
-    setMembers((prev) => [
-      {
-        id: crypto.randomUUID(),
-        tenant_id: "demo",
-        customer_name: form.customer_name,
-        customer_phone: form.customer_phone,
-        member_code: `MBR-2026-${seq}`,
-        discount_percentage: form.discount_percentage,
-        valid_until: "2027-12-31",
-        is_active: true,
-        created_at: new Date().toISOString(),
-      },
-      ...prev,
-    ]);
+  async function loadMembers() {
+    setLoading(true);
+    const supabase = createClient();
+    const { data } = await supabase
+      .from("memberships")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .order("created_at", { ascending: false });
+    setMembers((data as Membership[]) ?? []);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    loadMembers();
+  }, []);
+
+  async function addMember() {
+    if (!form.customer_name.trim() || !form.customer_phone.trim()) return;
+    setSaving(true);
+    const supabase = createClient();
+
+    // member_code, valid_until (via default di kolom) di-generate otomatis
+    // oleh database (lihat DEFAULT di supabase/schema.sql), jadi cukup kirim
+    // data pelanggan + diskon. Beri validitas 1 tahun dari sekarang.
+    const validUntil = new Date();
+    validUntil.setFullYear(validUntil.getFullYear() + 1);
+
+    const { error } = await supabase.from("memberships").insert({
+      tenant_id: tenantId,
+      customer_name: form.customer_name.trim(),
+      customer_phone: form.customer_phone.trim(),
+      discount_percentage: form.discount_percentage,
+      valid_until: validUntil.toISOString(),
+    });
+
+    if (error) {
+      alert("Gagal menambah member: " + error.message);
+      setSaving(false);
+      return;
+    }
+
     setForm({ customer_name: "", customer_phone: "", discount_percentage: 10 });
     setShowForm(false);
+    setSaving(false);
+    loadMembers();
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64 text-neutral-400">
+        <Loader2 className="animate-spin mr-2" size={18} /> Memuat member...
+      </div>
+    );
   }
 
   return (
@@ -96,39 +162,52 @@ function MembershipPanel() {
             </div>
             <div className="text-right">
               <span className="badge-active">Diskon {m.discount_percentage}%</span>
-              <p className="text-xs text-neutral-400 mt-1">Berlaku s/d {m.valid_until}</p>
+              <p className="text-xs text-neutral-400 mt-1">
+                Berlaku s/d {new Date(m.valid_until).toLocaleDateString("id-ID")}
+              </p>
             </div>
           </div>
         ))}
+        {members.length === 0 && (
+          <p className="p-6 text-center text-neutral-400 text-sm">Belum ada member terdaftar.</p>
+        )}
       </div>
 
       {showForm && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="card w-full max-w-sm p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-bold text-lg">Tambah Member Baru</h3>
-              <button onClick={() => setShowForm(false)}><X size={18} /></button>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-neutral-700 mb-1 block">Nama Pelanggan</label>
-              <input value={form.customer_name} onChange={(e) => setForm({ ...form, customer_name: e.target.value })} className="input-field" />
-            </div>
-            <div>
-              <label className="text-sm font-medium text-neutral-700 mb-1 block">No. HP</label>
-              <input value={form.customer_phone} onChange={(e) => setForm({ ...form, customer_phone: e.target.value })} className="input-field" />
-            </div>
-            <div>
-              <label className="text-sm font-medium text-neutral-700 mb-1 block">Diskon Member (%)</label>
-              <input
-                type="number"
-                value={form.discount_percentage}
-                onChange={(e) => setForm({ ...form, discount_percentage: Number(e.target.value) })}
-                className="input-field"
-              />
-            </div>
-            <button onClick={addMember} className="btn-primary w-full">Buat Kartu Member</button>
+        <Modal
+          title="Tambah Member Baru"
+          onClose={() => setShowForm(false)}
+          footer={
+            <button
+              disabled={saving}
+              onClick={addMember}
+              className="btn-primary w-full flex items-center justify-center gap-2"
+            >
+              {saving && <Loader2 className="animate-spin" size={16} />}
+              Buat Kartu Member
+            </button>
+          }
+        >
+          <div>
+            <label className="text-sm font-medium text-neutral-700 mb-1 block">Nama Pelanggan</label>
+            <input value={form.customer_name} onChange={(e) => setForm({ ...form, customer_name: e.target.value })} className="input-field" maxLength={80} />
           </div>
-        </div>
+          <div>
+            <label className="text-sm font-medium text-neutral-700 mb-1 block">No. HP</label>
+            <input value={form.customer_phone} onChange={(e) => setForm({ ...form, customer_phone: e.target.value })} className="input-field" maxLength={20} />
+          </div>
+          <div>
+            <label className="text-sm font-medium text-neutral-700 mb-1 block">Diskon Member (%)</label>
+            <input
+              type="number"
+              min={0}
+              max={100}
+              value={form.discount_percentage}
+              onChange={(e) => setForm({ ...form, discount_percentage: Number(e.target.value) })}
+              className="input-field"
+            />
+          </div>
+        </Modal>
       )}
     </div>
   );
