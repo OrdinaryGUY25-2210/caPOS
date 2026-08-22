@@ -42,7 +42,8 @@ capos/
 ├── app/
 │   ├── page.tsx                     # Login (root, tanpa landing page)
 │   ├── login/page.tsx               # Alias dari root login
-│   ├── register/page.tsx            # Registrasi + validasi kode akses + notif verifikasi email
+│   ├── register/page.tsx            # Registrasi + validasi kode akses + verifikasi OTP inline
+│   ├── forgot-password/page.tsx     # Lupa password: kirim OTP → verifikasi → set password baru
 │   ├── api/
 │   │   ├── register/route.ts        # Redeem kode akses (atomic) + signUp + kirim email verifikasi
 │   │   └── cashiers/route.ts        # Buat/hapus akun kasir (admin API, hanya owner/super_admin)
@@ -117,21 +118,32 @@ capos/
    Email** → pastikan **Confirm email** aktif (default-nya sudah aktif).
 
 5. **Set template email supaya mengirim KODE OTP, bukan link.** Ini
-   **wajib** dilakukan manual di Supabase Dashboard — secara default,
-   Supabase mengirim link konfirmasi (`{{ .ConfirmationURL }}`), bukan kode
+   **wajib** dilakukan manual di Supabase Dashboard untuk **DUA** template
+   sekaligus — satu untuk pendaftaran, satu untuk lupa password. Secara
+   default, Supabase mengirim link (`{{ .ConfirmationURL }}`), bukan kode
    6 digit. caPOS memakai `supabase.auth.verifyOtp()` di halaman
-   register/login, jadi template email-nya harus diubah supaya menampilkan
-   **kode**, bukan link:
-   - **Authentication → Email Templates → Confirm signup**
-   - Ganti isi body-nya, minimal sertakan variabel `{{ .Token }}` (bukan
-     `{{ .ConfirmationURL }}`), contoh isi minimal:
-     ```html
-     <h2>Kode Verifikasi caPOS Anda</h2>
-     <p>Masukkan kode berikut di aplikasi untuk mengaktifkan akun:</p>
-     <h1 style="letter-spacing: 8px;">{{ .Token }}</h1>
-     <p>Kode ini berlaku selama beberapa menit.</p>
-     ```
-   - Simpan (**Save**).
+   register/login/lupa-password, jadi kedua template harus diubah supaya
+   menampilkan **kode**, bukan link:
+
+   **a. Authentication → Email Templates → Confirm signup** (dipakai saat
+   daftar akun baru):
+   ```html
+   <h2>Kode Verifikasi caPOS Anda</h2>
+   <p>Masukkan kode berikut di aplikasi untuk mengaktifkan akun:</p>
+   <h1 style="letter-spacing: 8px;">{{ .Token }}</h1>
+   <p>Kode ini berlaku selama beberapa menit.</p>
+   ```
+
+   **b. Authentication → Email Templates → Reset Password** (dipakai saat
+   klik "Lupa password?" di halaman login):
+   ```html
+   <h2>Kode Reset Password caPOS Anda</h2>
+   <p>Masukkan kode berikut untuk atur ulang password akun Anda:</p>
+   <h1 style="letter-spacing: 8px;">{{ .Token }}</h1>
+   <p>Kalau Anda tidak meminta ini, abaikan email ini.</p>
+   ```
+
+   - Simpan (**Save**) di masing-masing template.
    - Kode OTP dari Supabase berlaku **60 detik** sebelum bisa di-resend, dan
      kedaluwarsa setelah periode tertentu (bisa diatur di **Authentication →
      Settings → Email OTP Expiry**, default 1 jam).
@@ -238,6 +250,13 @@ memastikan PWA-nya aktif dengan benar di URL production.
   Dashboard ke `{{ .Token }}` (lihat Bagian 3 langkah 5) — kalau tidak
   diubah, Supabase tetap mengirim link dan `verifyOtp()` akan selalu gagal
   karena tidak ada kode untuk dicocokkan.
+- **Lupa password juga pakai OTP** (`/forgot-password`) — sama seperti
+  verifikasi signup: `auth.resetPasswordForEmail()` kirim kode 6 digit,
+  lalu `auth.verifyOtp({ type: "recovery" })` sekaligus mengaktifkan sesi
+  supaya password baru bisa langsung disimpan tanpa perlu login ulang.
+  Pesan yang ditampilkan **selalu sama** baik email terdaftar maupun tidak,
+  supaya endpoint ini tidak bisa dipakai untuk menebak daftar email
+  terdaftar (user enumeration).
 - **Modal seragam**: semua form (`Modal.tsx`) punya header & tombol aksi
   yang selalu terlihat di layar HP manapun — tidak ada lagi kasus tombol
   Simpan/Tutup ter-cut di luar layar.
