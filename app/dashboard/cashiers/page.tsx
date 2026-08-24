@@ -5,6 +5,7 @@ import { Plus, Trash2, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import Modal from "@/components/Modal";
+import PasswordInput from "@/components/PasswordInput";
 import type { Profile } from "@/lib/types";
 
 export default function CashiersPage() {
@@ -155,7 +156,12 @@ export default function CashiersPage() {
           </div>
           <div>
             <label className="text-sm font-medium text-neutral-700 mb-1 block">Password Sementara</label>
-            <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} className="input-field" minLength={8} />
+            <PasswordInput
+              value={form.password}
+              onChange={(v) => setForm({ ...form, password: v })}
+              minLength={8}
+              autoComplete="new-password"
+            />
             <p className="text-xs text-neutral-400 mt-1">Minimal 8 karakter, kombinasi huruf & angka.</p>
           </div>
         </Modal>

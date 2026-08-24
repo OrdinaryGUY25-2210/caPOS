@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Coffee, Loader2, AlertTriangle, MailCheck } from "lucide-react";
 import { whatsappLink } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
+import PasswordInput from "@/components/PasswordInput";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -150,16 +151,16 @@ export default function RegisterPage() {
               required
               inputMode="numeric"
               autoComplete="one-time-code"
-              maxLength={6}
+              maxLength={8}
               value={otp}
               onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
               placeholder="123456"
-              className="input-field text-center text-2xl tracking-[0.5em] font-mono"
+              className="input-field text-center text-xl sm:text-2xl tracking-[0.3em] font-mono"
             />
 
             <button
               type="submit"
-              disabled={verifying || otp.length !== 6}
+              disabled={verifying || otp.length < 6}
               className="btn-primary w-full flex items-center justify-center gap-2"
             >
               {verifying && <Loader2 className="animate-spin" size={16} />}
@@ -247,14 +248,13 @@ export default function RegisterPage() {
             </div>
             <div>
               <label className="text-sm font-medium text-neutral-700 mb-1 block">Password</label>
-              <input
-                type="password"
+              <PasswordInput
                 required
                 minLength={6}
                 value={form.password}
-                onChange={(e) => setForm({ ...form, password: e.target.value })}
-                placeholder="Minimal 6 karakter"
-                className="input-field"
+                onChange={(v) => setForm({ ...form, password: v })}
+                placeholder="Minimal 8 karakter, kombinasi huruf & angka"
+                autoComplete="new-password"
               />
             </div>
 

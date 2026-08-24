@@ -279,6 +279,34 @@ AS $$
   );
 $$;
 
+-- Helper: ambil tenant_id milik user yang sedang login.
+--
+-- PENTING — kenapa ini harus jadi fungsi SECURITY DEFINER, bukan sub-query
+-- biasa: sebelumnya setiap policy (termasuk policy tabel `profiles` SENDIRI)
+-- ditulis dengan sub-query langsung ke tabel profiles, contoh:
+--   tenant_id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid())
+-- Ketika Postgres mengevaluasi policy tabel `profiles`, sub-query di atas
+-- ikut menyentuh tabel `profiles` lagi — yang berarti RLS `profiles` harus
+-- dievaluasi ulang untuk mengevaluasi dirinya sendiri. Ini memicu error
+-- "infinite recursion detected in policy for relation profiles" di
+-- Postgres, yang membuat SETIAP query ke profiles (termasuk saat login
+-- untuk mengecek role) gagal total dan diam-diam mengembalikan error
+-- (bukan data) — akibatnya app selalu fallback ke role default (`cashier`
+-- → /pos) walau akun yang login sebenarnya owner/super_admin.
+--
+-- Fungsi SECURITY DEFINER berjalan dengan hak akses pemilik fungsi
+-- (bypass RLS sepenuhnya, sama seperti is_super_admin() di atas), jadi
+-- tidak ada rekursi — query di dalam fungsi ini tidak pernah mengevaluasi
+-- ulang policy manapun.
+CREATE OR REPLACE FUNCTION current_tenant_id()
+RETURNS UUID
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT tenant_id FROM profiles WHERE id = auth.uid();
+$$;
+
 -- invite_codes: TIDAK BOLEH terbaca oleh anon/authenticated biasa — kode ini
 -- adalah "kunci" pendaftaran. Sebelumnya tabel ini TIDAK diberi RLS sama
 -- sekali, artinya siapa pun yang punya anon key bisa SELECT * FROM
@@ -293,40 +321,42 @@ CREATE POLICY "Invite codes: super_admin only" ON invite_codes
 
 CREATE POLICY "Tenants: own tenant or super_admin" ON tenants
   FOR ALL USING (
-    is_super_admin() OR id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid())
+    is_super_admin() OR id = current_tenant_id()
   );
 
 CREATE POLICY "Subscriptions: own tenant or super_admin" ON subscriptions
   FOR ALL USING (
-    is_super_admin() OR tenant_id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid())
+    is_super_admin() OR tenant_id = current_tenant_id()
   );
 
-CREATE POLICY "Profiles: own tenant or super_admin" ON profiles
+-- `id = auth.uid()` ditambahkan sebagai jalur langsung (tanpa fungsi/
+-- sub-query apa pun) supaya seorang user SELALU bisa baca baris profilnya
+-- sendiri walau ada masalah lain — ini jalur paling sederhana dan aman
+-- yang tidak mungkin memicu rekursi.
+CREATE POLICY "Profiles: own row, own tenant, or super_admin" ON profiles
   FOR ALL USING (
-    is_super_admin() OR tenant_id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid())
+    is_super_admin() OR id = auth.uid() OR tenant_id = current_tenant_id()
   );
 
 CREATE POLICY "Access products by tenant_id" ON products
   FOR ALL USING (
-    is_super_admin() OR tenant_id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid())
+    is_super_admin() OR tenant_id = current_tenant_id()
   );
 
 CREATE POLICY "Access memberships by tenant_id" ON memberships
   FOR ALL USING (
-    is_super_admin() OR tenant_id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid())
+    is_super_admin() OR tenant_id = current_tenant_id()
   );
 
 CREATE POLICY "Access transactions by tenant_id" ON transactions
   FOR ALL USING (
-    is_super_admin() OR tenant_id IN (SELECT tenant_id FROM profiles WHERE id = auth.uid())
+    is_super_admin() OR tenant_id = current_tenant_id()
   );
 
 CREATE POLICY "Access transaction_items by parent tenant" ON transaction_items
   FOR ALL USING (
     is_super_admin() OR transaction_id IN (
-      SELECT id FROM transactions WHERE tenant_id IN (
-        SELECT tenant_id FROM profiles WHERE id = auth.uid()
-      )
+      SELECT id FROM transactions WHERE tenant_id = current_tenant_id()
     )
   );
 
@@ -347,3 +377,30 @@ CREATE INDEX idx_transactions_tenant_created ON transactions (tenant_id, created
 CREATE INDEX idx_transaction_items_tx ON transaction_items (transaction_id);
 CREATE INDEX idx_memberships_tenant_code ON memberships (tenant_id, member_code) WHERE is_active = true;
 CREATE INDEX idx_profiles_tenant ON profiles (tenant_id);
+
+-- =========================================================
+-- PAYMENTS — riwayat transaksi Midtrans untuk perpanjangan langganan
+-- =========================================================
+CREATE TABLE payments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
+  order_id TEXT UNIQUE NOT NULL,
+  plan TEXT NOT NULL,
+  amount NUMERIC NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  raw_response JSONB,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
+
+-- Hanya boleh dibaca (bukan ditulis) dari client — status pembayaran cuma
+-- boleh berubah lewat webhook /api/midtrans/notification pakai service
+-- role setelah verifikasi signature, supaya tidak ada yang bisa "bayar"
+-- cuma dengan UPDATE langsung dari browser.
+CREATE POLICY "Payments: read own tenant" ON payments
+  FOR SELECT USING (is_super_admin() OR tenant_id = current_tenant_id());
+
+CREATE INDEX idx_payments_tenant ON payments (tenant_id, created_at DESC);
+CREATE INDEX idx_payments_order_id ON payments (order_id);

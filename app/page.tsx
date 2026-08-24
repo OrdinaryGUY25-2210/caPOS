@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Coffee, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import PasswordInput from "@/components/PasswordInput";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -132,16 +133,16 @@ export default function LoginPage() {
               required
               inputMode="numeric"
               autoComplete="one-time-code"
-              maxLength={6}
+              maxLength={8}
               value={otp}
               onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
               placeholder="123456"
-              className="input-field text-center text-2xl tracking-[0.5em] font-mono"
+              className="input-field text-center text-xl sm:text-2xl tracking-[0.3em] font-mono"
             />
 
             <button
               type="submit"
-              disabled={verifying || otp.length !== 6}
+              disabled={verifying || otp.length < 6}
               className="btn-primary w-full flex items-center justify-center gap-2"
             >
               {verifying && <Loader2 className="animate-spin" size={16} />}
@@ -184,13 +185,12 @@ export default function LoginPage() {
                   Lupa password?
                 </Link>
               </div>
-              <input
-                type="password"
+              <PasswordInput
                 required
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={setPassword}
                 placeholder="••••••••"
-                className="input-field"
+                autoComplete="current-password"
               />
             </div>
 

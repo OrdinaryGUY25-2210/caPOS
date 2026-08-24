@@ -82,7 +82,8 @@ capos/
 │   └── icons/                       # Ikon PWA (192px, 512px, apple-touch-icon)
 ├── supabase/
 │   ├── schema.sql                   # DDL lengkap: tabel, RLS, RPC checkout_transaction, dll
-│   └── migration_001_profiles_email_active.sql  # Migrasi kalau sudah pernah setup sebelumnya
+│   ├── migration_001_profiles_email_active.sql  # Migrasi kalau sudah pernah setup sebelumnya
+│   └── migration_002_fix_rls_recursion.sql      # WAJIB — perbaiki bug login selalu ke /pos
 └── .env.local.example
 ```
 
@@ -110,6 +111,14 @@ capos/
    > Sudah pernah menjalankan `schema.sql` versi lama? Jalankan
    > `supabase/migration_001_profiles_email_active.sql` saja, tidak perlu
    > mulai dari nol.
+   >
+   > ⚠️ **Sudah pernah setup Supabase SEBELUM 23 Agustus 2026 dan
+   > mengalami bug "login selalu masuk ke /pos walau akun owner/super_admin"?**
+   > Jalankan juga `supabase/migration_002_fix_rls_recursion.sql` — ini
+   > memperbaiki RLS policy `profiles` yang sebelumnya rekursif (lihat
+   > komentar di file migrasinya untuk penjelasan lengkap penyebabnya).
+   > Proyek yang baru pertama kali setup pakai `schema.sql` terbaru sudah
+   > otomatis benar, tidak perlu jalankan file ini.
 
 3. **Buat bucket Storage** untuk foto menu: **Storage → New bucket** → nama
    **`menu-images`** (harus persis) → aktifkan **Public bucket**.
@@ -117,7 +126,24 @@ capos/
 4. **Cek pengaturan email verifikasi**: **Authentication → Providers →
    Email** → pastikan **Confirm email** aktif (default-nya sudah aktif).
 
-5. **Set template email supaya mengirim KODE OTP, bukan link.** Ini
+5. **Pasang custom SMTP — WAJIB, bukan opsional.** Sejak Juni 2026, project
+   Supabase free-tier baru **tidak bisa edit template email sama sekali**
+   kecuali custom SMTP terpasang, dan SMTP bawaan Supabase cuma boleh kirim
+   2-4 email/jam **hanya ke alamat yang terdaftar sebagai anggota tim
+   project-mu** — jadi tanpa langkah ini, orang lain (calon pengguna caPOS)
+   **tidak akan pernah menerima kode OTP-nya sama sekali**.
+   - Paling mudah pakai **Resend** (gratis 3.000 email/bulan): buat akun di
+     resend.com → **API Keys → Create API Key** → salin key-nya.
+   - Di Supabase: **Authentication → Emails → Set up SMTP** (atau
+     **Project Settings → Auth → SMTP Settings**), isi:
+     - Host: `smtp.resend.com`, Port: `465`
+     - Username: `resend` (kata ini persis, bukan email)
+     - Password: API key dari Resend
+     - Sender email: `onboarding@resend.dev` (untuk testing; verifikasi
+       domain sendiri di Resend kalau sudah produksi)
+   - **Save**. Alternatif lain: Brevo (300 email/hari gratis), Postmark.
+
+6. **Set template email supaya mengirim KODE OTP, bukan link.** Ini
    **wajib** dilakukan manual di Supabase Dashboard untuk **DUA** template
    sekaligus — satu untuk pendaftaran, satu untuk lupa password. Secara
    default, Supabase mengirim link (`{{ .ConfirmationURL }}`), bukan kode
@@ -148,7 +174,7 @@ capos/
      kedaluwarsa setelah periode tertentu (bisa diatur di **Authentication →
      Settings → Email OTP Expiry**, default 1 jam).
 
-6. **Salin environment variables**
+7. **Salin environment variables**
    ```bash
    cp .env.local.example .env.local
    ```
@@ -160,7 +186,7 @@ capos/
    NEXT_PUBLIC_STUDIO_D13_WHATSAPP=6281234567890
    ```
 
-7. **Jalankan development server**
+8. **Jalankan development server**
    ```bash
    npm run dev
    ```

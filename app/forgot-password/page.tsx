@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Coffee, Loader2, KeyRound, ArrowLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import PasswordInput from "@/components/PasswordInput";
 
 export default function ForgotPasswordPage() {
   const router = useRouter();
@@ -165,36 +166,34 @@ export default function ForgotPasswordPage() {
                 required
                 inputMode="numeric"
                 autoComplete="one-time-code"
-                maxLength={6}
+                maxLength={8}
                 value={otp}
                 onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
                 placeholder="123456"
-                className="input-field text-center text-2xl tracking-[0.5em] font-mono"
+                className="input-field text-center text-xl sm:text-2xl tracking-[0.3em] font-mono"
               />
             </div>
 
             <div>
               <label className="text-sm font-medium text-neutral-700 mb-1 block">Password Baru</label>
-              <input
-                type="password"
+              <PasswordInput
                 required
                 minLength={8}
                 value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
+                onChange={setNewPassword}
                 placeholder="Minimal 8 karakter, huruf & angka"
-                className="input-field"
+                autoComplete="new-password"
               />
             </div>
 
             <div>
               <label className="text-sm font-medium text-neutral-700 mb-1 block">Konfirmasi Password Baru</label>
-              <input
-                type="password"
+              <PasswordInput
                 required
                 minLength={8}
                 value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                className="input-field"
+                onChange={setConfirmPassword}
+                autoComplete="new-password"
               />
             </div>
 
