@@ -211,7 +211,7 @@ export default function RegisterPage() {
                 required
                 value={form.accessCode}
                 onChange={(e) => setForm({ ...form, accessCode: e.target.value.toUpperCase() })}
-                placeholder="CAPOSVIRAL"
+                placeholder="Kode Referal"
                 className="input-field uppercase tracking-wide"
               />
             </div>
