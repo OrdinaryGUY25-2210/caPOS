@@ -1,19 +1,23 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus, Trash2, Loader2 } from "lucide-react";
+import Link from "next/link";
+import { Plus, Trash2, Loader2, Lock } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
+import { getTier, FREE_TIER_LIMITS, TIER_LABEL, type Tier } from "@/lib/tier";
 import Modal from "@/components/Modal";
 import PasswordInput from "@/components/PasswordInput";
 import type { Profile } from "@/lib/types";
 
 export default function CashiersPage() {
   const [cashiers, setCashiers] = useState<Profile[]>([]);
+  const [tier, setTier] = useState<Tier>("free");
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [limitReached, setLimitReached] = useState(false);
   const [form, setForm] = useState({ full_name: "", email: "", password: "" });
 
   async function loadCashiers() {
@@ -24,19 +28,29 @@ export default function CashiersPage() {
       return;
     }
     const supabase = createClient();
-    const { data } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("tenant_id", profile.tenant_id)
-      .eq("role", "cashier")
-      .order("created_at", { ascending: false });
+    const [{ data }, { data: sub }] = await Promise.all([
+      supabase.from("profiles").select("*").eq("tenant_id", profile.tenant_id).eq("role", "cashier").order("created_at", { ascending: false }),
+      supabase.from("subscriptions").select("status, plan").eq("tenant_id", profile.tenant_id).single(),
+    ]);
     setCashiers((data as Profile[]) ?? []);
+    setTier(profile.role === "super_admin" ? "supreme" : getTier(sub));
     setLoading(false);
   }
 
   useEffect(() => {
     loadCashiers();
   }, []);
+
+  const atCashierLimit = tier === "free" && cashiers.length >= FREE_TIER_LIMITS.maxCashiers;
+
+  function openForm() {
+    if (atCashierLimit) {
+      setLimitReached(true);
+      return;
+    }
+    setLimitReached(false);
+    setShowForm(true);
+  }
 
   async function addCashier() {
     setFormError(null);
@@ -50,7 +64,12 @@ export default function CashiersPage() {
     setSaving(false);
 
     if (!res.ok) {
-      setFormError(result.message || "Gagal membuat akun kasir.");
+      if (result.reason === "FREE_TIER_CASHIER_LIMIT") {
+        setShowForm(false);
+        setLimitReached(true);
+      } else {
+        setFormError(result.message || "Gagal membuat akun kasir.");
+      }
       return;
     }
 
@@ -74,6 +93,7 @@ export default function CashiersPage() {
     const res = await fetch(`/api/cashiers?id=${id}`, { method: "DELETE" });
     if (res.ok) {
       setCashiers((prev) => prev.filter((c) => c.id !== id));
+      setLimitReached(false);
     } else {
       const result = await res.json();
       alert(result.message || "Gagal menghapus kasir.");
@@ -93,12 +113,26 @@ export default function CashiersPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-neutral-900">Manajemen Kasir</h1>
-          <p className="text-sm text-neutral-500">Kelola akun staf kasir kafe Anda</p>
+          <p className="text-sm text-neutral-500">
+            Kelola akun staf kasir kafe Anda
+            {tier === "free" && <> — {cashiers.length}/{FREE_TIER_LIMITS.maxCashiers} kasir terpakai (paket {TIER_LABEL.free})</>}
+          </p>
         </div>
-        <button onClick={() => setShowForm(true)} className="btn-primary flex items-center gap-2">
-          <Plus size={16} /> Tambah Kasir
+        <button onClick={openForm} className="btn-primary flex items-center gap-2">
+          {atCashierLimit ? <Lock size={16} /> : <Plus size={16} />} Tambah Kasir
         </button>
       </div>
+
+      {limitReached && (
+        <div className="card p-4 flex items-center justify-between gap-3 border-warning bg-warning-light">
+          <p className="text-sm text-neutral-800">
+            Paket {TIER_LABEL.free} maksimal {FREE_TIER_LIMITS.maxCashiers} akun kasir. Upgrade ke Pro untuk kasir unlimited.
+          </p>
+          <Link href="/dashboard/subscription" className="btn-primary text-sm whitespace-nowrap">
+            Lihat Paket
+          </Link>
+        </div>
+      )}
 
       <div className="card divide-y divide-neutral-100">
         {cashiers.map((c) => (

@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from "react";
 import Script from "next/script";
-import { Zap, CheckCircle2, Loader2 } from "lucide-react";
+import { Zap, CheckCircle2, XCircle, Loader2 } from "lucide-react";
 import { whatsappLink, daysRemaining } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
+import { getTier, type Tier } from "@/lib/tier";
 
 declare global {
   interface Window {
@@ -24,13 +25,40 @@ declare global {
 }
 
 const PLANS = [
-  { key: "monthly", name: "Bulanan", price: "Rp99.000", period: "/bulan", features: ["1 Outlet", "Unlimited Transaksi", "Laporan Dasar"], highlight: false },
-  { key: "yearly", name: "Tahunan", price: "Rp999.000", period: "/tahun", features: ["1 Outlet", "Unlimited Transaksi", "Laporan Lengkap", "Prioritas Support"], highlight: true },
+  {
+    key: "free", name: "Free Trial", price: "Rp0", period: "/28 hari",
+    features: ["1 Owner + 2 Kasir", "Maks 10 Menu", "Riwayat 7 Hari", "Laporan Dasar"],
+    highlight: false, payable: false,
+  },
+  {
+    key: "monthly", name: "Pro", price: "Rp99.000", period: "/bulan",
+    features: ["Kasir Unlimited", "Menu Unlimited", "Riwayat Lengkap", "Kesehatan Penjualan"],
+    highlight: true, payable: true,
+  },
+  {
+    key: "yearly", name: "Supreme", price: "Rp999.000", period: "/tahun",
+    features: ["Semua fitur Pro", "Laporan Lengkap (Jam Ramai, Menu Terlaris)", "Export Excel & PDF", "Prioritas Support"],
+    highlight: false, payable: true,
+  },
 ] as const;
+
+const COMPARISON_ROWS: { label: string; free: string | boolean; pro: string | boolean; supreme: string | boolean }[] = [
+  { label: "Akun Kasir Tambahan", free: "Maks 2", pro: "Unlimited", supreme: "Unlimited" },
+  { label: "Jumlah Menu", free: "Maks 10", pro: "Unlimited", supreme: "Unlimited" },
+  { label: "Riwayat Transaksi", free: "7 Hari Terakhir", pro: "Lengkap", supreme: "Lengkap" },
+  { label: "Grafik Omzet Harian", free: true, pro: true, supreme: true },
+  { label: "Kesehatan Penjualan", free: false, pro: true, supreme: true },
+  { label: "Jam Ramai (Peak Hours)", free: false, pro: false, supreme: true },
+  { label: "Menu Terlaris", free: false, pro: false, supreme: true },
+  { label: "Export CSV Sederhana", free: true, pro: true, supreme: true },
+  { label: "Export Excel Multi-sheet + PDF", free: false, pro: false, supreme: true },
+  { label: "Prioritas Support", free: false, pro: false, supreme: true },
+];
 
 export default function SubscriptionPage() {
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<string>("trial");
+  const [currentTier, setCurrentTier] = useState<Tier>("free");
   const [daysLeft, setDaysLeft] = useState<number>(0);
   const [payingPlan, setPayingPlan] = useState<string | null>(null);
   const [paymentError, setPaymentError] = useState<string | null>(null);
@@ -46,12 +74,13 @@ export default function SubscriptionPage() {
     const supabase = createClient();
     const { data: sub } = await supabase
       .from("subscriptions")
-      .select("status, trial_ends_at, valid_until")
+      .select("status, plan, trial_ends_at, valid_until")
       .eq("tenant_id", profile.tenant_id)
       .single();
 
     if (sub) {
       setStatus(sub.status);
+      setCurrentTier(getTier(sub));
       const relevantDate = sub.status === "trial" ? sub.trial_ends_at : sub.valid_until;
       setDaysLeft(relevantDate ? daysRemaining(relevantDate) : 0);
     }
@@ -89,8 +118,6 @@ export default function SubscriptionPage() {
       window.snap.pay(result.token, {
         onSuccess: () => {
           setPayingPlan(null);
-          // Webhook akan mengupdate subscriptions di background — refresh
-          // data lokal setelah jeda singkat supaya sinkron.
           setTimeout(loadSubscription, 2000);
         },
         onPending: () => {
@@ -114,10 +141,7 @@ export default function SubscriptionPage() {
   const isProduction = process.env.NEXT_PUBLIC_MIDTRANS_IS_PRODUCTION === "true";
 
   return (
-    <div className="max-w-2xl space-y-6">
-      {/* Snap.js dari Midtrans — URL sandbox/production beda, dan
-          data-client-key WAJIB diisi client key (bukan server key —
-          client key aman ditaruh di frontend, server key tidak). */}
+    <div className="max-w-3xl space-y-6">
       <Script
         src={isProduction ? "https://app.midtrans.com/snap/snap.js" : "https://app.sandbox.midtrans.com/snap/snap.js"}
         data-client-key={process.env.NEXT_PUBLIC_MIDTRANS_CLIENT_KEY}
@@ -141,13 +165,13 @@ export default function SubscriptionPage() {
             </div>
             <div>
               <p className="font-semibold text-neutral-900 text-sm">
-                {status === "active" ? "Langganan Aktif" : status === "trial" ? "Masa Trial" : "Langganan Tidak Aktif"}
+                Paket saat ini: {currentTier === "free" ? "Free Trial" : currentTier === "pro" ? "Pro" : "Supreme"}
               </p>
               <p className="text-xs text-neutral-500">
                 {status === "active"
                   ? `Berakhir dalam ${daysLeft} hari`
                   : status === "trial"
-                  ? `Berakhir dalam ${daysLeft > 0 ? `${daysLeft} hari` : "hari ini"}`
+                  ? `Trial berakhir dalam ${daysLeft > 0 ? `${daysLeft} hari` : "hari ini"}`
                   : "Perpanjang untuk mengaktifkan kembali"}
               </p>
             </div>
@@ -161,12 +185,12 @@ export default function SubscriptionPage() {
         <div className="badge-urgent w-full justify-start px-3 py-2 rounded-lg">{paymentError}</div>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {PLANS.map((plan) => (
           <div key={plan.key} className={plan.highlight ? "card p-5 border-2 border-primary relative" : "card p-5"}>
             {plan.highlight && (
               <span className="absolute -top-3 left-5 bg-primary text-white text-xs font-semibold px-2.5 py-1 rounded-full">
-                Paling Hemat
+                Paling Populer
               </span>
             )}
             <p className="font-semibold text-neutral-900">{plan.name}</p>
@@ -180,19 +204,55 @@ export default function SubscriptionPage() {
                 </li>
               ))}
             </ul>
-            <button
-              onClick={() => handlePay(plan.key)}
-              disabled={payingPlan !== null}
-              className={
-                (plan.highlight ? "btn-primary" : "btn-outline") +
-                " w-full mt-5 flex items-center justify-center gap-2 disabled:opacity-60"
-              }
-            >
-              {payingPlan === plan.key && <Loader2 className="animate-spin" size={16} />}
-              Perpanjang Sekarang
-            </button>
+            {plan.payable ? (
+              <button
+                onClick={() => handlePay(plan.key)}
+                disabled={payingPlan !== null}
+                className={
+                  (plan.highlight ? "btn-primary" : "btn-outline") +
+                  " w-full mt-5 flex items-center justify-center gap-2 disabled:opacity-60"
+                }
+              >
+                {payingPlan === plan.key && <Loader2 className="animate-spin" size={16} />}
+                Perpanjang Sekarang
+              </button>
+            ) : (
+              <div className="w-full mt-5 text-center text-xs text-neutral-400 py-2.5">
+                {currentTier === "free" ? "Paket Anda saat ini" : "Paket awal (sudah dilewati)"}
+              </div>
+            )}
           </div>
         ))}
+      </div>
+
+      {/* Tabel perbandingan fitur — supaya keputusan upgrade lebih jelas
+          daripada cuma baca daftar singkat di tiap kartu. */}
+      <div className="card overflow-hidden">
+        <div className="p-4 border-b border-neutral-100">
+          <h2 className="font-semibold text-neutral-900 text-sm">Perbandingan Fitur Lengkap</h2>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-neutral-100 text-neutral-500">
+                <th className="text-left font-medium py-2.5 px-4">Fitur</th>
+                <th className="text-center font-medium py-2.5 px-3">Free Trial</th>
+                <th className="text-center font-medium py-2.5 px-3 text-primary-dark">Pro</th>
+                <th className="text-center font-medium py-2.5 px-3">Supreme</th>
+              </tr>
+            </thead>
+            <tbody>
+              {COMPARISON_ROWS.map((row) => (
+                <tr key={row.label} className="border-b border-neutral-50 last:border-0">
+                  <td className="py-2.5 px-4 text-neutral-700">{row.label}</td>
+                  <ComparisonCell value={row.free} />
+                  <ComparisonCell value={row.pro} highlight />
+                  <ComparisonCell value={row.supreme} />
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <p className="text-center text-xs text-neutral-400">
@@ -207,5 +267,21 @@ export default function SubscriptionPage() {
         </a>
       </p>
     </div>
+  );
+}
+
+function ComparisonCell({ value, highlight }: { value: string | boolean; highlight?: boolean }) {
+  return (
+    <td className={"text-center py-2.5 px-3" + (highlight ? " bg-primary-light/30" : "")}>
+      {typeof value === "boolean" ? (
+        value ? (
+          <CheckCircle2 size={16} className="text-primary inline" />
+        ) : (
+          <XCircle size={16} className="text-neutral-300 inline" />
+        )
+      ) : (
+        <span className="text-neutral-700">{value}</span>
+      )}
+    </td>
   );
 }

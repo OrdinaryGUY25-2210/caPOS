@@ -1,10 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus, Pencil, ImagePlus, Loader2 } from "lucide-react";
+import Link from "next/link";
+import { Plus, Pencil, ImagePlus, Loader2, Lock } from "lucide-react";
 import { formatRupiah, cx } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
+import { compressImage } from "@/lib/compressImage";
+import { getTier, FREE_TIER_LIMITS, TIER_LABEL, type Tier } from "@/lib/tier";
 import Modal from "@/components/Modal";
 import type { Product } from "@/lib/types";
 
@@ -13,10 +16,12 @@ const CATEGORIES = ["Kopi", "Non-Kopi", "Makanan", "Dessert"];
 export default function MenuPage() {
   const [menu, setMenu] = useState<Product[]>([]);
   const [tenantId, setTenantId] = useState<string | null>(null);
+  const [tier, setTier] = useState<Tier>("free");
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Product | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [limitNotice, setLimitNotice] = useState<string | null>(null);
 
   async function loadMenu() {
     setLoading(true);
@@ -28,22 +33,21 @@ export default function MenuPage() {
     setTenantId(profile.tenant_id);
 
     const supabase = createClient();
-    // RLS ("Access products by tenant_id") sudah membatasi query ini hanya
-    // ke produk milik tenant sendiri — tidak perlu filter manual di sini,
-    // tapi tetap ditulis eksplisit supaya query lebih cepat (pakai index).
-    const { data } = await supabase
-      .from("products")
-      .select("*")
-      .eq("tenant_id", profile.tenant_id)
-      .order("created_at", { ascending: false });
+    const [{ data }, { data: sub }] = await Promise.all([
+      supabase.from("products").select("*").eq("tenant_id", profile.tenant_id).order("created_at", { ascending: false }),
+      supabase.from("subscriptions").select("status, plan").eq("tenant_id", profile.tenant_id).single(),
+    ]);
 
     setMenu((data as Product[]) ?? []);
+    setTier(profile.role === "super_admin" ? "supreme" : getTier(sub));
     setLoading(false);
   }
 
   useEffect(() => {
     loadMenu();
   }, []);
+
+  const atMenuLimit = tier === "free" && menu.length >= FREE_TIER_LIMITS.maxMenu;
 
   async function toggleAvailability(product: Product) {
     const supabase = createClient();
@@ -54,7 +58,6 @@ export default function MenuPage() {
       .update({ is_available: next })
       .eq("id", product.id);
     if (error) {
-      // rollback tampilan kalau gagal simpan
       setMenu((prev) => prev.map((m) => (m.id === product.id ? { ...m, is_available: !next } : m)));
       alert("Gagal mengubah status ketersediaan: " + error.message);
     }
@@ -62,6 +65,12 @@ export default function MenuPage() {
 
   function openNew() {
     if (!tenantId) return;
+    if (atMenuLimit) {
+      setLimitNotice(
+        `Paket ${TIER_LABEL.free} maksimal ${FREE_TIER_LIMITS.maxMenu} menu. Upgrade ke Pro untuk menu unlimited.`
+      );
+      return;
+    }
     setEditing({
       id: "",
       tenant_id: tenantId,
@@ -80,7 +89,6 @@ export default function MenuPage() {
     const supabase = createClient();
 
     if (p.id) {
-      // Update produk yang sudah ada
       const { error } = await supabase
         .from("products")
         .update({ name: p.name, price: p.price, category: p.category, image_url: p.image_url })
@@ -91,7 +99,6 @@ export default function MenuPage() {
         return;
       }
     } else {
-      // Produk baru
       const { error } = await supabase.from("products").insert({
         tenant_id: p.tenant_id,
         name: p.name,
@@ -101,7 +108,14 @@ export default function MenuPage() {
         is_available: true,
       });
       if (error) {
-        alert("Gagal menambah menu: " + error.message);
+        // Trigger database enforce_menu_limit() melempar pesan berawalan
+        // "FREE_TIER_MENU_LIMIT:" — tangkap di sini supaya tampil sebagai
+        // pesan upsell yang ramah, bukan error mentah dari Postgres.
+        if (error.message.includes("FREE_TIER_MENU_LIMIT")) {
+          setLimitNotice(`Paket ${TIER_LABEL.free} maksimal ${FREE_TIER_LIMITS.maxMenu} menu. Upgrade ke Pro untuk menu unlimited.`);
+        } else {
+          alert("Gagal menambah menu: " + error.message);
+        }
         setSaving(false);
         return;
       }
@@ -125,12 +139,24 @@ export default function MenuPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-neutral-900">Kelola Menu & Stok</h1>
-          <p className="text-sm text-neutral-500">Tambah, edit foto, dan atur ketersediaan menu — tersimpan langsung ke database</p>
+          <p className="text-sm text-neutral-500">
+            Tambah, edit foto, dan atur ketersediaan menu
+            {tier === "free" && <> — {menu.length}/{FREE_TIER_LIMITS.maxMenu} menu terpakai (paket {TIER_LABEL.free})</>}
+          </p>
         </div>
         <button onClick={openNew} className="btn-primary flex items-center gap-2">
-          <Plus size={16} /> Tambah Menu
+          {atMenuLimit ? <Lock size={16} /> : <Plus size={16} />} Tambah Menu
         </button>
       </div>
+
+      {limitNotice && (
+        <div className="card p-4 flex items-center justify-between gap-3 border-warning bg-warning-light">
+          <p className="text-sm text-neutral-800">{limitNotice}</p>
+          <Link href="/dashboard/subscription" className="btn-primary text-sm whitespace-nowrap">
+            Lihat Paket
+          </Link>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
         {menu.map((product) => (
@@ -197,21 +223,30 @@ function ProductForm({
   const [form, setForm] = useState(product);
   const [preview, setPreview] = useState<string | null>(product.image_url);
   const [uploading, setUploading] = useState(false);
+  const [compressInfo, setCompressInfo] = useState<string | null>(null);
 
   async function handleImage(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const rawFile = e.target.files?.[0];
+    if (!rawFile) return;
 
     setUploading(true);
-    const supabase = createClient();
-    const ext = file.name.split(".").pop();
-    const path = `${form.tenant_id}/${crypto.randomUUID()}.${ext}`;
+    setCompressInfo(null);
 
-    // Butuh bucket Storage bernama "menu-images" (public) di project
-    // Supabase — buat lewat Dashboard → Storage → New bucket, set Public.
+    // Kompresi dulu di browser sebelum upload — foto HP modern sering
+    // 3-8MB, setelah dikompres biasanya jadi ratusan KB saja tanpa
+    // kelihatan bedanya di ukuran tampilan menu.
+    const compressedFile = await compressImage(rawFile, { maxDimension: 1200, quality: 0.8 });
+    const savedPct = Math.round((1 - compressedFile.size / rawFile.size) * 100);
+    if (savedPct > 0) {
+      setCompressInfo(`Dikompres ${savedPct}% (${(rawFile.size / 1024).toFixed(0)}KB → ${(compressedFile.size / 1024).toFixed(0)}KB)`);
+    }
+
+    const supabase = createClient();
+    const path = `${form.tenant_id}/${crypto.randomUUID()}.jpg`;
+
     const { error: uploadError } = await supabase.storage
       .from("menu-images")
-      .upload(path, file, { upsert: true });
+      .upload(path, compressedFile, { upsert: true, contentType: "image/jpeg" });
 
     if (uploadError) {
       alert(
@@ -257,6 +292,7 @@ function ProductForm({
         )}
         <input type="file" accept="image/*" onChange={handleImage} className="hidden" disabled={uploading} />
       </label>
+      {compressInfo && <p className="text-xs text-primary-dark">{compressInfo}</p>}
 
       <div>
         <label className="text-sm font-medium text-neutral-700 mb-1 block">Nama Menu</label>

@@ -26,6 +26,7 @@ CREATE TABLE subscriptions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
   status sub_status DEFAULT 'trial',
+  plan TEXT,  -- 'monthly' | 'yearly' | NULL (trial/belum pernah bayar) — dipakai untuk gating Laporan Dasar vs Lengkap
   trial_ends_at TIMESTAMPTZ DEFAULT (now() + INTERVAL '28 days'),
   valid_until TIMESTAMPTZ DEFAULT (now() + INTERVAL '28 days'),
   updated_at TIMESTAMPTZ DEFAULT now()
@@ -40,16 +41,6 @@ CREATE TABLE profiles (
   email TEXT,             -- disalin dari auth.users saat akun dibuat, biar
                            -- daftar kasir bisa ditampilkan tanpa perlu admin API
   is_active BOOLEAN DEFAULT true, -- nonaktifkan akun kasir tanpa menghapusnya
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-
--- 4. Invite Codes (Sistem Pembatasan Registrasi Max 100)
-CREATE TABLE invite_codes (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  code TEXT UNIQUE NOT NULL,
-  max_uses INT DEFAULT 1,       -- Set 100 untuk Promo Konten Trial
-  used_count INT DEFAULT 0,     -- Auto-increment setiap ada registrasi
-  is_active BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -85,11 +76,23 @@ CREATE TABLE memberships (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- 6.5 Shifts — sesi kerja kasir, dipakai untuk mengaitkan tiap transaksi
+-- ke "siapa yang jaga saat itu" (riwayat transaksi & laporan shift).
+CREATE TABLE shifts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
+  cashier_id UUID REFERENCES profiles(id),
+  opened_at TIMESTAMPTZ DEFAULT now(),
+  closed_at TIMESTAMPTZ,
+  status TEXT NOT NULL DEFAULT 'open' -- 'open' | 'closed'
+);
+
 -- 7. Transactions
 CREATE TABLE transactions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
   cashier_id UUID REFERENCES profiles(id),
+  shift_id UUID REFERENCES shifts(id),
   invoice_number TEXT NOT NULL,
   total_amount NUMERIC NOT NULL,
   payment_method TEXT DEFAULT 'cash',
@@ -124,53 +127,31 @@ FROM transactions
 GROUP BY tenant_id, DATE(created_at);
 
 -- =========================================================
--- FUNGSI: Redeem Invite Code (Atomic, Anti Race-Condition)
--- Dipanggil dari /app/api/register/route.ts via supabase.rpc()
--- Return: 'OK' jika berhasil, 'QUOTA_FULL' jika kuota penuh,
---         NULL jika kode tidak ditemukan / tidak aktif.
---
--- SET search_path = '' mencegah "search_path hijacking": tanpa baris ini,
--- fungsi SECURITY DEFINER bisa dikelabui memanggil fungsi/tabel bernama
--- sama yang sengaja dibuat di schema lain oleh pengguna jahat, lalu
--- dieksekusi dengan hak akses pemilik fungsi (superuser-like).
+-- FUNGSI: Buka Shift Kasir (kalau belum ada yang 'open' untuk kasir ini)
 -- =========================================================
-CREATE OR REPLACE FUNCTION redeem_invite_code(p_code TEXT)
-RETURNS TEXT
+CREATE OR REPLACE FUNCTION open_shift(p_tenant_id UUID, p_cashier_id UUID)
+RETURNS UUID
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
-  v_row invite_codes%ROWTYPE;
+  v_shift_id UUID;
 BEGIN
-  SELECT * INTO v_row FROM invite_codes
-    WHERE code = p_code AND is_active = true
-    FOR UPDATE; -- row lock mencegah race condition saat trafik tinggi
+  SELECT id INTO v_shift_id FROM shifts
+    WHERE tenant_id = p_tenant_id AND cashier_id = p_cashier_id AND status = 'open'
+    LIMIT 1;
 
-  IF NOT FOUND THEN
-    RETURN NULL;
+  IF v_shift_id IS NULL THEN
+    INSERT INTO shifts (tenant_id, cashier_id, status)
+      VALUES (p_tenant_id, p_cashier_id, 'open')
+      RETURNING id INTO v_shift_id;
   END IF;
 
-  IF v_row.used_count >= v_row.max_uses THEN
-    RETURN 'QUOTA_FULL';
-  END IF;
-
-  UPDATE invite_codes
-    SET used_count = used_count + 1,
-        is_active = (used_count + 1) < max_uses
-    WHERE id = v_row.id;
-
-  RETURN 'OK';
+  RETURN v_shift_id;
 END;
 $$;
 
--- =========================================================
--- FUNGSI: Checkout Transaksi (Total dihitung di SERVER, bukan client)
--- Klien HANYA mengirim daftar product_id + qty. Harga diambil ulang dari
--- tabel `products` dan diskon member divalidasi ulang di sini, sehingga
--- request yang dimodifikasi (mis. lewat DevTools/Burp Suite untuk mengubah
--- total_amount) tidak bisa mengubah nilai transaksi yang tersimpan.
--- =========================================================
 CREATE OR REPLACE FUNCTION checkout_transaction(
   p_tenant_id UUID,
   p_cashier_id UUID,
@@ -193,6 +174,7 @@ DECLARE
   v_member_id UUID := NULL;
   v_total NUMERIC;
   v_tx_id UUID;
+  v_shift_id UUID;
 BEGIN
   -- Kasir yang memanggil harus benar-benar tergabung di tenant tsb.
   IF NOT EXISTS (
@@ -204,6 +186,11 @@ BEGIN
   IF jsonb_array_length(p_items) = 0 THEN
     RAISE EXCEPTION 'Keranjang kosong';
   END IF;
+
+  -- Setiap transaksi otomatis dikaitkan ke shift yang sedang berjalan
+  -- untuk kasir ini (dibuka otomatis kalau belum ada) — supaya riwayat
+  -- transaksi bisa ditelusuri "terjadi di shift siapa".
+  v_shift_id := open_shift(p_tenant_id, p_cashier_id);
 
   -- Validasi ulang member & diskon di server (jangan percaya diskon dari client)
   IF p_member_code IS NOT NULL AND p_member_code <> '' THEN
@@ -246,10 +233,10 @@ BEGIN
 
   INSERT INTO transactions (
     id, tenant_id, cashier_id, invoice_number, total_amount,
-    payment_method, member_id, is_offline_sync
+    payment_method, member_id, is_offline_sync, shift_id
   ) VALUES (
     v_tx_id, p_tenant_id, p_cashier_id, p_invoice_number, v_total,
-    p_payment_method, v_member_id, false
+    p_payment_method, v_member_id, false, v_shift_id
   );
 
   RETURN v_tx_id;
@@ -307,18 +294,6 @@ AS $$
   SELECT tenant_id FROM profiles WHERE id = auth.uid();
 $$;
 
--- invite_codes: TIDAK BOLEH terbaca oleh anon/authenticated biasa — kode ini
--- adalah "kunci" pendaftaran. Sebelumnya tabel ini TIDAK diberi RLS sama
--- sekali, artinya siapa pun yang punya anon key bisa SELECT * FROM
--- invite_codes langsung lewat REST API Supabase dan melihat/menebak semua
--- kode aktif. Redeem tetap lewat redeem_invite_code() (service role di
--- server), sementara hanya super_admin yang boleh melihat/mengelola lewat
--- dashboard admin.
-ALTER TABLE invite_codes ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Invite codes: super_admin only" ON invite_codes
-  FOR ALL USING (is_super_admin());
-
 CREATE POLICY "Tenants: own tenant or super_admin" ON tenants
   FOR ALL USING (
     is_super_admin() OR id = current_tenant_id()
@@ -361,12 +336,6 @@ CREATE POLICY "Access transaction_items by parent tenant" ON transaction_items
   );
 
 -- =========================================================
--- SEED: Kode akses awal untuk demo/testing
--- =========================================================
-INSERT INTO invite_codes (code, max_uses) VALUES ('CAPOSVIRAL', 100);
-INSERT INTO invite_codes (code, max_uses) VALUES ('DEMOSTUDIOD13', 1);
-
--- =========================================================
 -- INDEKS PERFORMA
 -- Query utama di aplikasi selalu difilter per tenant_id atau per tanggal
 -- (laporan omzet). Tanpa indeks ini, Postgres melakukan sequential scan
@@ -404,3 +373,118 @@ CREATE POLICY "Payments: read own tenant" ON payments
 
 CREATE INDEX idx_payments_tenant ON payments (tenant_id, created_at DESC);
 CREATE INDEX idx_payments_order_id ON payments (order_id);
+
+-- =========================================================
+-- SHIFTS — RLS
+-- =========================================================
+ALTER TABLE shifts ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Shifts: own tenant or super_admin" ON shifts
+  FOR ALL USING (is_super_admin() OR tenant_id = current_tenant_id());
+
+CREATE INDEX idx_shifts_tenant_status ON shifts (tenant_id, cashier_id, status);
+CREATE INDEX idx_transactions_shift ON transactions (shift_id);
+
+-- =========================================================
+-- FUNGSI TIER — sumber kebenaran tunggal "tenant ini di tier apa"
+-- 'free'    = trial ATAU expired/past_due (belum/tidak lagi bayar)
+-- 'pro'     = active + plan monthly
+-- 'supreme' = active + plan yearly
+-- =========================================================
+CREATE OR REPLACE FUNCTION tenant_tier(p_tenant_id UUID)
+RETURNS TEXT
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT CASE
+    WHEN status = 'active' AND plan = 'yearly' THEN 'supreme'
+    WHEN status = 'active' AND plan = 'monthly' THEN 'pro'
+    ELSE 'free'
+  END
+  FROM subscriptions WHERE tenant_id = p_tenant_id;
+$$;
+
+-- =========================================================
+-- ENFORCE LIMIT TIER FREE — lewat trigger database, bukan cuma di
+-- frontend. Trigger jalan APA PUN caranya insert dilakukan (browser,
+-- /api/cashiers pakai service role, dll) — service role bypass RLS
+-- tapi TIDAK bypass trigger.
+-- =========================================================
+CREATE OR REPLACE FUNCTION enforce_cashier_limit()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_count INT;
+BEGIN
+  IF NEW.role <> 'cashier' THEN
+    RETURN NEW;
+  END IF;
+
+  IF tenant_tier(NEW.tenant_id) = 'free' THEN
+    SELECT COUNT(*) INTO v_count FROM profiles
+      WHERE tenant_id = NEW.tenant_id AND role = 'cashier';
+    IF v_count >= 2 THEN
+      RAISE EXCEPTION 'FREE_TIER_CASHIER_LIMIT: Paket Free Trial maksimal 2 akun kasir. Upgrade ke Pro untuk tambah kasir.';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_enforce_cashier_limit
+  BEFORE INSERT ON profiles
+  FOR EACH ROW EXECUTE FUNCTION enforce_cashier_limit();
+
+CREATE OR REPLACE FUNCTION enforce_menu_limit()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_count INT;
+BEGIN
+  IF tenant_tier(NEW.tenant_id) = 'free' THEN
+    SELECT COUNT(*) INTO v_count FROM products WHERE tenant_id = NEW.tenant_id;
+    IF v_count >= 10 THEN
+      RAISE EXCEPTION 'FREE_TIER_MENU_LIMIT: Paket Free Trial maksimal 10 menu. Upgrade ke Pro untuk menu unlimited.';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_enforce_menu_limit
+  BEFORE INSERT ON products
+  FOR EACH ROW EXECUTE FUNCTION enforce_menu_limit();
+
+-- =========================================================
+-- VIEW ANALITIK DATA ASLI — dipakai halaman /dashboard menggantikan
+-- data contoh (demo) yang sebelumnya hardcode. security_invoker = true
+-- supaya RLS transactions/transaction_items tetap berlaku.
+-- =========================================================
+CREATE OR REPLACE VIEW peak_hours_analytics
+WITH (security_invoker = true) AS
+SELECT
+  tenant_id,
+  EXTRACT(HOUR FROM created_at)::INT AS hour_of_day,
+  COUNT(*) AS total_orders
+FROM transactions
+GROUP BY tenant_id, EXTRACT(HOUR FROM created_at);
+
+CREATE OR REPLACE VIEW best_seller_analytics
+WITH (security_invoker = true) AS
+SELECT
+  t.tenant_id,
+  p.name AS product_name,
+  SUM(ti.qty) AS total_qty
+FROM transaction_items ti
+JOIN transactions t ON t.id = ti.transaction_id
+JOIN products p ON p.id = ti.product_id
+GROUP BY t.tenant_id, p.name;

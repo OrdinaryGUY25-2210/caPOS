@@ -27,7 +27,7 @@ AS $$
   SELECT tenant_id FROM profiles WHERE id = auth.uid();
 $$;
 
--- 2. Hapus semua policy lama yang rekursif...
+-- 2. Hapus semua policy lama yang rekursif (nama lama)...
 DROP POLICY IF EXISTS "Tenants: own tenant or super_admin" ON tenants;
 DROP POLICY IF EXISTS "Subscriptions: own tenant or super_admin" ON subscriptions;
 DROP POLICY IF EXISTS "Profiles: own tenant or super_admin" ON profiles;
@@ -35,6 +35,12 @@ DROP POLICY IF EXISTS "Access products by tenant_id" ON products;
 DROP POLICY IF EXISTS "Access memberships by tenant_id" ON memberships;
 DROP POLICY IF EXISTS "Access transactions by tenant_id" ON transactions;
 DROP POLICY IF EXISTS "Access transaction_items by parent tenant" ON transaction_items;
+
+-- ...dan juga nama BARU-nya (untuk kasus migrasi ini dijalankan LAGI, atau
+-- dijalankan setelah schema.sql versi terbaru yang sudah memakai nama
+-- policy baru ini sejak awal — tanpa baris ini, CREATE POLICY di bawah
+-- akan gagal dengan error "policy already exists").
+DROP POLICY IF EXISTS "Profiles: own row, own tenant, or super_admin" ON profiles;
 
 -- 3. ...dan buat ulang semuanya memakai current_tenant_id() (aman, tanpa rekursi).
 CREATE POLICY "Tenants: own tenant or super_admin" ON tenants

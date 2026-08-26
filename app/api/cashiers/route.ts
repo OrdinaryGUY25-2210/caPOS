@@ -96,6 +96,17 @@ export async function POST(request: Request) {
     // Bersihkan auth user kalau insert profile gagal, biar tidak ada akun
     // "yatim" tanpa profil/tenant.
     await supabase.auth.admin.deleteUser(authUser.user.id);
+
+    // Trigger database enforce_cashier_limit() melempar pesan berawalan
+    // "FREE_TIER_CASHIER_LIMIT:" — teruskan pesan itu ke client supaya
+    // bisa ditampilkan sebagai upsell yang jelas, bukan error generik.
+    if (profileError.message.includes("FREE_TIER_CASHIER_LIMIT")) {
+      return NextResponse.json(
+        { message: "Paket Free Trial maksimal 2 akun kasir. Upgrade ke Pro untuk tambah kasir.", reason: "FREE_TIER_CASHIER_LIMIT" },
+        { status: 403 }
+      );
+    }
+
     return NextResponse.json({ message: "Gagal menyimpan data kasir." }, { status: 500 });
   }
 

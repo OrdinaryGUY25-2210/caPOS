@@ -3,8 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Coffee, Loader2, AlertTriangle, MailCheck } from "lucide-react";
-import { whatsappLink } from "@/lib/utils";
+import { Coffee, Loader2, MailCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import PasswordInput from "@/components/PasswordInput";
 
@@ -15,10 +14,9 @@ export default function RegisterPage() {
     ownerName: "",
     email: "",
     password: "",
-    accessCode: "",
+    confirmPassword: "",
   });
   const [loading, setLoading] = useState(false);
-  const [quotaFull, setQuotaFull] = useState(false);
   const [showOtpForm, setShowOtpForm] = useState(false);
   const [registeredEmail, setRegisteredEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -32,9 +30,17 @@ export default function RegisterPage() {
 
   async function handleRegister(e: React.FormEvent) {
     e.preventDefault();
-    setLoading(true);
     setError(null);
-    setQuotaFull(false);
+
+    // Dicek dulu di client untuk feedback instan — server tetap validasi
+    // ulang semuanya di /api/register, jadi ini murni buat UX, bukan
+    // satu-satunya lapisan keamanan.
+    if (form.password !== form.confirmPassword) {
+      setError("Konfirmasi password tidak cocok dengan password di atas.");
+      return;
+    }
+
+    setLoading(true);
 
     try {
       const res = await fetch("/api/register", {
@@ -45,13 +51,7 @@ export default function RegisterPage() {
       const result = await res.json();
 
       if (!res.ok) {
-        if (result.reason === "QUOTA_FULL") {
-          setQuotaFull(true);
-        } else if (result.reason === "INVALID_CODE") {
-          setError("Kode Akses / Referral tidak ditemukan atau sudah tidak aktif.");
-        } else {
-          setError(result.message || "Pendaftaran gagal. Silakan coba lagi.");
-        }
+        setError(result.message || "Pendaftaran gagal. Silakan coba lagi.");
         setLoading(false);
         return;
       }
@@ -81,13 +81,12 @@ export default function RegisterPage() {
       setOtpError(
         verifyError?.message.toLowerCase().includes("expired")
           ? "Kode OTP sudah kedaluwarsa. Klik \"Kirim ulang kode\" di bawah."
-          : "Kode OTP salah. Periksa kembali 6 digit kode dari email Anda."
+          : "Kode OTP salah. Periksa kembali kode dari email Anda."
       );
       setVerifying(false);
       return;
     }
 
-    // OTP benar → sesi aktif → arahkan sesuai role (baru daftar = owner)
     const { data: profile } = await supabase
       .from("profiles")
       .select("role")
@@ -125,7 +124,7 @@ export default function RegisterPage() {
           </div>
           <h1 className="text-2xl font-bold text-neutral-900">Daftar caPOS</h1>
           <p className="text-sm text-neutral-500 text-center">
-            Pendaftaran memerlukan Kode Akses / Referral yang valid
+            Mulai kelola kafe Anda — gratis 28 hari, tanpa kartu kredit
           </p>
         </div>
 
@@ -137,7 +136,7 @@ export default function RegisterPage() {
               </div>
               <p className="font-semibold text-neutral-900">Masukkan Kode OTP</p>
               <p className="text-sm text-neutral-500">
-                Kami sudah mengirim kode 6 digit ke{" "}
+                Kami sudah mengirim kode ke{" "}
                 <span className="font-medium text-neutral-700">{registeredEmail}</span>.
                 Masukkan kodenya di bawah untuk mengaktifkan akun.
               </p>
@@ -176,45 +175,12 @@ export default function RegisterPage() {
               {resending ? "Mengirim..." : resent ? "Kode terkirim ulang ✓" : "Kirim ulang kode"}
             </button>
           </form>
-        ) : quotaFull ? (
-          <div className="card p-6 text-center space-y-4">
-            <div className="w-12 h-12 rounded-full bg-urgent-light flex items-center justify-center mx-auto">
-              <AlertTriangle className="text-urgent" size={24} />
-            </div>
-            <div>
-              <p className="font-semibold text-neutral-900">Kuota Penuh</p>
-              <p className="text-sm text-neutral-500 mt-1">
-                Kuota 100 Kafe Trial untuk kode ini sudah penuh. Hubungi WhatsApp Studio D13.
-              </p>
-            </div>
-            <a
-              href={whatsappLink("Halo Studio D13, saya ingin daftar caPOS tapi kuota kode trial sudah penuh.")}
-              target="_blank"
-              rel="noreferrer"
-              className="btn-primary w-full inline-block"
-            >
-              Hubungi via WhatsApp
-            </a>
-            <button onClick={() => setQuotaFull(false)} className="btn-outline w-full">
-              Coba Kode Lain
-            </button>
-          </div>
         ) : (
           <form onSubmit={handleRegister} className="card p-6 space-y-4">
             {error && (
               <div className="badge-urgent w-full justify-start px-3 py-2 rounded-lg">{error}</div>
             )}
 
-            <div>
-              <label className="text-sm font-medium text-neutral-700 mb-1 block">Kode Akses / Referral</label>
-              <input
-                required
-                value={form.accessCode}
-                onChange={(e) => setForm({ ...form, accessCode: e.target.value.toUpperCase() })}
-                placeholder="Kode Referal"
-                className="input-field uppercase tracking-wide"
-              />
-            </div>
             <div>
               <label className="text-sm font-medium text-neutral-700 mb-1 block">Nama Kafe</label>
               <input
@@ -250,10 +216,21 @@ export default function RegisterPage() {
               <label className="text-sm font-medium text-neutral-700 mb-1 block">Password</label>
               <PasswordInput
                 required
-                minLength={6}
+                minLength={8}
                 value={form.password}
                 onChange={(v) => setForm({ ...form, password: v })}
                 placeholder="Minimal 8 karakter, kombinasi huruf & angka"
+                autoComplete="new-password"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-neutral-700 mb-1 block">Konfirmasi Password</label>
+              <PasswordInput
+                required
+                minLength={8}
+                value={form.confirmPassword}
+                onChange={(v) => setForm({ ...form, confirmPassword: v })}
+                placeholder="Ulangi password di atas"
                 autoComplete="new-password"
               />
             </div>

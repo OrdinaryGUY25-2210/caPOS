@@ -17,6 +17,12 @@ CREATE TABLE IF NOT EXISTS payments (
 
 ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
 
+-- DROP dulu sebelum CREATE — CREATE POLICY tidak punya opsi IF NOT EXISTS
+-- di Postgres (beda dengan CREATE TABLE), jadi tanpa DROP ini, migrasi
+-- akan gagal dengan error "policy already exists" kalau dijalankan lagi
+-- setelah schema.sql (yang sudah menyertakan tabel & policy ini juga).
+DROP POLICY IF EXISTS "Payments: read own tenant" ON payments;
+
 -- Owner/super_admin BOLEH BACA riwayat pembayaran tenant sendiri, tapi
 -- TIDAK BOLEH insert/update langsung dari client — status pembayaran
 -- HANYA boleh berubah lewat webhook /api/midtrans/notification (pakai

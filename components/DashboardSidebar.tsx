@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   BarChart3,
+  Receipt,
   Coffee,
   Users,
   CreditCard,
@@ -18,6 +19,7 @@ import { createClient } from "@/lib/supabase/client";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Laporan & Omzet", icon: BarChart3 },
+  { href: "/dashboard/transactions", label: "Riwayat Transaksi", icon: Receipt },
   { href: "/dashboard/menu", label: "Kelola Menu & Stok", icon: Coffee },
   { href: "/dashboard/cashiers", label: "Manajemen Kasir", icon: Users },
   { href: "/dashboard/membership", label: "Membership", icon: CreditCard },

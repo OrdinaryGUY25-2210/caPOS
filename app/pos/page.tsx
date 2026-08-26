@@ -40,6 +40,8 @@ export default function PosPage() {
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [receipt, setReceipt] = useState<ReceiptData | null>(null);
   const [cashierName, setCashierName] = useState("Kasir");
+  const [roleLabel, setRoleLabel] = useState("Kasir");
+  const [shiftStartedAt, setShiftStartedAt] = useState<string | null>(null);
   const [session, setSession] = useState<{ tenantId: string; cashierId: string } | null>(null);
   const [cafeSettings, setCafeSettings] = useState({
     name: "Kafe Demo",
@@ -56,12 +58,31 @@ export default function PosPage() {
 
       setSession({ tenantId: profile.tenant_id, cashierId: userId });
       setCashierName(profile.full_name || "Kasir");
+      setRoleLabel(profile.role === "owner" ? "Owner" : profile.role === "super_admin" ? "Super Admin" : "Kasir");
+
+      const supabase = createClient();
+
+      // Buka shift otomatis (idempotent — kalau sudah ada yang 'open'
+      // untuk akun ini, dipakai lagi, tidak bikin baru) supaya navbar bisa
+      // tampilkan "Shift dimulai HH:mm" dan tiap transaksi otomatis
+      // tertaut ke shift ini lewat checkout_transaction().
+      const { data: shiftId } = await supabase.rpc("open_shift", {
+        p_tenant_id: profile.tenant_id,
+        p_cashier_id: userId,
+      });
+      if (shiftId) {
+        const { data: shiftRow } = await supabase
+          .from("shifts")
+          .select("opened_at")
+          .eq("id", shiftId)
+          .single();
+        if (shiftRow) setShiftStartedAt(shiftRow.opened_at);
+      }
 
       const cached = await db.products.toArray();
       if (cached.length > 0) setProducts(cached);
 
       // Muat data kafe (nama/alamat/WiFi) untuk struk.
-      const supabase = createClient();
       const { data: tenant } = await supabase
         .from("tenants")
         .select("name, show_wifi_on_receipt, wifi_ssid, wifi_password")
@@ -236,6 +257,8 @@ export default function PosPage() {
       </Suspense>
       <PosNavbar
         cashierName={cashierName}
+        roleLabel={roleLabel}
+        shiftStartedAt={shiftStartedAt}
         onLogout={async () => {
           await createClient().auth.signOut();
           window.location.href = "/login";
