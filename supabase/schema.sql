@@ -3,7 +3,7 @@
 -- Jalankan file ini di Supabase SQL Editor secara berurutan.
 -- =========================================================
 
-CREATE TYPE user_role AS ENUM ('super_admin', 'owner', 'cashier');
+CREATE TYPE user_role AS ENUM ('super_admin', 'owner', 'manager', 'cashier');
 CREATE TYPE sub_status AS ENUM ('trial', 'active', 'past_due', 'expired');
 
 CREATE SEQUENCE member_seq START 1;
@@ -29,7 +29,27 @@ CREATE TABLE subscriptions (
   plan TEXT,  -- 'monthly' | 'yearly' | NULL (trial/belum pernah bayar) — dipakai untuk gating Laporan Dasar vs Lengkap
   trial_ends_at TIMESTAMPTZ DEFAULT (now() + INTERVAL '28 days'),
   valid_until TIMESTAMPTZ DEFAULT (now() + INTERVAL '28 days'),
+  referred_by_code TEXT,                    -- kode referral yang dipakai saat daftar (kalau ada)
+  pending_signup_discount_pct NUMERIC DEFAULT 0, -- 2% pendaftar baru, dikonsumsi di pembayaran pertama
+  super_trial_ends_at TIMESTAMPTZ,          -- diisi kalau daftar pakai kode Super Admin (now()+5 hari)
   updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Kode referral permanen 1:1 per tenant, plus log siapa memakai kode siapa.
+CREATE TABLE referrals (
+  tenant_id UUID PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
+  code TEXT UNIQUE NOT NULL,
+  accumulated_uses INT NOT NULL DEFAULT 0, -- 0-5, tiap +1 = +3% (maks 15%)
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE referral_redemptions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  code TEXT NOT NULL,
+  referrer_tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
+  referred_tenant_id UUID UNIQUE REFERENCES tenants(id) ON DELETE CASCADE,
+  reward_granted BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT now()
 );
 
 -- 3. Profiles
@@ -37,10 +57,11 @@ CREATE TABLE profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
   role user_role DEFAULT 'cashier',
+  job_title TEXT,          -- label jabatan bebas (mis. "Barista", "Kasir Utama") — beda dari `role` yang menentukan hak akses sistem
   full_name TEXT,
   email TEXT,             -- disalin dari auth.users saat akun dibuat, biar
-                           -- daftar kasir bisa ditampilkan tanpa perlu admin API
-  is_active BOOLEAN DEFAULT true, -- nonaktifkan akun kasir tanpa menghapusnya
+                           -- daftar karyawan bisa ditampilkan tanpa perlu admin API
+  is_active BOOLEAN DEFAULT true, -- nonaktifkan akun karyawan tanpa menghapusnya
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -85,6 +106,40 @@ CREATE TABLE shifts (
   opened_at TIMESTAMPTZ DEFAULT now(),
   closed_at TIMESTAMPTZ,
   status TEXT NOT NULL DEFAULT 'open' -- 'open' | 'closed'
+);
+
+-- 6.6 Attendance — pengajuan izin/sakit/cuti karyawan, ditinjau Manager/Owner.
+CREATE TABLE attendance (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
+  employee_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,            -- 'izin' | 'sakit' | 'cuti'
+  date_start DATE NOT NULL,
+  date_end DATE NOT NULL,
+  reason TEXT,
+  status TEXT NOT NULL DEFAULT 'pending', -- 'pending' | 'approved' | 'rejected'
+  reviewed_by UUID REFERENCES profiles(id),
+  reviewed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- 6.7 Approval Requests — antrean persetujuan untuk mencegah kecurangan:
+-- kasir yang menambah menu baru atau mengubah harga TIDAK langsung
+-- mengubah tabel `products`, melainkan masuk sini dulu sampai disetujui
+-- Manager/Owner. `payload` menyimpan data yang diusulkan (fleksibel per
+-- jenis permintaan), `target_id` dipakai kalau ini usulan ubah data yang
+-- sudah ada (mis. price_change ke produk tertentu).
+CREATE TABLE approval_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
+  requested_by UUID REFERENCES profiles(id),
+  type TEXT NOT NULL,            -- 'new_menu' | 'price_change'
+  target_id UUID,                -- product id kalau type = 'price_change'
+  payload JSONB NOT NULL,        -- data yang diusulkan, mis. {"name":"Kopi Baru","price":20000,"category":"Kopi"}
+  status TEXT NOT NULL DEFAULT 'pending', -- 'pending' | 'approved' | 'rejected'
+  reviewed_by UUID REFERENCES profiles(id),
+  reviewed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now()
 );
 
 -- 7. Transactions
@@ -253,6 +308,8 @@ ALTER TABLE products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE memberships ENABLE ROW LEVEL SECURITY;
 ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE transaction_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance ENABLE ROW LEVEL SECURITY;
+ALTER TABLE approval_requests ENABLE ROW LEVEL SECURITY;
 
 -- Helper: super_admin bypasses every policy below (Content Bypass requirement)
 CREATE OR REPLACE FUNCTION is_super_admin()
@@ -263,6 +320,20 @@ SET search_path = public, pg_temp
 AS $$
   SELECT EXISTS (
     SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'super_admin'
+  );
+$$;
+
+-- Helper: manager DIPERLAKUKAN SAMA seperti owner untuk hampir semua akses
+-- dashboard — bedanya cuma manager tidak bisa akses /admin (itu murni
+-- super_admin) dan tidak bisa hapus tenant-nya sendiri dari pengaturan.
+CREATE OR REPLACE FUNCTION is_manager_or_owner()
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('owner', 'manager')
   );
 $$;
 
@@ -356,6 +427,7 @@ CREATE TABLE payments (
   order_id TEXT UNIQUE NOT NULL,
   plan TEXT NOT NULL,
   amount NUMERIC NOT NULL,
+  discount_pct NUMERIC DEFAULT 0, -- diskon referral yang dipakai di transaksi ini
   status TEXT NOT NULL DEFAULT 'pending',
   raw_response JSONB,
   created_at TIMESTAMPTZ DEFAULT now(),
@@ -382,6 +454,60 @@ ALTER TABLE shifts ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Shifts: own tenant or super_admin" ON shifts
   FOR ALL USING (is_super_admin() OR tenant_id = current_tenant_id());
 
+-- =========================================================
+-- ATTENDANCE (Kehadiran/Izin) — RLS
+-- Karyawan (siapa saja di tenant) boleh baca & buat pengajuan miliknya
+-- sendiri; hanya Manager/Owner yang boleh UPDATE (approve/reject).
+-- =========================================================
+CREATE POLICY "Attendance: view own tenant" ON attendance
+  FOR SELECT USING (is_super_admin() OR tenant_id = current_tenant_id());
+
+CREATE POLICY "Attendance: create own request" ON attendance
+  FOR INSERT WITH CHECK (
+    tenant_id = current_tenant_id()
+    AND (employee_id = auth.uid() OR is_manager_or_owner())
+  );
+
+CREATE POLICY "Attendance: manager/owner review" ON attendance
+  FOR UPDATE USING (
+    is_super_admin() OR (tenant_id = current_tenant_id() AND is_manager_or_owner())
+  );
+
+CREATE INDEX idx_attendance_tenant_status ON attendance (tenant_id, status);
+
+-- =========================================================
+-- APPROVAL REQUESTS — RLS
+-- Siapa saja di tenant boleh buat pengajuan & lihat daftar pengajuan
+-- tenant-nya (supaya kasir bisa lihat status pengajuannya sendiri), tapi
+-- hanya Manager/Owner yang boleh UPDATE (approve/reject).
+-- =========================================================
+CREATE POLICY "Approval requests: view own tenant" ON approval_requests
+  FOR SELECT USING (is_super_admin() OR tenant_id = current_tenant_id());
+
+CREATE POLICY "Approval requests: create own request" ON approval_requests
+  FOR INSERT WITH CHECK (
+    tenant_id = current_tenant_id() AND requested_by = auth.uid()
+  );
+
+CREATE POLICY "Approval requests: manager/owner review" ON approval_requests
+  FOR UPDATE USING (
+    is_super_admin() OR (tenant_id = current_tenant_id() AND is_manager_or_owner())
+  );
+
+CREATE INDEX idx_approval_requests_tenant_status ON approval_requests (tenant_id, status);
+
+-- Daftarkan ke publication realtime supaya NotificationBell.tsx bisa
+-- menerima event perubahan tanpa polling.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND tablename = 'approval_requests'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE approval_requests;
+  END IF;
+END $$;
+
 CREATE INDEX idx_shifts_tenant_status ON shifts (tenant_id, cashier_id, status);
 CREATE INDEX idx_transactions_shift ON transactions (shift_id);
 
@@ -398,6 +524,7 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
   SELECT CASE
+    WHEN super_trial_ends_at IS NOT NULL AND super_trial_ends_at > now() THEN 'supreme'
     WHEN status = 'active' AND plan = 'yearly' THEN 'supreme'
     WHEN status = 'active' AND plan = 'monthly' THEN 'pro'
     ELSE 'free'
@@ -420,15 +547,17 @@ AS $$
 DECLARE
   v_count INT;
 BEGIN
-  IF NEW.role <> 'cashier' THEN
+  -- Limit "2 karyawan tambahan" berlaku untuk role cashier MAUPUN manager
+  -- — keduanya dihitung sebagai "karyawan tambahan" di luar owner.
+  IF NEW.role NOT IN ('cashier', 'manager') THEN
     RETURN NEW;
   END IF;
 
   IF tenant_tier(NEW.tenant_id) = 'free' THEN
     SELECT COUNT(*) INTO v_count FROM profiles
-      WHERE tenant_id = NEW.tenant_id AND role = 'cashier';
+      WHERE tenant_id = NEW.tenant_id AND role IN ('cashier', 'manager');
     IF v_count >= 2 THEN
-      RAISE EXCEPTION 'FREE_TIER_CASHIER_LIMIT: Paket Free Trial maksimal 2 akun kasir. Upgrade ke Pro untuk tambah kasir.';
+      RAISE EXCEPTION 'FREE_TIER_CASHIER_LIMIT: Paket Free Trial maksimal 2 akun karyawan tambahan (kasir/manager). Upgrade ke Pro untuk tambah karyawan.';
     END IF;
   END IF;
 
@@ -488,3 +617,142 @@ FROM transaction_items ti
 JOIN transactions t ON t.id = ti.transaction_id
 JOIN products p ON p.id = ti.product_id
 GROUP BY t.tenant_id, p.name;
+
+-- =========================================================
+-- FUNGSI: Setujui/Tolak Approval Request
+--
+-- Perubahan sesungguhnya ke tabel `products` HANYA terjadi lewat fungsi
+-- ini setelah Manager/Owner approve — mencegah kasir langsung menulis ke
+-- `products` sendiri (yang akan membuka celah kecurangan: kasir bisa
+-- naikkan/turunkan harga seenaknya tanpa sepengetahuan atasan).
+-- =========================================================
+CREATE OR REPLACE FUNCTION review_approval_request(p_request_id UUID, p_approve BOOLEAN)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_req approval_requests%ROWTYPE;
+BEGIN
+  -- Hanya manager/owner (atau super_admin) tenant yang sama yang boleh
+  -- memutuskan — dicek di sini juga (bukan cuma RLS) supaya fungsi ini
+  -- tetap aman dipanggil dari mana pun.
+  IF NOT is_super_admin() AND NOT EXISTS (
+    SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('owner', 'manager')
+  ) THEN
+    RAISE EXCEPTION 'Akses ditolak: hanya Manager/Owner yang boleh meninjau pengajuan.';
+  END IF;
+
+  SELECT * INTO v_req FROM approval_requests WHERE id = p_request_id AND status = 'pending';
+  IF v_req.id IS NULL THEN
+    RAISE EXCEPTION 'Pengajuan tidak ditemukan atau sudah ditinjau sebelumnya.';
+  END IF;
+
+  IF NOT is_super_admin() AND v_req.tenant_id <> current_tenant_id() THEN
+    RAISE EXCEPTION 'Akses ditolak: bukan pengajuan tenant Anda.';
+  END IF;
+
+  IF p_approve THEN
+    IF v_req.type = 'new_menu' THEN
+      INSERT INTO products (tenant_id, name, price, category, image_url, is_available)
+      VALUES (
+        v_req.tenant_id,
+        v_req.payload->>'name',
+        (v_req.payload->>'price')::NUMERIC,
+        v_req.payload->>'category',
+        v_req.payload->>'image_url',
+        true
+      );
+    ELSIF v_req.type = 'price_change' THEN
+      UPDATE products SET price = (v_req.payload->>'price')::NUMERIC
+        WHERE id = v_req.target_id AND tenant_id = v_req.tenant_id;
+    END IF;
+  END IF;
+
+  UPDATE approval_requests
+    SET status = CASE WHEN p_approve THEN 'approved' ELSE 'rejected' END,
+        reviewed_by = auth.uid(),
+        reviewed_at = now()
+    WHERE id = p_request_id;
+END;
+$$;
+
+-- =========================================================
+-- REFERRALS — RLS
+-- Semua PENULISAN hanya lewat service role (server) — tidak ada policy
+-- INSERT/UPDATE untuk client biasa, supaya angka diskon tidak bisa
+-- dimanipulasi langsung dari browser.
+-- =========================================================
+ALTER TABLE referrals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE referral_redemptions ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Referrals: own tenant or super_admin" ON referrals
+  FOR SELECT USING (is_super_admin() OR tenant_id = current_tenant_id());
+
+CREATE POLICY "Referral redemptions: view own" ON referral_redemptions
+  FOR SELECT USING (
+    is_super_admin()
+    OR referrer_tenant_id = current_tenant_id()
+    OR referred_tenant_id = current_tenant_id()
+  );
+
+CREATE INDEX idx_referral_redemptions_referrer ON referral_redemptions (referrer_tenant_id, reward_granted);
+
+-- =========================================================
+-- FUNGSI: Redeem kode referral saat registrasi
+-- =========================================================
+CREATE OR REPLACE FUNCTION redeem_referral_code(p_code TEXT, p_new_tenant_id UUID)
+RETURNS TEXT
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_referrer_tenant_id UUID;
+BEGIN
+  SELECT tenant_id INTO v_referrer_tenant_id FROM referrals WHERE code = p_code FOR UPDATE;
+
+  IF v_referrer_tenant_id IS NULL THEN
+    RETURN 'invalid';
+  END IF;
+
+  IF v_referrer_tenant_id = p_new_tenant_id THEN
+    RETURN 'invalid';
+  END IF;
+
+  INSERT INTO referral_redemptions (code, referrer_tenant_id, referred_tenant_id)
+    VALUES (p_code, v_referrer_tenant_id, p_new_tenant_id);
+
+  RETURN 'referrer';
+END;
+$$;
+
+-- =========================================================
+-- FUNGSI: Proses reward referral setelah pembayaran pertama sukses.
+-- Reset akumulasi diskon tenant TERJADI SETIAP KALI dia top up, berapa
+-- pun akumulasinya saat itu — TIDAK perlu menunggu penuh 5/5.
+-- =========================================================
+CREATE OR REPLACE FUNCTION process_referral_on_payment(p_tenant_id UUID)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  UPDATE referrals r
+  SET accumulated_uses = LEAST(r.accumulated_uses + 1, 5)
+  FROM referral_redemptions rr
+  WHERE rr.referred_tenant_id = p_tenant_id
+    AND rr.reward_granted = false
+    AND r.tenant_id = rr.referrer_tenant_id;
+
+  UPDATE referral_redemptions
+  SET reward_granted = true
+  WHERE referred_tenant_id = p_tenant_id AND reward_granted = false;
+
+  UPDATE referrals SET accumulated_uses = 0 WHERE tenant_id = p_tenant_id;
+
+  UPDATE subscriptions SET pending_signup_discount_pct = 0 WHERE tenant_id = p_tenant_id;
+END;
+$$;
