@@ -1,7 +1,7 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-// Direct Role Routing: super_admin -> /admin, owner -> /dashboard, cashier -> /pos
+// Direct Role Routing: super_admin -> /admin, owner/manager -> /dashboard, cashier -> /pos
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request: { headers: request.headers } });
 
@@ -45,6 +45,7 @@ export async function middleware(request: NextRequest) {
     const roleHome: Record<string, string> = {
       super_admin: "/admin",
       owner: "/dashboard",
+      manager: "/dashboard",
       cashier: "/pos",
     };
 
@@ -64,7 +65,13 @@ export async function middleware(request: NextRequest) {
         url.searchParams.set("access_denied", path);
         return NextResponse.redirect(url);
       }
-      if (path.startsWith("/dashboard") && profile.role !== "owner") {
+      // manager DIPERLAKUKAN SAMA seperti owner untuk akses dashboard —
+      // cuma cashier yang diblokir dari /dashboard. Pengajuan izin/sakit
+      // untuk kasir ditaruh di dalam /pos (lihat components/PosNavbar),
+      // bukan di /dashboard/attendance, supaya kasir tidak perlu melihat
+      // layout dashboard penuh (sidebar dengan semua menu Owner/Manager)
+      // cuma untuk mengajukan izin.
+      if (path.startsWith("/dashboard") && profile.role !== "owner" && profile.role !== "manager") {
         const url = new URL(roleHome[profile.role], request.url);
         url.searchParams.set("access_denied", path);
         return NextResponse.redirect(url);

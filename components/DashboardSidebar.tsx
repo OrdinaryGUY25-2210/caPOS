@@ -13,16 +13,28 @@ import {
   Zap,
   LogOut,
   ShoppingCart,
+  CalendarCheck,
+  Gift,
+  FileText,
+  PackageSearch,
+  Target,
+  ClipboardCheck,
 } from "lucide-react";
 import { cx } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Laporan & Omzet", icon: BarChart3 },
+  { href: "/dashboard/laporan-pdf", label: "Laporan PDF Otomatis", icon: FileText },
+  { href: "/dashboard/target", label: "Target Bulanan", icon: Target },
   { href: "/dashboard/transactions", label: "Riwayat Transaksi", icon: Receipt },
   { href: "/dashboard/menu", label: "Kelola Menu & Stok", icon: Coffee },
-  { href: "/dashboard/cashiers", label: "Manajemen Kasir", icon: Users },
+  { href: "/dashboard/stock", label: "Stok & HPP", icon: PackageSearch },
+  { href: "/dashboard/employees", label: "Manajemen Karyawan", icon: Users },
+  { href: "/dashboard/cashier-evaluation", label: "Evaluasi Kasir", icon: ClipboardCheck },
+  { href: "/dashboard/attendance", label: "Kehadiran Karyawan", icon: CalendarCheck },
   { href: "/dashboard/membership", label: "Membership", icon: CreditCard },
+  { href: "/dashboard/referral", label: "Program Referral", icon: Gift },
   { href: "/dashboard/settings", label: "Pengaturan Kafe", icon: Settings },
   { href: "/dashboard/faq", label: "FAQ & Helpdesk", icon: HelpCircle },
   { href: "/dashboard/subscription", label: "Status Langganan", icon: Zap },

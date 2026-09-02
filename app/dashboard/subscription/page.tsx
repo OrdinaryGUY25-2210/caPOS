@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import Script from "next/script";
 import { Zap, CheckCircle2, XCircle, Loader2 } from "lucide-react";
-import { whatsappLink, daysRemaining } from "@/lib/utils";
+import { whatsappLink, daysRemaining, formatRupiah } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { getTier, type Tier } from "@/lib/tier";
@@ -26,17 +27,17 @@ declare global {
 
 const PLANS = [
   {
-    key: "free", name: "Free Trial", price: "Rp0", period: "/28 hari",
+    key: "free", name: "Free Trial", price: "Rp0", period: "/28 hari", rawAmount: 0,
     features: ["1 Owner + 2 Kasir", "Maks 10 Menu", "Riwayat 7 Hari", "Laporan Dasar"],
     highlight: false, payable: false,
   },
   {
-    key: "monthly", name: "Pro", price: "Rp99.000", period: "/bulan",
+    key: "monthly", name: "Pro", price: "Rp99.000", period: "/bulan", rawAmount: 99000,
     features: ["Kasir Unlimited", "Menu Unlimited", "Riwayat Lengkap", "Kesehatan Penjualan"],
     highlight: true, payable: true,
   },
   {
-    key: "yearly", name: "Supreme", price: "Rp999.000", period: "/tahun",
+    key: "yearly", name: "Supreme", price: "Rp999.000", period: "/tahun", rawAmount: 999000,
     features: ["Semua fitur Pro", "Laporan Lengkap (Jam Ramai, Menu Terlaris)", "Export Excel & PDF", "Prioritas Support"],
     highlight: false, payable: true,
   },
@@ -62,6 +63,7 @@ export default function SubscriptionPage() {
   const [daysLeft, setDaysLeft] = useState<number>(0);
   const [payingPlan, setPayingPlan] = useState<string | null>(null);
   const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [availableDiscountPct, setAvailableDiscountPct] = useState(0);
 
   async function loadSubscription() {
     setLoading(true);
@@ -72,11 +74,14 @@ export default function SubscriptionPage() {
     }
 
     const supabase = createClient();
-    const { data: sub } = await supabase
-      .from("subscriptions")
-      .select("status, plan, trial_ends_at, valid_until")
-      .eq("tenant_id", profile.tenant_id)
-      .single();
+    const [{ data: sub }, { data: referral }] = await Promise.all([
+      supabase.from("subscriptions").select("status, plan, trial_ends_at, valid_until, pending_signup_discount_pct").eq("tenant_id", profile.tenant_id).single(),
+      supabase.from("referrals").select("accumulated_uses").eq("tenant_id", profile.tenant_id).single(),
+    ]);
+
+    const signupPct = Number(sub?.pending_signup_discount_pct) || 0;
+    const referralPct = Math.min((referral?.accumulated_uses ?? 0) * 3, 15);
+    setAvailableDiscountPct(Math.min(signupPct + referralPct, 17));
 
     if (sub) {
       setStatus(sub.status);
@@ -185,8 +190,23 @@ export default function SubscriptionPage() {
         <div className="badge-urgent w-full justify-start px-3 py-2 rounded-lg">{paymentError}</div>
       )}
 
+      {availableDiscountPct > 0 && (
+        <div className="card p-4 bg-primary-light/40 border-primary/20 text-sm text-neutral-700 flex items-center justify-between">
+          <span>
+            🎉 Anda punya diskon <strong>{availableDiscountPct}%</strong> yang akan otomatis kepakai untuk pembayaran berikutnya.
+          </span>
+          <Link href="/dashboard/referral" className="text-primary-dark text-xs font-medium hover:underline whitespace-nowrap">
+            Lihat detail
+          </Link>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {PLANS.map((plan) => (
+        {PLANS.map((plan) => {
+          const discountedPrice = plan.payable && availableDiscountPct > 0
+            ? Math.round(plan.rawAmount * (1 - availableDiscountPct / 100))
+            : null;
+          return (
           <div key={plan.key} className={plan.highlight ? "card p-5 border-2 border-primary relative" : "card p-5"}>
             {plan.highlight && (
               <span className="absolute -top-3 left-5 bg-primary text-white text-xs font-semibold px-2.5 py-1 rounded-full">
@@ -194,9 +214,18 @@ export default function SubscriptionPage() {
               </span>
             )}
             <p className="font-semibold text-neutral-900">{plan.name}</p>
-            <p className="text-2xl font-bold text-neutral-900 mt-1">
-              {plan.price}<span className="text-sm font-normal text-neutral-400">{plan.period}</span>
-            </p>
+            {discountedPrice !== null ? (
+              <div className="mt-1">
+                <span className="text-sm text-neutral-400 line-through mr-2">{plan.price}</span>
+                <p className="text-2xl font-bold text-primary">
+                  {formatRupiah(discountedPrice)}<span className="text-sm font-normal text-neutral-400">{plan.period}</span>
+                </p>
+              </div>
+            ) : (
+              <p className="text-2xl font-bold text-neutral-900 mt-1">
+                {plan.price}<span className="text-sm font-normal text-neutral-400">{plan.period}</span>
+              </p>
+            )}
             <ul className="mt-4 space-y-2">
               {plan.features.map((f) => (
                 <li key={f} className="flex items-center gap-2 text-sm text-neutral-600">
@@ -222,7 +251,8 @@ export default function SubscriptionPage() {
               </div>
             )}
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Tabel perbandingan fitur — supaya keputusan upgrade lebih jelas

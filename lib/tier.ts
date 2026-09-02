@@ -29,7 +29,14 @@ export const TIER_BADGE_CLASS: Record<Tier, string> = {
 export const FREE_TIER_LIMITS = {
   maxCashiers: 2,
   maxMenu: 10,
-  historyDays: 7,
+  historyDays: 14,
+};
+
+/** Batas riwayat (hari) per tier — dipakai halaman Riwayat Transaksi & Laporan. */
+export const HISTORY_DAYS_LIMIT: Record<Tier, number | null> = {
+  free: 14,       // 7-14 hari sesuai permintaan; dipilih 14 sebagai batas maksimal free
+  pro: 30,        // owner Pro bisa pilih periode 7/14/30 hari
+  supreme: null,  // null = unlimited (tidak ada batas)
 };
 
 export function isPremiumReport(tier: Tier) {

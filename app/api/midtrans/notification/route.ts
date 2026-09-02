@@ -88,6 +88,18 @@ export async function POST(request: Request) {
         updated_at: new Date().toISOString(),
       })
       .eq("tenant_id", payment.tenant_id);
+
+    // Proses reward referral: (1) beri +3% ke referrer tenant ini kalau
+    // ada & belum pernah, (2) RESET akumulasi diskon tenant ini sendiri
+    // ke 0 — terjadi SETIAP KALI dia top up, berapa pun akumulasinya saat
+    // itu (tidak menunggu penuh 5/5), dan (3) konsumsi diskon 2%
+    // pendaftar baru kalau masih ada.
+    const { error: referralError } = await svc.rpc("process_referral_on_payment", {
+      p_tenant_id: payment.tenant_id,
+    });
+    if (referralError) {
+      console.error("process_referral_on_payment failed:", referralError);
+    }
   }
 
   // Midtrans mengharapkan response 200 apa pun hasilnya (selama sudah

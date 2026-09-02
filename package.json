@@ -20,7 +20,9 @@
     "lucide-react": "^0.427.0",
     "recharts": "^2.12.7",
     "xlsx": "^0.18.5",
-    "clsx": "^2.1.1"
+    "clsx": "^2.1.1",
+    "jspdf": "^2.5.2",
+    "jspdf-autotable": "^3.8.4"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.19",

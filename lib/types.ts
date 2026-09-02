@@ -1,4 +1,4 @@
-export type UserRole = "super_admin" | "owner" | "cashier";
+export type UserRole = "super_admin" | "owner" | "manager" | "cashier";
 export type SubStatus = "trial" | "active" | "past_due" | "expired";
 
 export interface Tenant {
@@ -26,6 +26,7 @@ export interface Profile {
   id: string;
   tenant_id: string;
   role: UserRole;
+  job_title: string | null;
   full_name: string | null;
   email: string | null;
   is_active: boolean;

@@ -203,6 +203,7 @@ export default function MenuPage() {
           saving={saving}
           onClose={() => setShowForm(false)}
           onSave={saveProduct}
+          existingCategories={Array.from(new Set(menu.map((m) => m.category).filter(Boolean)))}
         />
       )}
     </div>
@@ -214,16 +215,29 @@ function ProductForm({
   saving,
   onClose,
   onSave,
+  existingCategories,
 }: {
   product: Product;
   saving: boolean;
   onClose: () => void;
   onSave: (p: Product) => void;
+  existingCategories: string[];
 }) {
   const [form, setForm] = useState(product);
+  // Harga disimpan sebagai STRING terpisah di form ini (bukan langsung
+  // number seperti Product.price) — supaya kolom bisa benar-benar
+  // dikosongkan lalu ditulis manual. Sebelumnya `value={form.price}`
+  // (number) + `Number(e.target.value)` bikin field SELALU balik ke "0"
+  // tiap kali dikosongkan, karena Number("") = 0 langsung ditulis balik
+  // ke state dan me-render ulang input dengan "0" lagi — jadi pengguna
+  // tidak pernah benar-benar bisa menghapusnya.
+  const [priceInput, setPriceInput] = useState(product.price > 0 ? String(product.price) : "");
   const [preview, setPreview] = useState<string | null>(product.image_url);
   const [uploading, setUploading] = useState(false);
   const [compressInfo, setCompressInfo] = useState<string | null>(null);
+
+  const parsedPrice = priceInput === "" ? 0 : Number(priceInput);
+  const priceValid = priceInput !== "" && !Number.isNaN(parsedPrice) && parsedPrice > 0;
 
   async function handleImage(e: React.ChangeEvent<HTMLInputElement>) {
     const rawFile = e.target.files?.[0];
@@ -269,8 +283,8 @@ function ProductForm({
       onClose={onClose}
       footer={
         <button
-          disabled={saving || !form.name.trim() || form.price <= 0}
-          onClick={() => onSave(form)}
+          disabled={saving || !form.name.trim() || !priceValid}
+          onClick={() => onSave({ ...form, price: parsedPrice })}
           className="btn-primary w-full flex items-center justify-center gap-2"
         >
           {saving && <Loader2 className="animate-spin" size={16} />}
@@ -301,18 +315,28 @@ function ProductForm({
       <div>
         <label className="text-sm font-medium text-neutral-700 mb-1 block">Harga</label>
         <input
-          type="number"
-          min={0}
-          value={form.price}
-          onChange={(e) => setForm({ ...form, price: Number(e.target.value) })}
+          type="text"
+          inputMode="numeric"
+          value={priceInput}
+          onChange={(e) => setPriceInput(e.target.value.replace(/[^0-9]/g, ""))}
+          placeholder="Contoh: 20000"
           className="input-field"
         />
       </div>
       <div>
         <label className="text-sm font-medium text-neutral-700 mb-1 block">Kategori</label>
-        <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className="input-field">
-          {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-        </select>
+        {/* Datalist, bukan <select> terkunci — bisa pilih kategori yang
+            sudah ada ATAU ketik bebas kategori baru sepenuhnya. */}
+        <input
+          list="menu-category-suggestions"
+          value={form.category}
+          onChange={(e) => setForm({ ...form, category: e.target.value })}
+          placeholder="Pilih atau ketik kategori baru"
+          className="input-field"
+        />
+        <datalist id="menu-category-suggestions">
+          {existingCategories.map((c) => <option key={c} value={c} />)}
+        </datalist>
       </div>
     </Modal>
   );

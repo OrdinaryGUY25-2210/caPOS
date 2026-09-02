@@ -15,6 +15,7 @@ export default function RegisterPage() {
     email: "",
     password: "",
     confirmPassword: "",
+    referralCode: "",
   });
   const [loading, setLoading] = useState(false);
   const [showOtpForm, setShowOtpForm] = useState(false);
@@ -233,6 +234,21 @@ export default function RegisterPage() {
                 placeholder="Ulangi password di atas"
                 autoComplete="new-password"
               />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-neutral-700 mb-1 block">
+                Kode Referral <span className="text-neutral-400 font-normal">(opsional)</span>
+              </label>
+              <input
+                value={form.referralCode}
+                onChange={(e) => setForm({ ...form, referralCode: e.target.value.toUpperCase() })}
+                placeholder="Punya kode teman? Masukkan di sini"
+                className="input-field uppercase tracking-wide"
+                maxLength={20}
+              />
+              <p className="text-xs text-neutral-400 mt-1">
+                Pakai kode referral dapat diskon 2% untuk pembayaran pertama Anda.
+              </p>
             </div>
 
             <button type="submit" disabled={loading} className="btn-primary w-full flex items-center justify-center gap-2">

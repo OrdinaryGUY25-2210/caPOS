@@ -5,6 +5,7 @@ import { Search, Plus, Minus, Trash2, Printer, ScanLine } from "lucide-react";
 import PosNavbar from "@/components/PosNavbar";
 import Receipt, { type ReceiptData } from "@/components/Receipt";
 import Modal from "@/components/Modal";
+import CashierQuickActions from "@/components/CashierQuickActions";
 import AccessDeniedNotice from "@/components/AccessDeniedNotice";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
@@ -41,6 +42,7 @@ export default function PosPage() {
   const [receipt, setReceipt] = useState<ReceiptData | null>(null);
   const [cashierName, setCashierName] = useState("Kasir");
   const [roleLabel, setRoleLabel] = useState("Kasir");
+  const [role, setRole] = useState<string>("cashier");
   const [shiftStartedAt, setShiftStartedAt] = useState<string | null>(null);
   const [session, setSession] = useState<{ tenantId: string; cashierId: string } | null>(null);
   const [cafeSettings, setCafeSettings] = useState({
@@ -58,7 +60,8 @@ export default function PosPage() {
 
       setSession({ tenantId: profile.tenant_id, cashierId: userId });
       setCashierName(profile.full_name || "Kasir");
-      setRoleLabel(profile.role === "owner" ? "Owner" : profile.role === "super_admin" ? "Super Admin" : "Kasir");
+      setRoleLabel(profile.role === "owner" ? "Owner" : profile.role === "super_admin" ? "Super Admin" : profile.role === "manager" ? "Manager" : "Kasir");
+      setRole(profile.role);
 
       const supabase = createClient();
 
@@ -295,6 +298,11 @@ export default function PosPage() {
                 </button>
               ))}
             </div>
+            {/* Cuma kasir yang lihat tombol ini — owner/manager sudah punya
+                akses penuh lewat Dashboard, tidak perlu jalur usulan. */}
+            {role === "cashier" && session && (
+              <CashierQuickActions tenantId={session.tenantId} cashierId={session.cashierId} />
+            )}
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 overflow-y-auto pb-4">

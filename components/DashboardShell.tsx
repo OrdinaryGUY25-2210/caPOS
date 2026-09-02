@@ -1,22 +1,20 @@
 "use client";
 
-import { useState, Suspense } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { Menu, Coffee } from "lucide-react";
 import DashboardSidebar from "./DashboardSidebar";
 import TrialBanner from "./TrialBanner";
 import LandscapeNotice from "./LandscapeNotice";
 import AccessDeniedNotice from "./AccessDeniedNotice";
+import NotificationBell from "./NotificationBell";
+import { getCurrentProfile } from "@/lib/getCurrentProfile";
+import { isManagerOrOwner, ROLE_LABEL } from "@/lib/role";
 
 /**
  * Layout dashboard yang responsif di semua ukuran layar:
- *  - Desktop (≥ md): sidebar statis di kiri, seperti sebelumnya.
- *  - Mobile (< md): sidebar disembunyikan secara default. Topbar kecil
- *    dengan tombol hamburger memicu sidebar muncul sebagai OVERLAY
- *    (mengambang di atas konten dengan backdrop gelap di belakangnya),
- *    bukan mendorong/menambah frame baru ke tata letak — jadi konten
- *    utama tidak pernah ikut menyempit atau ter-geser aneh.
- *  - Tap di area gelap (backdrop) atau pilih salah satu menu akan
- *    otomatis menutup drawer-nya.
+ *  - Desktop (≥ md): sidebar statis di kiri + top bar tipis berisi
+ *    lonceng notifikasi & profil akun di kanan.
+ *  - Mobile (< md): sidebar disembunyikan default, hamburger di topbar.
  */
 export default function DashboardShell({
   daysLeft,
@@ -26,6 +24,24 @@ export default function DashboardShell({
   children: React.ReactNode;
 }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [tenantId, setTenantId] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const [role, setRole] = useState<string>("owner");
+  const [showBell, setShowBell] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const { profile } = await getCurrentProfile();
+      if (!profile) return;
+      setTenantId(profile.tenant_id);
+      setName(profile.full_name || "");
+      setRole(profile.role);
+      // Bell cuma untuk Manager/Owner — kasir yang MENGAJUKAN, bukan yang
+      // MENYETUJUI, jadi tidak perlu lihat lonceng ini (mereka tidak akses
+      // dashboard sama sekali).
+      setShowBell(isManagerOrOwner(profile.role));
+    })();
+  }, []);
 
   return (
     <div className="h-screen flex overflow-hidden bg-neutral-50">
@@ -33,12 +49,10 @@ export default function DashboardShell({
         <AccessDeniedNotice />
       </Suspense>
 
-      {/* Sidebar statis — hanya tampil di layar medium ke atas */}
       <div className="hidden md:block border-r border-neutral-200">
         <DashboardSidebar />
       </div>
 
-      {/* Drawer overlay — hanya untuk layar kecil, dan hanya dirender saat dibuka */}
       {drawerOpen && (
         <div className="fixed inset-0 z-50 md:hidden">
           <div
@@ -53,22 +67,38 @@ export default function DashboardShell({
       )}
 
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-        {/* Topbar mobile — cuma ikon hamburger, tidak ada nav lain di sini
-            supaya tidak menambah frame baru; navigasi tetap satu tempat
-            (drawer) untuk menghindari duplikasi & kebingungan. */}
-        <div className="md:hidden h-14 bg-white border-b border-neutral-200 flex items-center gap-3 px-4 shrink-0">
-          <button
-            onClick={() => setDrawerOpen(true)}
-            aria-label="Buka menu navigasi"
-            className="text-neutral-600 hover:bg-neutral-100 p-1.5 -m-1.5 rounded-lg"
-          >
-            <Menu size={22} />
-          </button>
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-md bg-primary flex items-center justify-center">
-              <Coffee className="text-white" size={13} />
+        {/* Top bar — tampil di SEMUA ukuran layar. Hamburger cuma muncul
+            di mobile; lonceng + profil selalu di kanan. */}
+        <div className="h-14 bg-white border-b border-neutral-200 flex items-center justify-between px-4 shrink-0">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setDrawerOpen(true)}
+              aria-label="Buka menu navigasi"
+              className="md:hidden text-neutral-600 hover:bg-neutral-100 p-1.5 -m-1.5 rounded-lg"
+            >
+              <Menu size={22} />
+            </button>
+            <div className="md:hidden flex items-center gap-2">
+              <div className="w-6 h-6 rounded-md bg-primary flex items-center justify-center">
+                <Coffee className="text-white" size={13} />
+              </div>
+              <span className="font-bold text-neutral-900 text-sm">caPOS</span>
             </div>
-            <span className="font-bold text-neutral-900 text-sm">caPOS</span>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {showBell && tenantId && <NotificationBell tenantId={tenantId} />}
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-full bg-primary-light text-primary-dark flex items-center justify-center text-xs font-bold shrink-0">
+                {(name || "?").slice(0, 2).toUpperCase()}
+              </div>
+              <div className="hidden sm:flex flex-col leading-tight">
+                <span className="text-sm font-medium text-neutral-700">{name}</span>
+                <span className="text-[10px] text-neutral-400 uppercase tracking-wide">
+                  {ROLE_LABEL[role as keyof typeof ROLE_LABEL] ?? role}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
 
