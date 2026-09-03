@@ -61,16 +61,35 @@ API langsung.
 - Reset terjadi setiap kali pemilik kode top up — memakai berapa pun
   akumulasi yang terkumpul saat itu (tidak perlu menunggu penuh 5/5).
   Kombinasi maksimal dalam satu transaksi: 2% + 15% = 17%.
-- Kode khusus Super Admin (`SUPER_ADMIN_REFERRAL_CODE` di env): pendaftar
-  dapat 5 hari akses Supreme penuh tanpa bayar, lalu otomatis turun ke sisa
-  23 hari trial standar (total tetap 28 hari) — plus tetap dapat diskon 2%.
+- Kode khusus Super Admin: dibuat & dikelola dari `/admin` (tabel
+  `admin_special_codes`, migration_010) — bisa banyak kode sekaligus, tiap
+  kode punya masa berlaku, lama trial Supreme, dan diskon pendaftar sendiri.
+  Pendaftar yang pakai kode ini dapat trial Supreme sesuai lama yang diatur,
+  lalu otomatis turun ke sisa trial standar (total tetap 28 hari), plus
+  tetap dapat diskon pendaftar sesuai kode tersebut.
 
 ### Lainnya
 - Pembayaran Midtrans (Snap) dengan diskon otomatis terhitung & webhook
   terverifikasi signature.
-- Super Admin (`/admin`) — statistik tenant, perpanjang/aktifkan langganan.
+- Super Admin (`/admin`) — statistik tenant, perpanjang/aktifkan langganan,
+  perbaiki kode referral tenant yang hilang, buat kode khusus (masa berlaku
+  sendiri) untuk campaign/partner.
 - PWA — install ke home screen, jalan offline.
 - Responsif di semua ukuran layar.
+
+### Laporan & Operasional (migration_009)
+- **Laporan PDF Otomatis** (`/dashboard/laporan-pdf`) — satu klik jadi PDF
+  rapi: omzet, estimasi laba kotor (dari HPP), omzet harian, menu terlaris,
+  metode pembayaran, kinerja kasir. Periode custom dibatasi sesuai tier.
+- **Stok & HPP** (`/dashboard/stock`) — HPP per menu, pelacakan stok
+  opsional per produk (otomatis berkurang saat checkout), restock, riwayat
+  pergerakan stok, alert stok menipis.
+- **Target Bulanan Owner** (`/dashboard/target`) — set target omzet
+  bulanan, progress bar, kebutuhan omzet/hari sisa bulan, riwayat vs
+  realisasi.
+- **Evaluasi Kasir** (`/dashboard/cashier-evaluation`) — ranking otomatis
+  kinerja kasir (omzet, transaksi, rata-rata, hari kerja) dibanding rata-rata
+  tim, per 7 hari/30 hari/bulan ini.
 
 ---
 
@@ -121,7 +140,11 @@ Jalankan berurutan, skip yang sudah pernah dijalankan (semua idempotent):
 4. migration_004 (kolom plan), 5. migration_005 (tier/shift/analitik),
 6. migration_007a_add_manager_role.sql — WAJIB DIJALANKAN SENDIRI
 (nambah enum, tidak boleh digabung query lain dalam satu klik Run),
-7. migration_007b_manager_features.sql, 8. migration_008_referral_system.sql.
+7. migration_007b_manager_features.sql, 8. migration_008_referral_system.sql,
+9. migration_009_stock_hpp_target_evaluasi.sql (Stok & HPP, Target Bulanan,
+data pendukung Evaluasi Kasir & Laporan PDF Otomatis),
+10. migration_010_admin_tools.sql (perbaikan kode referral yang hilang +
+kode khusus Super Admin dengan masa berlaku, dari /admin).
 
 Setelah migrasi 007b, cek Database → Replication di Supabase Dashboard,
 pastikan tabel approval_requests tercentang aktif di publication
@@ -129,8 +152,11 @@ supabase_realtime (untuk notifikasi lonceng real-time).
 
 ### Environment Variables tambahan
 ```
-SUPER_ADMIN_REFERRAL_CODE=kode-rahasia-anda
+NEXT_PUBLIC_STUDIO_D13_WHATSAPP=628xxxxxxxxxx   # nomor WA tombol "Hubungi Developer"
 ```
+`SUPER_ADMIN_REFERRAL_CODE` TIDAK dipakai lagi sejak migration_010 — kode
+khusus Super Admin sekarang dibuat & dikelola langsung dari `/admin`
+(tabel `admin_special_codes`), boleh dihapus dari env kapan saja.
 
 Bucket Storage, SMTP, template OTP — sama seperti sebelumnya, lihat komentar
 di `.env.local.example`, lalu jalankan `npm install && npm run dev`.

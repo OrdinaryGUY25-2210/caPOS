@@ -113,14 +113,19 @@ export async function POST(request: Request) {
   let referralOutcome: "none" | "invalid" | "super_admin" | "referrer" = "none";
 
   if (referralCodeInput) {
-    const superAdminCode = process.env.SUPER_ADMIN_REFERRAL_CODE;
+    // Coba dulu sebagai kode khusus Admin (bisa banyak, masing-masing
+    // punya masa berlaku & lama trial sendiri — lihat migration_010).
+    const { data: specialRows, error: specialError } = await supabase.rpc("redeem_special_code", {
+      p_code: referralCodeInput,
+      p_new_tenant_id: tenant.id,
+    });
+    const specialResult = Array.isArray(specialRows) ? specialRows[0] : null;
 
-    if (superAdminCode && referralCodeInput === superAdminCode.toUpperCase()) {
-      // Kode khusus Super Admin: 5 hari akses Supreme penuh + tetap dapat
-      // diskon 2% pendaftar baru. Tidak masuk tabel referral_redemptions
-      // karena bukan kode milik tenant mana pun.
-      subscriptionFields.super_trial_ends_at = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
-      subscriptionFields.pending_signup_discount_pct = 2;
+    if (!specialError && specialResult) {
+      subscriptionFields.super_trial_ends_at = new Date(
+        Date.now() + Number(specialResult.trial_days) * 24 * 60 * 60 * 1000
+      ).toISOString();
+      subscriptionFields.pending_signup_discount_pct = Number(specialResult.discount_pct);
       subscriptionFields.referred_by_code = referralCodeInput;
       referralOutcome = "super_admin";
     } else {

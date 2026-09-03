@@ -58,9 +58,7 @@ export default function DashboardSidebar({ onNavigate }: { onNavigate?: () => vo
   return (
     <aside className="w-72 sm:w-64 bg-white flex flex-col h-full shrink-0">
       <div className="h-16 flex items-center gap-2 px-5 border-b border-neutral-200 shrink-0">
-        <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-          <Coffee className="text-white" size={16} />
-        </div>
+        <img src="/logo.png" alt="caPOS" className="w-8 h-8 rounded-lg" />
         <span className="font-bold text-neutral-900">caPOS</span>
       </div>
 

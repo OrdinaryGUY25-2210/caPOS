@@ -246,21 +246,28 @@ function ProductForm({
     setUploading(true);
     setCompressInfo(null);
 
-    // Kompresi dulu di browser sebelum upload — foto HP modern sering
-    // 3-8MB, setelah dikompres biasanya jadi ratusan KB saja tanpa
-    // kelihatan bedanya di ukuran tampilan menu.
-    const compressedFile = await compressImage(rawFile, { maxDimension: 1200, quality: 0.8 });
+    // Kompresi & konversi ke WebP dulu di browser sebelum upload — foto HP
+    // modern sering 3-8MB. Target akhir 100-200KB (WebP kualitas diturunkan
+    // bertahap kalau masih kebesaran); otomatis fallback ke JPEG kalau
+    // browser tidak bisa meng-encode WebP.
+    const compressedFile = await compressImage(rawFile, {
+      maxDimension: 1200,
+      quality: 0.82,
+      format: "webp",
+      maxSizeKB: 180,
+    });
     const savedPct = Math.round((1 - compressedFile.size / rawFile.size) * 100);
     if (savedPct > 0) {
-      setCompressInfo(`Dikompres ${savedPct}% (${(rawFile.size / 1024).toFixed(0)}KB → ${(compressedFile.size / 1024).toFixed(0)}KB)`);
+      setCompressInfo(`Dikompres ${savedPct}% (${(rawFile.size / 1024).toFixed(0)}KB → ${(compressedFile.size / 1024).toFixed(0)}KB, ${compressedFile.type === "image/webp" ? "WebP" : "JPEG"})`);
     }
 
     const supabase = createClient();
-    const path = `${form.tenant_id}/${crypto.randomUUID()}.jpg`;
+    const ext = compressedFile.type === "image/webp" ? "webp" : "jpg";
+    const path = `${form.tenant_id}/${crypto.randomUUID()}.${ext}`;
 
     const { error: uploadError } = await supabase.storage
       .from("menu-images")
-      .upload(path, compressedFile, { upsert: true, contentType: "image/jpeg" });
+      .upload(path, compressedFile, { upsert: true, contentType: compressedFile.type });
 
     if (uploadError) {
       alert(

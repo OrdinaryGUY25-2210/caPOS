@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Coffee, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import PasswordInput from "@/components/PasswordInput";
 
@@ -108,9 +108,7 @@ export default function LoginPage() {
     <main className="min-h-screen flex items-center justify-center bg-neutral-50 px-4">
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-8">
-          <div className="w-14 h-14 rounded-2xl bg-primary flex items-center justify-center mb-3 shadow-sm">
-            <Coffee className="text-white" size={28} strokeWidth={2.2} />
-          </div>
+          <img src="/logo.png" alt="caPOS" className="w-14 h-14 rounded-2xl mb-3 shadow-sm" />
           <h1 className="text-2xl font-bold text-neutral-900">caPOS</h1>
           <p className="text-sm text-neutral-500">Point of Sale Kafe by Studio D13</p>
         </div>

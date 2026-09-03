@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Coffee, LogOut, Wifi, WifiOff, Clock } from "lucide-react";
+import { LogOut, Wifi, WifiOff, Clock } from "lucide-react";
 
 export default function PosNavbar({
   cashierName,
@@ -37,9 +37,7 @@ export default function PosNavbar({
   return (
     <header className="h-16 bg-white border-b border-neutral-200 flex items-center justify-between px-4 shrink-0">
       <div className="flex items-center gap-3">
-        <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center">
-          <Coffee className="text-white" size={18} />
-        </div>
+        <img src="/logo.png" alt="caPOS" className="w-9 h-9 rounded-xl" />
         <span className="font-bold text-neutral-900 hidden sm:inline">caPOS</span>
         {isOnline ? (
           <span className="badge-active">

@@ -54,6 +54,10 @@ const COMPARISON_ROWS: { label: string; free: string | boolean; pro: string | bo
   { label: "Export CSV Sederhana", free: true, pro: true, supreme: true },
   { label: "Export Excel Multi-sheet + PDF", free: false, pro: false, supreme: true },
   { label: "Prioritas Support", free: false, pro: false, supreme: true },
+  { label: "Laporan PDF Otomatis", free: "Riwayat 14 Hari", pro: "Riwayat 30 Hari", supreme: "Riwayat Lengkap" },
+  { label: "Stok & HPP", free: true, pro: true, supreme: true },
+  { label: "Target Bulanan Owner", free: true, pro: true, supreme: true },
+  { label: "Evaluasi Kasir", free: true, pro: true, supreme: true },
 ];
 
 export default function SubscriptionPage() {

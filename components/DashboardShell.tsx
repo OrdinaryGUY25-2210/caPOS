@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, Suspense } from "react";
-import { Menu, Coffee } from "lucide-react";
+import { Menu } from "lucide-react";
 import DashboardSidebar from "./DashboardSidebar";
 import TrialBanner from "./TrialBanner";
 import LandscapeNotice from "./LandscapeNotice";
@@ -79,9 +79,7 @@ export default function DashboardShell({
               <Menu size={22} />
             </button>
             <div className="md:hidden flex items-center gap-2">
-              <div className="w-6 h-6 rounded-md bg-primary flex items-center justify-center">
-                <Coffee className="text-white" size={13} />
-              </div>
+              <img src="/logo.png" alt="caPOS" className="w-6 h-6 rounded-md" />
               <span className="font-bold text-neutral-900 text-sm">caPOS</span>
             </div>
           </div>
