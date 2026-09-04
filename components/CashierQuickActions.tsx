@@ -5,6 +5,7 @@ import { PackagePlus, Loader2 } from "lucide-react";
 import Modal from "@/components/Modal";
 import { createClient } from "@/lib/supabase/client";
 import { compressImage } from "@/lib/compressImage";
+import { formatNumberWithDots, stripNumberDots } from "@/lib/utils";
 
 const CATEGORIES = ["Kopi", "Non-Kopi", "Makanan", "Dessert"];
 
@@ -116,11 +117,13 @@ export default function CashierQuickActions({
           <div>
             <label className="text-sm font-medium text-neutral-700 mb-1 block">Harga Usulan</label>
             <input
-              type="number"
-              min={0}
-              value={menuForm.price}
-              onChange={(e) => setMenuForm({ ...menuForm, price: e.target.value })}
-              placeholder="Contoh: 20000"
+              type="text"
+              inputMode="numeric"
+              // Ditampilkan pakai titik ribuan (mis. "20.000") biar nominal
+              // gampang dibaca; state `menuForm.price` tetap digit polos.
+              value={formatNumberWithDots(menuForm.price)}
+              onChange={(e) => setMenuForm({ ...menuForm, price: stripNumberDots(e.target.value) })}
+              placeholder="Contoh: 20.000"
               className="input-field"
             />
           </div>

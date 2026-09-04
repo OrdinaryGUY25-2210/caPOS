@@ -46,3 +46,14 @@ export function isPremiumReport(tier: Tier) {
 export function hasSalesHealth(tier: Tier) {
   return tier === "pro" || tier === "supreme";
 }
+
+/**
+ * Batas jumlah cabang per tier — HARUS sama persis dengan
+ * enforce_branch_limit() di supabase/migration_011_multi_branch_stock_opname.sql.
+ * null = unlimited (Supreme).
+ */
+export const BRANCH_LIMIT: Record<Tier, number | null> = {
+  free: 1,
+  pro: 3,
+  supreme: null,
+};

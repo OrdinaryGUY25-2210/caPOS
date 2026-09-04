@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Plus, Pencil, ImagePlus, Loader2, Lock } from "lucide-react";
-import { formatRupiah, cx } from "@/lib/utils";
+import { formatRupiah, formatNumberWithDots, stripNumberDots, cx } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { compressImage } from "@/lib/compressImage";
@@ -324,9 +324,13 @@ function ProductForm({
         <input
           type="text"
           inputMode="numeric"
-          value={priceInput}
-          onChange={(e) => setPriceInput(e.target.value.replace(/[^0-9]/g, ""))}
-          placeholder="Contoh: 20000"
+          // Ditampilkan dengan titik ribuan (mis. "20.000") supaya nominal
+          // besar gampang dibaca sekilas, tapi state yang tersimpan tetap
+          // digit polos ("20000") — jadi parsedPrice/priceValid di atas
+          // tidak perlu berubah sama sekali.
+          value={formatNumberWithDots(priceInput)}
+          onChange={(e) => setPriceInput(stripNumberDots(e.target.value))}
+          placeholder="Contoh: 20.000"
           className="input-field"
         />
       </div>

@@ -7,6 +7,7 @@ import { formatRupiah } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { getTier, FREE_TIER_LIMITS, TIER_LABEL, type Tier } from "@/lib/tier";
+import { useBranch, ALL_BRANCHES } from "@/lib/branchContext";
 
 interface TxRow {
   id: string;
@@ -15,9 +16,11 @@ interface TxRow {
   payment_method: string;
   created_at: string;
   cashier_name: string | null;
+  branch_name: string | null;
 }
 
 export default function TransactionsPage() {
+  const { selectedBranchId, canSwitchBranch } = useBranch();
   const [rows, setRows] = useState<TxRow[]>([]);
   const [tier, setTier] = useState<Tier>("free");
   const [loading, setLoading] = useState(true);
@@ -42,9 +45,15 @@ export default function TransactionsPage() {
 
       let query = supabase
         .from("transactions")
-        .select("id, invoice_number, total_amount, payment_method, created_at, profiles(full_name)")
+        .select("id, invoice_number, total_amount, payment_method, created_at, profiles(full_name), branches(name)")
         .eq("tenant_id", profile.tenant_id)
         .order("created_at", { ascending: false });
+
+      // Filter cabang: "Semua Cabang" (Laporan Konsolidasi) tidak difilter;
+      // manager/kasir otomatis terkunci ke cabang mereka lewat context.
+      if (selectedBranchId !== ALL_BRANCHES) {
+        query = query.eq("branch_id", selectedBranchId);
+      }
 
       // Tier Free hanya bisa lihat N hari terakhir — dibatasi di query
       // (bukan cuma dipotong tampilannya), supaya lebih hemat data yang
@@ -66,11 +75,12 @@ export default function TransactionsPage() {
           payment_method: t.payment_method,
           created_at: t.created_at,
           cashier_name: t.profiles?.full_name ?? null,
+          branch_name: t.branches?.name ?? null,
         }))
       );
       setLoading(false);
     })();
-  }, []);
+  }, [selectedBranchId]);
 
   if (loading) {
     return (
@@ -110,6 +120,7 @@ export default function TransactionsPage() {
                 <p className="text-xs text-neutral-400 flex items-center gap-1">
                   <User size={11} />
                   {t.cashier_name ?? "Kasir"} · {new Date(t.created_at).toLocaleString("id-ID")}
+                  {canSwitchBranch && selectedBranchId === ALL_BRANCHES && t.branch_name && <> · {t.branch_name}</>}
                 </p>
               </div>
             </div>

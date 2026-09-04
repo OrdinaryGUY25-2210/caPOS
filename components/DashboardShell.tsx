@@ -9,6 +9,8 @@ import AccessDeniedNotice from "./AccessDeniedNotice";
 import NotificationBell from "./NotificationBell";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { isManagerOrOwner, ROLE_LABEL } from "@/lib/role";
+import { BranchProvider } from "@/lib/branchContext";
+import BranchSwitcher from "./BranchSwitcher";
 
 /**
  * Layout dashboard yang responsif di semua ukuran layar:
@@ -44,6 +46,7 @@ export default function DashboardShell({
   }, []);
 
   return (
+    <BranchProvider>
     <div className="h-screen flex overflow-hidden bg-neutral-50">
       <Suspense fallback={null}>
         <AccessDeniedNotice />
@@ -85,6 +88,9 @@ export default function DashboardShell({
           </div>
 
           <div className="flex items-center gap-3">
+            {/* Filter/pilihan cabang — hanya render sesuatu untuk Owner
+                yang punya lebih dari 1 cabang (lihat BranchSwitcher). */}
+            <BranchSwitcher />
             {showBell && tenantId && <NotificationBell tenantId={tenantId} />}
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-full bg-primary-light text-primary-dark flex items-center justify-center text-xs font-bold shrink-0">
@@ -106,5 +112,6 @@ export default function DashboardShell({
         <main className="flex-1 overflow-y-auto p-4 sm:p-6">{children}</main>
       </div>
     </div>
+    </BranchProvider>
   );
 }

@@ -19,6 +19,8 @@ import {
   PackageSearch,
   Target,
   ClipboardCheck,
+  Building2,
+  ClipboardList,
 } from "lucide-react";
 import { cx } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
@@ -30,6 +32,8 @@ const NAV_ITEMS = [
   { href: "/dashboard/transactions", label: "Riwayat Transaksi", icon: Receipt },
   { href: "/dashboard/menu", label: "Kelola Menu & Stok", icon: Coffee },
   { href: "/dashboard/stock", label: "Stok & HPP", icon: PackageSearch },
+  { href: "/dashboard/stock-opname", label: "Stok Opname", icon: ClipboardList },
+  { href: "/dashboard/branches", label: "Manajemen Cabang", icon: Building2 },
   { href: "/dashboard/employees", label: "Manajemen Karyawan", icon: Users },
   { href: "/dashboard/cashier-evaluation", label: "Evaluasi Kasir", icon: ClipboardCheck },
   { href: "/dashboard/attendance", label: "Kehadiran Karyawan", icon: CalendarCheck },

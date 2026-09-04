@@ -2,17 +2,20 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { PackageSearch, PackagePlus, AlertTriangle, Loader2, Pencil, History } from "lucide-react";
-import { formatRupiah, cx } from "@/lib/utils";
+import { formatRupiah, formatNumberWithDots, stripNumberDots, cx } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
+import { useBranch, ALL_BRANCHES } from "@/lib/branchContext";
 import Modal from "@/components/Modal";
 import type { Product } from "@/lib/types";
 
 /**
- * Kolom stok/HPP (cost_price, track_stock, stock_qty, low_stock_threshold)
- * ditambahkan lewat migration_009 — belum ada di lib/types.ts, jadi
- * diperluas di sini saja supaya file types.ts yang sudah ada tidak perlu
- * disentuh sama sekali.
+ * Kolom stok/HPP (cost_price, track_stock, low_stock_threshold) ditambahkan
+ * lewat migration_009 — belum ada di lib/types.ts, jadi diperluas di sini
+ * saja supaya file types.ts yang sudah ada tidak perlu disentuh sama sekali.
+ * `stock_qty` sejak migration_011 TIDAK lagi dibaca dari products.stock_qty
+ * (legacy) — melainkan dihitung dari branch_stock sesuai cabang yang
+ * dipilih (lihat loadAll() di bawah).
  */
 interface ProductStock extends Product {
   cost_price: number;
@@ -38,6 +41,7 @@ const TYPE_LABEL: Record<string, string> = {
 };
 
 export default function StockPage() {
+  const { selectedBranchId, selectedBranch, canSwitchBranch } = useBranch();
   const [products, setProducts] = useState<ProductStock[]>([]);
   const [movements, setMovements] = useState<MovementRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,6 +49,10 @@ export default function StockPage() {
   const [restocking, setRestocking] = useState<ProductStock | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // "Semua Cabang" (Laporan Konsolidasi) -> stok ditampilkan gabungan
+  // (read-only); restock/HPP tetap butuh 1 cabang spesifik dipilih.
+  const isConsolidated = selectedBranchId === ALL_BRANCHES;
 
   async function loadAll() {
     setLoading(true);
@@ -55,21 +63,34 @@ export default function StockPage() {
     }
 
     const supabase = createClient();
-    const [{ data: prodData }, { data: moveData }] = await Promise.all([
-      supabase
-        .from("products")
-        .select("*")
-        .eq("tenant_id", profile.tenant_id)
-        .order("name", { ascending: true }),
-      supabase
-        .from("stock_movements")
-        .select("id, type, qty_change, note, created_at, products(name)")
-        .eq("tenant_id", profile.tenant_id)
-        .order("created_at", { ascending: false })
-        .limit(30),
+    const [{ data: prodData }, { data: stockRows }, movementQuery] = await Promise.all([
+      supabase.from("products").select("*").eq("tenant_id", profile.tenant_id).order("name", { ascending: true }),
+      supabase.from("branch_stock").select("product_id, branch_id, stock_qty").eq("tenant_id", profile.tenant_id),
+      (() => {
+        let q = supabase
+          .from("stock_movements")
+          .select("id, type, qty_change, note, created_at, products(name)")
+          .eq("tenant_id", profile.tenant_id)
+          .order("created_at", { ascending: false })
+          .limit(30);
+        if (!isConsolidated) q = q.eq("branch_id", selectedBranchId);
+        return q;
+      })(),
     ]);
+    const { data: moveData } = movementQuery;
 
-    setProducts((prodData as ProductStock[]) ?? []);
+    // Stok per cabang yang dipilih; kalau "Semua Cabang" dipilih (Owner),
+    // jumlahkan stok dari SEMUA cabang supaya angka di kartu ringkasan
+    // mencerminkan total inventori tenant, bukan cuma 1 cabang.
+    const stockMap = new Map<string, number>();
+    for (const row of (stockRows as { product_id: string; branch_id: string; stock_qty: number }[]) ?? []) {
+      if (!isConsolidated && row.branch_id !== selectedBranchId) continue;
+      stockMap.set(row.product_id, (stockMap.get(row.product_id) ?? 0) + Number(row.stock_qty));
+    }
+
+    setProducts(
+      ((prodData as ProductStock[]) ?? []).map((p) => ({ ...p, stock_qty: stockMap.get(p.id) ?? 0 }))
+    );
     setMovements(
       (moveData ?? []).map((m: any) => ({
         id: m.id,
@@ -85,7 +106,8 @@ export default function StockPage() {
 
   useEffect(() => {
     loadAll();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedBranchId]);
 
   const tracked = useMemo(() => products.filter((p) => p.track_stock), [products]);
   const lowStock = useMemo(
@@ -128,6 +150,10 @@ export default function StockPage() {
 
   async function doRestock(p: ProductStock, qty: number, note: string) {
     if (!qty || qty <= 0) return;
+    if (isConsolidated) {
+      alert("Pilih 1 cabang dulu di kanan atas (BranchSwitcher) untuk melakukan restock.");
+      return;
+    }
     setSaving(true);
     const supabase = createClient();
     const { error } = await supabase.rpc("adjust_stock", {
@@ -135,6 +161,7 @@ export default function StockPage() {
       p_qty_change: qty,
       p_type: "restock",
       p_note: note || "Restock manual",
+      p_branch_id: selectedBranchId,
     });
     setSaving(false);
     if (error) {
@@ -159,13 +186,21 @@ export default function StockPage() {
         <div>
           <h1 className="text-xl font-bold text-neutral-900">Stok & HPP</h1>
           <p className="text-sm text-neutral-500">
-            Atur HPP (harga pokok) tiap menu, aktifkan pelacakan stok bahan, dan pantau stok menipis.
+            Atur HPP (harga pokok) tiap menu, aktifkan pelacakan stok bahan, dan pantau stok menipis
+            {canSwitchBranch && !isConsolidated && selectedBranch ? ` — cabang ${selectedBranch.name}.` : "."}
           </p>
         </div>
         <button onClick={() => setShowHistory(true)} className="btn-outline flex items-center gap-1.5 text-sm">
           <History size={14} /> Riwayat Pergerakan
         </button>
       </div>
+
+      {isConsolidated && canSwitchBranch && (
+        <div className="rounded-xl bg-neutral-100 text-neutral-600 text-sm px-4 py-3">
+          Menampilkan stok <strong>gabungan semua cabang</strong> (read-only). Pilih 1 cabang di kanan atas
+          untuk restock atau opname stok cabang tertentu.
+        </div>
+      )}
 
       {lowStock.length > 0 && (
         <div className="card p-4 border-urgent bg-urgent-light/40 flex items-start gap-3">
@@ -231,8 +266,9 @@ export default function StockPage() {
                     {p.track_stock && (
                       <button
                         onClick={() => setRestocking(p)}
-                        className="text-primary-dark hover:bg-primary-light rounded-lg p-1.5 mr-1"
-                        title="Restock"
+                        disabled={isConsolidated}
+                        className="text-primary-dark hover:bg-primary-light rounded-lg p-1.5 mr-1 disabled:opacity-30 disabled:hover:bg-transparent"
+                        title={isConsolidated ? "Pilih 1 cabang dulu untuk restock" : "Restock"}
                       >
                         <PackagePlus size={16} />
                       </button>
@@ -346,9 +382,11 @@ function StockSettingsModal({
         <input
           type="text"
           inputMode="numeric"
-          value={costInput}
-          onChange={(e) => setCostInput(e.target.value.replace(/[^0-9]/g, ""))}
-          placeholder="Contoh: 8000"
+          // Titik ribuan cuma untuk tampilan (mis. "8.000") — value yang
+          // disimpan & dikirim ke onSave tetap digit polos seperti semula.
+          value={formatNumberWithDots(costInput)}
+          onChange={(e) => setCostInput(stripNumberDots(e.target.value))}
+          placeholder="Contoh: 8.000"
           className="input-field"
         />
         <p className="text-xs text-neutral-400 mt-1">

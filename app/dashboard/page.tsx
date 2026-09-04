@@ -12,6 +12,7 @@ import { formatRupiah } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { getTier, hasSalesHealth, type Tier } from "@/lib/tier";
+import { useBranch, ALL_BRANCHES } from "@/lib/branchContext";
 
 const PIE_COLORS = ["#10B981", "#059669", "#34D399", "#6EE7B7", "#94A3B8"];
 const DAY_LABELS = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
@@ -21,6 +22,7 @@ interface PeakPoint { hour: string; orders: number }
 interface BestSellerPoint { name: string; value: number }
 
 export default function ReportsPage() {
+  const { selectedBranchId, selectedBranch, canSwitchBranch } = useBranch();
   const [chartModel, setChartModel] = useState<"bar" | "line">("bar");
   const [loading, setLoading] = useState(true);
   const [tier, setTier] = useState<Tier>("free");
@@ -59,23 +61,31 @@ export default function ReportsPage() {
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
       sevenDaysAgo.setHours(0, 0, 0, 0);
 
-      const { data: dailyRows } = await supabase
-        .from("daily_sales_analytics")
-        .select("sale_date, total_orders, total_revenue")
-        .eq("tenant_id", profile.tenant_id)
-        .gte("sale_date", sevenDaysAgo.toISOString().slice(0, 10));
+      const { data: dailyRows } = await (() => {
+        let q = supabase
+          .from("daily_sales_analytics")
+          .select("sale_date, total_orders, total_revenue")
+          .eq("tenant_id", profile.tenant_id)
+          .gte("sale_date", sevenDaysAgo.toISOString().slice(0, 10));
+        if (selectedBranchId !== ALL_BRANCHES) q = q.eq("branch_id", selectedBranchId);
+        return q;
+      })();
 
       const filledDays: OmzetPoint[] = [];
       for (let i = 6; i >= 0; i--) {
         const d = new Date();
         d.setDate(d.getDate() - i);
         const dateStr = d.toISOString().slice(0, 10);
-        const found = (dailyRows ?? []).find((r: any) => r.sale_date === dateStr);
+        // Kalau "Semua Cabang" dipilih, daily_sales_analytics mengembalikan
+        // SATU baris PER CABANG untuk tanggal yang sama (view di-group by
+        // tenant_id, branch_id, sale_date sejak migration_011) — jadi harus
+        // dijumlahkan di sini, bukan cuma ambil baris pertama yang cocok.
+        const matches = (dailyRows ?? []).filter((r: any) => r.sale_date === dateStr);
         filledDays.push({
           day: DAY_LABELS[d.getDay()],
           date: dateStr,
-          omzet: found ? Number(found.total_revenue) : 0,
-          orders: found ? Number(found.total_orders) : 0,
+          omzet: matches.reduce((s: number, r: any) => s + Number(r.total_revenue), 0),
+          orders: matches.reduce((s: number, r: any) => s + Number(r.total_orders), 0),
         });
       }
       setOmzetData(filledDays);
@@ -85,33 +95,48 @@ export default function ReportsPage() {
       setHealthTrendPct(prev3 > 0 ? Math.round(((last3 - prev3) / prev3) * 100) : null);
 
       if (currentTier === "supreme") {
-        const { data: peakRows } = await supabase
+        let peakQuery = supabase
           .from("peak_hours_analytics")
           .select("hour_of_day, total_orders")
           .eq("tenant_id", profile.tenant_id);
+        if (selectedBranchId !== ALL_BRANCHES) peakQuery = peakQuery.eq("branch_id", selectedBranchId);
+        const { data: peakRows } = await peakQuery;
 
         setPeakHours(
           Array.from({ length: 24 }, (_, h) => h)
             .filter((h) => h % 2 === 0)
             .map((h) => ({
               hour: `${String(h).padStart(2, "0")}:00`,
-              orders: (peakRows ?? []).find((r: any) => r.hour_of_day === h)?.total_orders ?? 0,
+              // Sama seperti omzet harian — jumlahkan lintas cabang kalau
+              // "Semua Cabang" dipilih (baris view sudah di-group per cabang).
+              orders: (peakRows ?? [])
+                .filter((r: any) => r.hour_of_day === h)
+                .reduce((s: number, r: any) => s + Number(r.total_orders), 0),
             }))
         );
 
-        const { data: bestRows } = await supabase
+        let bestQuery = supabase
           .from("best_seller_analytics")
-          .select("product_name, total_qty")
-          .eq("tenant_id", profile.tenant_id)
-          .order("total_qty", { ascending: false })
-          .limit(5);
+          .select("product_name, branch_id, total_qty")
+          .eq("tenant_id", profile.tenant_id);
+        if (selectedBranchId !== ALL_BRANCHES) bestQuery = bestQuery.eq("branch_id", selectedBranchId);
+        const { data: bestRows } = await bestQuery;
 
-        setBestSellers((bestRows ?? []).map((r: any) => ({ name: r.product_name, value: Number(r.total_qty) })));
+        const bestMap = new Map<string, number>();
+        for (const r of (bestRows as { product_name: string; total_qty: number }[]) ?? []) {
+          bestMap.set(r.product_name, (bestMap.get(r.product_name) ?? 0) + Number(r.total_qty));
+        }
+        setBestSellers(
+          Array.from(bestMap.entries())
+            .map(([name, value]) => ({ name, value }))
+            .sort((a, b) => b.value - a.value)
+            .slice(0, 5)
+        );
       }
 
       setLoading(false);
     })();
-  }, []);
+  }, [selectedBranchId]);
 
   function exportCSV() {
     const header = "Tanggal,Hari,Omzet (Rp),Jumlah Transaksi\n";
@@ -179,7 +204,10 @@ export default function ReportsPage() {
               {isPremium ? "Laporan Lengkap" : "Laporan Dasar"}
             </span>
           </div>
-          <p className="text-sm text-neutral-500">Ringkasan performa penjualan kafe Anda — 7 hari terakhir</p>
+          <p className="text-sm text-neutral-500">
+            Ringkasan performa penjualan kafe Anda — 7 hari terakhir
+            {canSwitchBranch && (selectedBranchId === ALL_BRANCHES ? " (Semua Cabang)" : selectedBranch ? ` — ${selectedBranch.name}` : "")}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           {isPremium ? (

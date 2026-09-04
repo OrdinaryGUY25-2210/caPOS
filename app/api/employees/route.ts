@@ -58,6 +58,7 @@ export async function POST(request: Request) {
   const confirmPassword = typeof body.confirmPassword === "string" ? body.confirmPassword : "";
   const jobTitle = sanitize(body.jobTitle, 60);
   const role = ALLOWED_ROLES.includes(body.role) ? body.role : "cashier";
+  const branchId = sanitize(body.branchId, 64);
 
   const errors: string[] = [];
   if (!SAFE_TEXT_RE.test(fullName)) errors.push("Nama tidak valid.");
@@ -67,11 +68,20 @@ export async function POST(request: Request) {
     errors.push("Password harus mengandung huruf dan angka.");
   }
   if (password !== confirmPassword) errors.push("Konfirmasi password tidak cocok.");
+  if (!branchId) errors.push("Cabang penugasan wajib dipilih.");
   if (errors.length > 0) {
     return NextResponse.json({ message: errors.join(" ") }, { status: 400 });
   }
 
   const supabase = serviceClient();
+
+  // Service-role client melewati RLS sepenuhnya, jadi branchId yang
+  // dikirim client HARUS divalidasi manual di sini — pastikan cabang itu
+  // benar-benar milik tenant Owner yang sedang membuat karyawan ini.
+  const { data: branch } = await supabase.from("branches").select("id").eq("id", branchId).eq("tenant_id", auth.profile.tenant_id).single();
+  if (!branch) {
+    return NextResponse.json({ message: "Cabang tidak ditemukan di tenant Anda." }, { status: 400 });
+  }
 
   // Akun karyawan langsung terkonfirmasi (email_confirm: true) karena yang
   // membuatkan adalah owner-nya sendiri (bukan pendaftaran publik), dan
@@ -97,6 +107,7 @@ export async function POST(request: Request) {
     full_name: fullName,
     email,
     job_title: jobTitle || null,
+    branch_id: branchId,
   });
 
   if (profileError) {

@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { getTier, FREE_TIER_LIMITS, TIER_LABEL, type Tier } from "@/lib/tier";
 import { ROLE_LABEL } from "@/lib/role";
+import { useBranch } from "@/lib/branchContext";
 import Modal from "@/components/Modal";
 import PasswordInput from "@/components/PasswordInput";
 import type { Profile } from "@/lib/types";
@@ -14,6 +15,7 @@ import type { Profile } from "@/lib/types";
 const JOB_TITLE_SUGGESTIONS = ["Kasir", "Barista", "Kasir Utama", "Asisten Manager"];
 
 export default function EmployeesPage() {
+  const { branches } = useBranch();
   const [employees, setEmployees] = useState<Profile[]>([]);
   const [tier, setTier] = useState<Tier>("free");
   const [isOwner, setIsOwner] = useState(false);
@@ -22,8 +24,9 @@ export default function EmployeesPage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [limitReached, setLimitReached] = useState(false);
+  const [reassigningId, setReassigningId] = useState<string | null>(null);
   const [form, setForm] = useState({
-    full_name: "", email: "", password: "", confirmPassword: "", role: "cashier", jobTitle: "",
+    full_name: "", email: "", password: "", confirmPassword: "", role: "cashier", jobTitle: "", branchId: "",
   });
 
   async function loadEmployees() {
@@ -58,6 +61,10 @@ export default function EmployeesPage() {
     }
     setLimitReached(false);
     setFormError(null);
+    // Default ke Cabang Utama (atau cabang pertama yang ada) supaya Owner
+    // tidak wajib klik dropdown kalau tenant cuma punya 1 cabang.
+    const defaultBranch = branches.find((b) => b.is_main)?.id ?? branches[0]?.id ?? "";
+    setForm((f) => ({ ...f, branchId: defaultBranch }));
     setShowForm(true);
   }
 
@@ -65,6 +72,10 @@ export default function EmployeesPage() {
     setFormError(null);
     if (form.password !== form.confirmPassword) {
       setFormError("Konfirmasi password tidak cocok.");
+      return;
+    }
+    if (!form.branchId) {
+      setFormError("Pilih cabang penugasan karyawan ini.");
       return;
     }
     setSaving(true);
@@ -78,6 +89,7 @@ export default function EmployeesPage() {
         confirmPassword: form.confirmPassword,
         role: form.role,
         jobTitle: form.jobTitle,
+        branchId: form.branchId,
       }),
     });
     const result = await res.json();
@@ -93,9 +105,21 @@ export default function EmployeesPage() {
       return;
     }
 
-    setForm({ full_name: "", email: "", password: "", confirmPassword: "", role: "cashier", jobTitle: "" });
+    setForm({ full_name: "", email: "", password: "", confirmPassword: "", role: "cashier", jobTitle: "", branchId: "" });
     setShowForm(false);
     loadEmployees();
+  }
+
+  async function reassignBranch(empId: string, branchId: string) {
+    setReassigningId(empId);
+    const supabase = createClient();
+    const { error } = await supabase.rpc("set_employee_branch", { p_employee_id: empId, p_branch_id: branchId });
+    setReassigningId(null);
+    if (error) {
+      alert("Gagal memindahkan cabang: " + error.message);
+      return;
+    }
+    setEmployees((prev) => prev.map((e) => (e.id === empId ? { ...e, branch_id: branchId } : e)));
   }
 
   async function toggleActive(emp: Profile) {
@@ -165,6 +189,24 @@ export default function EmployeesPage() {
                   {e.email} · <span className="font-medium">{ROLE_LABEL[e.role]}</span>
                   {e.job_title && <> · {e.job_title}</>}
                 </p>
+                {isOwner && branches.length > 1 ? (
+                  <select
+                    value={e.branch_id ?? ""}
+                    disabled={reassigningId === e.id}
+                    onChange={(ev) => reassignBranch(e.id, ev.target.value)}
+                    className="text-xs mt-1 rounded-lg border border-neutral-200 px-2 py-1 text-neutral-600 disabled:opacity-50"
+                  >
+                    {branches.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <p className="text-xs text-neutral-400 mt-0.5">
+                    Cabang: {branches.find((b) => b.id === e.branch_id)?.name ?? "-"}
+                  </p>
+                )}
               </div>
             </div>
             <div className="flex items-center gap-3">
@@ -218,6 +260,21 @@ export default function EmployeesPage() {
             <datalist id="job-title-suggestions">
               {JOB_TITLE_SUGGESTIONS.map((j) => <option key={j} value={j} />)}
             </datalist>
+          </div>
+          <div>
+            <label className="text-sm font-medium text-neutral-700 mb-1 block">Cabang Penugasan</label>
+            <select value={form.branchId} onChange={(e) => setForm({ ...form, branchId: e.target.value })} className="input-field">
+              <option value="">Pilih cabang...</option>
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                  {b.is_main ? " (Utama)" : ""}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-neutral-400 mt-1">
+              Karyawan ini hanya bisa mengakses & bertransaksi di cabang yang dipilih.
+            </p>
           </div>
           <div>
             <label className="text-sm font-medium text-neutral-700 mb-1 block">Email</label>

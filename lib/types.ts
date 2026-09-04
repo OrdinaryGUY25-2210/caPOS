@@ -31,6 +31,20 @@ export interface Profile {
   email: string | null;
   is_active: boolean;
   created_at: string;
+  /** Cabang penugasan (migration_011). NULL untuk owner/super_admin — mereka akses semua cabang. */
+  branch_id: string | null;
+}
+
+/** Cabang/outlet milik 1 tenant (migration_011 — Multi-Cabang). */
+export interface Branch {
+  id: string;
+  tenant_id: string;
+  name: string;
+  address: string | null;
+  /** Cabang pertama tenant, dibuat otomatis saat tenant daftar — tidak bisa dihapus. */
+  is_main: boolean;
+  is_active: boolean;
+  created_at: string;
 }
 
 export interface InviteCode {
@@ -75,6 +89,8 @@ export interface Transaction {
   member_id: string | null;
   is_offline_sync: boolean;
   created_at: string;
+  /** Cabang tempat transaksi terjadi (migration_011). NULL = transaksi lama sebelum multi-cabang. */
+  branch_id: string | null;
 }
 
 export interface TransactionItem {

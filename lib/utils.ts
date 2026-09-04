@@ -26,3 +26,19 @@ export function whatsappLink(message: string) {
 export function cx(...classes: (string | false | null | undefined)[]) {
   return classes.filter(Boolean).join(" ");
 }
+
+/**
+ * Format string angka mentah (mis. "20000") jadi "20.000" untuk ditampilkan
+ * di input field harga/HPP — supaya nominal besar gampang dibaca sekilas
+ * saat diketik, tanpa mengubah value asli yang tersimpan (tetap digit saja).
+ */
+export function formatNumberWithDots(value: string | number) {
+  const digits = String(value).replace(/[^0-9]/g, "");
+  if (!digits) return "";
+  return new Intl.NumberFormat("id-ID").format(Number(digits));
+}
+
+/** Ambil digit mentah dari input yang sudah diberi titik ribuan, mis. "20.000" -> "20000". */
+export function stripNumberDots(value: string) {
+  return value.replace(/[^0-9]/g, "");
+}

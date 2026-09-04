@@ -6,6 +6,7 @@ import { formatRupiah, cx } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { getTier, HISTORY_DAYS_LIMIT, type Tier } from "@/lib/tier";
+import { useBranch, ALL_BRANCHES } from "@/lib/branchContext";
 
 type RangeKey = "today" | "7" | "month" | "custom";
 
@@ -35,6 +36,7 @@ function rangeToDates(range: RangeKey, customStart: string, customEnd: string) {
 }
 
 export default function LaporanPdfPage() {
+  const { selectedBranchId, selectedBranch, canSwitchBranch } = useBranch();
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [tier, setTier] = useState<Tier>("free");
@@ -82,25 +84,48 @@ export default function LaporanPdfPage() {
       const supabase = createClient();
       const { start, end } = rangeToDates(range, customStart, customEnd);
 
-      const [{ data: txRows }, { data: itemRows }] = await Promise.all([
-        supabase
-          .from("transactions")
-          .select("id, total_amount, payment_method, created_at, cashier_id, profiles(full_name)")
-          .eq("tenant_id", tenantId)
-          .gte("created_at", start.toISOString())
-          .lte("created_at", end.toISOString())
-          .limit(10000),
-        supabase
-          .from("transaction_items")
-          .select("qty, subtotal, product_id, products(name, cost_price), transactions!inner(created_at, tenant_id)")
-          .eq("transactions.tenant_id", tenantId)
-          .gte("transactions.created_at", start.toISOString())
-          .lte("transactions.created_at", end.toISOString())
-          .limit(10000),
+      const [{ data: txRows }, { data: itemRows }, { data: opnameRows }] = await Promise.all([
+        (() => {
+          let q = supabase
+            .from("transactions")
+            .select("id, total_amount, payment_method, created_at, cashier_id, profiles(full_name)")
+            .eq("tenant_id", tenantId)
+            .gte("created_at", start.toISOString())
+            .lte("created_at", end.toISOString())
+            .limit(10000);
+          if (selectedBranchId !== ALL_BRANCHES) q = q.eq("branch_id", selectedBranchId);
+          return q;
+        })(),
+        (() => {
+          let q = supabase
+            .from("transaction_items")
+            .select("qty, subtotal, product_id, products(name, cost_price), transactions!inner(created_at, tenant_id, branch_id)")
+            .eq("transactions.tenant_id", tenantId)
+            .gte("transactions.created_at", start.toISOString())
+            .lte("transactions.created_at", end.toISOString())
+            .limit(10000);
+          if (selectedBranchId !== ALL_BRANCHES) q = q.eq("transactions.branch_id", selectedBranchId);
+          return q;
+        })(),
+        // Kerugian stok opname (migration_011) periode yang sama — dipotong
+        // dari laba kotor supaya "Keuntungan Bersih" di laporan benar-benar
+        // memperhitungkan bahan basi/rusak/selisih, bukan cuma omzet-HPP.
+        (() => {
+          let q = supabase
+            .from("stock_opname_logs")
+            .select("loss_value")
+            .eq("tenant_id", tenantId)
+            .gte("created_at", start.toISOString())
+            .lte("created_at", end.toISOString())
+            .limit(10000);
+          if (selectedBranchId !== ALL_BRANCHES) q = q.eq("branch_id", selectedBranchId);
+          return q;
+        })(),
       ]);
 
       const transactions = txRows ?? [];
       const items = itemRows ?? [];
+      const totalOpnameLoss = (opnameRows ?? []).reduce((s: number, r: any) => s + Number(r.loss_value), 0);
 
       // --- Ringkasan ---
       const totalOmzet = transactions.reduce((s: number, t: any) => s + Number(t.total_amount), 0);
@@ -108,7 +133,7 @@ export default function LaporanPdfPage() {
       const avgPerOrder = totalOrders > 0 ? Math.round(totalOmzet / totalOrders) : 0;
       const totalHpp = items.reduce((s: number, it: any) => s + Number(it.qty) * Number(it.products?.cost_price ?? 0), 0);
       const grossProfit = totalOmzet - totalHpp;
-      const marginPct = totalOmzet > 0 ? Math.round((grossProfit / totalOmzet) * 100) : 0;
+      const netProfit = grossProfit - totalOpnameLoss;
 
       // --- Omzet harian ---
       const dailyMap = new Map<string, { orders: number; revenue: number }>();
@@ -182,7 +207,8 @@ export default function LaporanPdfPage() {
       doc.setFontSize(9);
       doc.setTextColor(100);
       doc.text(
-        `Periode: ${toISODate(start)} s/d ${toISODate(end)}  ·  Dibuat: ${new Date().toLocaleString("id-ID")}`,
+        `Periode: ${toISODate(start)} s/d ${toISODate(end)}  ·  Dibuat: ${new Date().toLocaleString("id-ID")}` +
+          (canSwitchBranch ? `  ·  Cabang: ${selectedBranchId === ALL_BRANCHES ? "Semua Cabang (Konsolidasi)" : selectedBranch?.name ?? "-"}` : ""),
         margin, y
       );
       doc.setTextColor(0);
@@ -193,10 +219,10 @@ export default function LaporanPdfPage() {
         margin: { left: margin, right: margin },
         theme: "grid",
         styles: { fontSize: 9 },
-        head: [["Total Omzet", "Total Transaksi", "Rata-rata/Transaksi", "Estimasi Laba Kotor", "Margin"]],
+        head: [["Total Omzet", "Total Transaksi", "Rata-rata/Transaksi", "Laba Kotor", "Kerugian Opname", "Keuntungan Bersih"]],
         body: [[
           formatRupiah(totalOmzet), String(totalOrders), formatRupiah(avgPerOrder),
-          formatRupiah(grossProfit), `${marginPct}%`,
+          formatRupiah(grossProfit), totalOpnameLoss > 0 ? `- ${formatRupiah(totalOpnameLoss)}` : formatRupiah(0), formatRupiah(netProfit),
         ]],
         headStyles: { fillColor: [16, 185, 129] },
       });
@@ -293,7 +319,9 @@ export default function LaporanPdfPage() {
       <div>
         <h1 className="text-xl font-bold text-neutral-900">Laporan PDF Otomatis</h1>
         <p className="text-sm text-neutral-500">
-          Satu klik: rekap omzet, laba kotor (HPP), menu terlaris, metode pembayaran, dan kinerja kasir langsung jadi file PDF rapi.
+          Satu klik: rekap omzet, laba kotor (HPP), kerugian stok opname, keuntungan bersih, menu terlaris,
+          metode pembayaran, dan kinerja kasir langsung jadi file PDF rapi.
+          {canSwitchBranch && ` Sesuai cabang yang dipilih di navbar (${selectedBranchId === ALL_BRANCHES ? "Semua Cabang" : selectedBranch?.name ?? "-"}).`}
         </p>
       </div>
 
@@ -365,8 +393,9 @@ export default function LaporanPdfPage() {
       <div className="card p-4 flex items-start gap-3 bg-neutral-50">
         <FileText className="text-neutral-400 shrink-0 mt-0.5" size={18} />
         <p className="text-xs text-neutral-500">
-          Laporan berisi: ringkasan omzet & estimasi laba kotor (berdasarkan HPP di halaman Stok & HPP),
-          rincian omzet harian, menu terlaris, metode pembayaran, dan kinerja tiap kasir pada periode yang dipilih.
+          Laporan berisi: ringkasan omzet, laba kotor (berdasarkan HPP di halaman Stok & HPP), kerugian dari
+          Stok Opname (bahan basi/rusak/selisih), keuntungan bersih, rincian omzet harian, menu terlaris,
+          metode pembayaran, dan kinerja tiap kasir pada periode yang dipilih.
           Kolom laba kotor akan menampilkan 0 kalau HPP menu belum diisi di halaman Stok & HPP.
         </p>
       </div>
