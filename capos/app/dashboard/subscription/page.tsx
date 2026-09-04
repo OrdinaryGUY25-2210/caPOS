@@ -7,8 +7,8 @@ import { whatsappLink, daysRemaining } from "@/lib/utils";
 const DEMO_TRIAL_END = "2026-08-23T00:00:00Z";
 
 const PLANS = [
-  { name: "Bulanan", price: "Rp99.000", period: "/bulan", features: ["1 Outlet", "Unlimited Transaksi", "Laporan Dasar"] },
-  { name: "Tahunan", price: "Rp999.000", period: "/tahun", features: ["1 Outlet", "Unlimited Transaksi", "Laporan Lengkap", "Prioritas Support"], highlight: true },
+  { name: "Bulanan", price: "Rp100.000", period: "/bulan", features: ["1 Outlet", "Unlimited Transaksi", "Laporan Dasar"] },
+  { name: "Tahunan", price: "Rp850.000", period: "/tahun", features: ["1 Outlet", "Unlimited Transaksi", "Laporan Lengkap", "Prioritas Support"], highlight: true },
 ];
 
 export default function SubscriptionPage() {
