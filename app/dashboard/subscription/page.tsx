@@ -32,12 +32,12 @@ const PLANS = [
     highlight: false, payable: false,
   },
   {
-    key: "monthly", name: "Pro", price: "Rp99.000", period: "/bulan", rawAmount: 99000,
+    key: "monthly", name: "Pro", price: "Rp100.000", period: "/bulan", rawAmount: 100000,
     features: ["Kasir Unlimited", "Menu Unlimited", "Riwayat Lengkap", "Kesehatan Penjualan"],
     highlight: true, payable: true,
   },
   {
-    key: "yearly", name: "Supreme", price: "Rp999.000", period: "/tahun", rawAmount: 999000,
+    key: "yearly", name: "Supreme", price: "Rp850.000", period: "/tahun", rawAmount: 850000,
     features: ["Semua fitur Pro", "Laporan Lengkap (Jam Ramai, Menu Terlaris)", "Export Excel & PDF", "Prioritas Support"],
     highlight: false, payable: true,
   },
