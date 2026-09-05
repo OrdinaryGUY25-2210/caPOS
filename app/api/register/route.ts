@@ -90,6 +90,25 @@ export async function POST(request: Request) {
 
   const supabase = serviceClient();
 
+  // 0. Cek email sudah terdaftar SEBELUM membuat apa pun. Tanpa ini, kalau
+  // emailnya sudah dipakai, tenant/subscription/referral tetap kebuat dulu
+  // (langkah 1-4 di bawah) baru auth.signUp() gagal/obfuscated di langkah 5 —
+  // hasilnya tenant "nyangkut" tanpa auth user yang valid. Profiles.email
+  // selalu diisi tiap kali akun jadi (baik dari sini maupun /api/employees),
+  // jadi ini cara paling murah untuk deteksi dupe tanpa perlu admin API.
+  const { data: existingProfile } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("email", email)
+    .maybeSingle();
+
+  if (existingProfile) {
+    return NextResponse.json(
+      { message: "Email ini sudah terdaftar. Silakan login, atau gunakan email lain untuk mendaftar." },
+      { status: 409 }
+    );
+  }
+
   // 1. Create tenant — registrasi terbuka untuk siapa saja, tiap orang
   // otomatis dapat 28 hari trial.
   const { data: tenant, error: tenantError } = await supabase
@@ -173,11 +192,23 @@ export async function POST(request: Request) {
     password,
   });
 
-  if (authError || !authUser.user) {
-    console.error("auth signUp failed", authError);
+  // Supabase signUp() TIDAK mengembalikan error untuk email yang sudah
+  // terdaftar & terkonfirmasi (supaya tidak bocor mana email yang valid) —
+  // sebagai gantinya ia balas "sukses" tapi user.identities kosong ([]).
+  // Ini jaring pengaman kedua di belakang cek langkah 0 di atas.
+  const isDuplicateEmail =
+    authError?.message?.toLowerCase().includes("already registered") ||
+    (authUser?.user && Array.isArray(authUser.user.identities) && authUser.user.identities.length === 0);
+
+  if (authError || !authUser.user || isDuplicateEmail) {
+    if (!isDuplicateEmail) console.error("auth signUp failed", authError);
     await supabase.from("tenants").delete().eq("id", tenant.id);
     return NextResponse.json(
-      { message: "Pendaftaran gagal. Periksa kembali data Anda atau gunakan email lain." },
+      {
+        message: isDuplicateEmail
+          ? "Email ini sudah terdaftar. Silakan login, atau gunakan email lain untuk mendaftar."
+          : "Pendaftaran gagal. Periksa kembali data Anda atau gunakan email lain.",
+      },
       { status: 400 }
     );
   }

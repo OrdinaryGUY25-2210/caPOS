@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { getTier, HISTORY_DAYS_LIMIT, type Tier } from "@/lib/tier";
 import { useBranch, ALL_BRANCHES } from "@/lib/branchContext";
+import { Skeleton } from "@/components/Skeleton";
 
 type RangeKey = "today" | "7" | "month" | "custom";
 
@@ -308,8 +309,17 @@ export default function LaporanPdfPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64 text-neutral-400">
-        <Loader2 className="animate-spin mr-2" size={18} /> Memuat...
+      <div className="space-y-6">
+        <div className="space-y-2">
+          <Skeleton className="h-5 w-56" />
+          <Skeleton className="h-3 w-full max-w-lg" />
+          <Skeleton className="h-3 w-2/3" />
+        </div>
+        <div className="card p-5 space-y-4">
+          <Skeleton className="h-3 w-28" />
+          <Skeleton className="h-9 w-64 rounded-lg" />
+          <Skeleton className="h-10 w-56 rounded-xl" />
+        </div>
       </div>
     );
   }

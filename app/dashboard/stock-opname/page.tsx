@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { useBranch, ALL_BRANCHES } from "@/lib/branchContext";
 import type { Product } from "@/lib/types";
+import { SkeletonTableRows } from "@/components/Skeleton";
 
 interface ProductStock extends Product {
   cost_price: number;
@@ -217,13 +218,7 @@ export default function StockOpnamePage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-100">
-                {loading && (
-                  <tr>
-                    <td colSpan={7} className="p-8 text-center text-neutral-400">
-                      <Loader2 className="animate-spin inline mr-2" size={16} /> Memuat data stok...
-                    </td>
-                  </tr>
-                )}
+                {loading && <SkeletonTableRows rows={5} cols={7} />}
                 {!loading && rows.length === 0 && (
                   <tr>
                     <td colSpan={7} className="p-8 text-center text-neutral-400">
@@ -382,13 +377,7 @@ function OpnameHistory({ tenantId, branchId, showBranchColumn }: { tenantId: str
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-100">
-            {loading && (
-              <tr>
-                <td colSpan={9} className="p-8 text-center text-neutral-400">
-                  <Loader2 className="animate-spin inline mr-2" size={16} /> Memuat riwayat...
-                </td>
-              </tr>
-            )}
+            {loading && <SkeletonTableRows rows={6} cols={showBranchColumn ? 9 : 8} />}
             {!loading && logs.length === 0 && (
               <tr>
                 <td colSpan={9} className="p-8 text-center text-neutral-400">

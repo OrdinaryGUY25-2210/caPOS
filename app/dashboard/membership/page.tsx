@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import Modal from "@/components/Modal";
 import type { Membership } from "@/lib/types";
+import { Skeleton, SkeletonList } from "@/components/Skeleton";
 
 export default function MembershipPage() {
   const [loading, setLoading] = useState(true);
@@ -36,8 +37,17 @@ export default function MembershipPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64 text-neutral-400">
-        <Loader2 className="animate-spin mr-2" size={18} /> Memuat...
+      <div className="max-w-lg mx-auto mt-10">
+        <div className="card p-8 text-center space-y-4">
+          <Skeleton className="w-14 h-14 rounded-2xl mx-auto" />
+          <Skeleton className="h-5 w-56 mx-auto" />
+          <div className="space-y-2">
+            <Skeleton className="h-3 w-full" />
+            <Skeleton className="h-3 w-full" />
+            <Skeleton className="h-3 w-2/3 mx-auto" />
+          </div>
+          <Skeleton className="h-10 w-full rounded-xl" />
+        </div>
       </div>
     );
   }
@@ -130,8 +140,12 @@ function MembershipPanel({ tenantId }: { tenantId: string }) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64 text-neutral-400">
-        <Loader2 className="animate-spin mr-2" size={18} /> Memuat member...
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-5 w-40" />
+          <Skeleton className="h-10 w-36 rounded-xl" />
+        </div>
+        <SkeletonList rows={4} />
       </div>
     );
   }

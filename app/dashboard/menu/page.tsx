@@ -10,6 +10,7 @@ import { compressImage } from "@/lib/compressImage";
 import { getTier, FREE_TIER_LIMITS, TIER_LABEL, type Tier } from "@/lib/tier";
 import Modal from "@/components/Modal";
 import type { Product } from "@/lib/types";
+import { Skeleton, SkeletonCardGrid } from "@/components/Skeleton";
 
 const CATEGORIES = ["Kopi", "Non-Kopi", "Makanan", "Dessert"];
 
@@ -128,8 +129,15 @@ export default function MenuPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64 text-neutral-400">
-        <Loader2 className="animate-spin mr-2" size={18} /> Memuat menu...
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div className="space-y-2">
+            <Skeleton className="h-5 w-48" />
+            <Skeleton className="h-3 w-64" />
+          </div>
+          <Skeleton className="h-10 w-32 rounded-xl" />
+        </div>
+        <SkeletonCardGrid count={8} />
       </div>
     );
   }

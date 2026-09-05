@@ -6,6 +6,7 @@ import Modal from "@/components/Modal";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { isManagerOrOwner } from "@/lib/role";
+import { Skeleton, SkeletonList } from "@/components/Skeleton";
 
 interface AttendanceRow {
   id: string;
@@ -124,8 +125,15 @@ export default function AttendancePage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64 text-neutral-400">
-        <Loader2 className="animate-spin mr-2" size={18} /> Memuat data kehadiran...
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div className="space-y-2">
+            <Skeleton className="h-5 w-48" />
+            <Skeleton className="h-3 w-56" />
+          </div>
+          <Skeleton className="h-10 w-32 rounded-xl" />
+        </div>
+        <SkeletonList rows={5} />
       </div>
     );
   }

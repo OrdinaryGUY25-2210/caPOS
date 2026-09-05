@@ -9,6 +9,7 @@ import { formatRupiah, cx } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import Modal from "@/components/Modal";
+import { Skeleton, SkeletonStatGrid } from "@/components/Skeleton";
 
 const MONTH_LABEL = [
   "Januari", "Februari", "Maret", "April", "Mei", "Juni",
@@ -132,8 +133,26 @@ export default function TargetPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64 text-neutral-400">
-        <Loader2 className="animate-spin mr-2" size={18} /> Memuat target bulanan...
+      <div className="space-y-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-2">
+            <Skeleton className="h-5 w-52" />
+            <Skeleton className="h-3 w-32" />
+          </div>
+          <Skeleton className="h-10 w-36 rounded-xl" />
+        </div>
+        <div className="card p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <Skeleton className="h-3 w-40" />
+            <Skeleton className="h-3 w-10" />
+          </div>
+          <Skeleton className="h-3 w-full rounded-full" />
+        </div>
+        <SkeletonStatGrid count={3} />
+        <div className="card p-5 space-y-4">
+          <Skeleton className="h-4 w-56" />
+          <Skeleton className="h-64 w-full" />
+        </div>
       </div>
     );
   }

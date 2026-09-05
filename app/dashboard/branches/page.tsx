@@ -8,6 +8,7 @@ import { getTier, TIER_LABEL, BRANCH_LIMIT, type Tier } from "@/lib/tier";
 import { useBranch } from "@/lib/branchContext";
 import Modal from "@/components/Modal";
 import type { Branch } from "@/lib/types";
+import { Skeleton } from "@/components/Skeleton";
 
 /**
  * Manajemen Cabang (Owner only). Manager/Kasir tidak bisa membuka halaman
@@ -86,8 +87,38 @@ export default function BranchesPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-20 text-neutral-400">
-        <Loader2 className="animate-spin" size={28} />
+      <div className="max-w-3xl mx-auto space-y-5">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="space-y-2">
+            <Skeleton className="h-5 w-44" />
+            <Skeleton className="h-3 w-64" />
+          </div>
+          <Skeleton className="h-10 w-36 rounded-xl" />
+        </div>
+        <div className="card p-4 flex items-center justify-between">
+          <div className="space-y-2">
+            <Skeleton className="h-3 w-20" />
+            <Skeleton className="h-4 w-24" />
+          </div>
+          <div className="space-y-2 text-right">
+            <Skeleton className="h-3 w-24 ml-auto" />
+            <Skeleton className="h-4 w-16 ml-auto" />
+          </div>
+        </div>
+        <div className="space-y-2">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="card p-4 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <Skeleton className="w-10 h-10 rounded-xl shrink-0" />
+                <div className="space-y-2 flex-1 min-w-0">
+                  <Skeleton className="h-4 w-1/3" />
+                  <Skeleton className="h-3 w-1/2" />
+                </div>
+              </div>
+              <Skeleton className="h-6 w-20 rounded-full shrink-0" />
+            </div>
+          ))}
+        </div>
       </div>
     );
   }

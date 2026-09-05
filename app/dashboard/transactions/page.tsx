@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Receipt as ReceiptIcon, Lock, Loader2, User } from "lucide-react";
+import { Receipt as ReceiptIcon, Lock, User } from "lucide-react";
 import Link from "next/link";
 import { formatRupiah } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { getTier, FREE_TIER_LIMITS, TIER_LABEL, type Tier } from "@/lib/tier";
 import { useBranch, ALL_BRANCHES } from "@/lib/branchContext";
+import { Skeleton, SkeletonList } from "@/components/Skeleton";
 
 interface TxRow {
   id: string;
@@ -84,8 +85,14 @@ export default function TransactionsPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64 text-neutral-400">
-        <Loader2 className="animate-spin mr-2" size={18} /> Memuat riwayat transaksi...
+      <div className="space-y-6">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="space-y-2">
+            <Skeleton className="h-5 w-44" />
+            <Skeleton className="h-3 w-60" />
+          </div>
+        </div>
+        <SkeletonList rows={6} />
       </div>
     );
   }

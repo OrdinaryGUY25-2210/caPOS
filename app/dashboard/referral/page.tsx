@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Gift, Copy, Check, Loader2, Users } from "lucide-react";
+import { Gift, Copy, Check, Users } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
+import { Skeleton } from "@/components/Skeleton";
 
 interface RedemptionRow {
   id: string;
@@ -56,8 +57,32 @@ export default function ReferralPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64 text-neutral-400">
-        <Loader2 className="animate-spin mr-2" size={18} /> Memuat program referral...
+      <div className="max-w-2xl space-y-6">
+        <div className="space-y-2">
+          <Skeleton className="h-5 w-44" />
+          <Skeleton className="h-3 w-64" />
+        </div>
+        <div className="card p-6 text-center space-y-3">
+          <Skeleton className="w-12 h-12 rounded-2xl mx-auto" />
+          <Skeleton className="h-3 w-32 mx-auto" />
+          <Skeleton className="h-9 w-40 mx-auto" />
+          <Skeleton className="h-3 w-full max-w-sm mx-auto" />
+        </div>
+        <div className="card p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <Skeleton className="h-4 w-32" />
+            <Skeleton className="h-5 w-10" />
+          </div>
+          <Skeleton className="h-3 w-full rounded-full" />
+        </div>
+        <div className="card divide-y divide-neutral-100">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="flex items-center justify-between p-4">
+              <Skeleton className="h-3 w-24" />
+              <Skeleton className="h-5 w-24 rounded-full" />
+            </div>
+          ))}
+        </div>
       </div>
     );
   }

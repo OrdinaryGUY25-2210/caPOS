@@ -64,6 +64,13 @@ export function BranchProvider({ children }: { children: ReactNode }) {
       const saved = typeof window !== "undefined" ? window.localStorage.getItem(STORAGE_KEY) : null;
       if (saved && (saved === ALL_BRANCHES || list.some((b) => b.id === saved))) {
         setSelectedBranchIdState(saved);
+      } else if (list.length === 1) {
+        // Cuma 1 cabang (kasus paling umum: tenant 1 outlet dengan "Cabang
+        // Utama" bawaan) — BranchSwitcher sengaja disembunyikan kalau cuma
+        // ada 1 pilihan, jadi TIDAK BOLEH default ke ALL_BRANCHES di sini:
+        // tidak akan ada UI untuk keluar dari mode read-only-nya sama
+        // sekali. Langsung pilih cabang itu supaya restock/opname jalan.
+        setSelectedBranchIdState(list[0].id);
       } else {
         setSelectedBranchIdState(ALL_BRANCHES);
       }

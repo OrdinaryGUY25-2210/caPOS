@@ -5,7 +5,7 @@ import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from "recharts";
-import { Download, Printer, TrendingUp, TrendingDown, Minus, Sparkles, Loader2, HeartPulse } from "lucide-react";
+import { Download, Printer, TrendingUp, TrendingDown, Minus, Sparkles, HeartPulse } from "lucide-react";
 import Link from "next/link";
 import * as XLSX from "xlsx";
 import { formatRupiah } from "@/lib/utils";
@@ -13,6 +13,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { getTier, hasSalesHealth, type Tier } from "@/lib/tier";
 import { useBranch, ALL_BRANCHES } from "@/lib/branchContext";
+import { Skeleton, SkeletonStatGrid } from "@/components/Skeleton";
 
 const PIE_COLORS = ["#10B981", "#059669", "#34D399", "#6EE7B7", "#94A3B8"];
 const DAY_LABELS = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
@@ -188,8 +189,19 @@ export default function ReportsPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64 text-neutral-400">
-        <Loader2 className="animate-spin mr-2" size={18} /> Memuat laporan...
+      <div className="space-y-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-2">
+            <Skeleton className="h-5 w-40" />
+            <Skeleton className="h-3 w-56" />
+          </div>
+          <Skeleton className="h-9 w-32 rounded-xl" />
+        </div>
+        <SkeletonStatGrid count={3} />
+        <div className="card p-5 space-y-4">
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-64 w-full" />
+        </div>
       </div>
     );
   }

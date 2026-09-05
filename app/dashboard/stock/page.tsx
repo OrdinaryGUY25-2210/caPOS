@@ -8,6 +8,7 @@ import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { useBranch, ALL_BRANCHES } from "@/lib/branchContext";
 import Modal from "@/components/Modal";
 import type { Product } from "@/lib/types";
+import { Skeleton, SkeletonStatGrid, SkeletonTableRows } from "@/components/Skeleton";
 
 /**
  * Kolom stok/HPP (cost_price, track_stock, low_stock_threshold) ditambahkan
@@ -174,8 +175,32 @@ export default function StockPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64 text-neutral-400">
-        <Loader2 className="animate-spin mr-2" size={18} /> Memuat data stok...
+      <div className="space-y-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-2">
+            <Skeleton className="h-5 w-32" />
+            <Skeleton className="h-3 w-72" />
+          </div>
+          <Skeleton className="h-9 w-40 rounded-xl" />
+        </div>
+        <SkeletonStatGrid count={3} />
+        <div className="card overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-neutral-100 text-left text-neutral-500">
+                <th className="p-3 font-medium">Menu</th>
+                <th className="p-3 font-medium">Harga Jual</th>
+                <th className="p-3 font-medium">HPP</th>
+                <th className="p-3 font-medium">Margin</th>
+                <th className="p-3 font-medium">Stok</th>
+                <th className="p-3 font-medium"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-neutral-100">
+              <SkeletonTableRows rows={6} cols={6} />
+            </tbody>
+          </table>
+        </div>
       </div>
     );
   }

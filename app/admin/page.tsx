@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { generateReferralCode } from "@/lib/generateReferralCode";
 import Modal from "@/components/Modal";
+import { Skeleton, SkeletonStatGrid, SkeletonList } from "@/components/Skeleton";
 
 interface TenantRow {
   id: string;
@@ -227,8 +228,22 @@ export default function AdminPanel() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-neutral-50 text-neutral-400">
-        <Loader2 className="animate-spin mr-2" size={18} /> Memuat data admin...
+      <div className="min-h-screen bg-neutral-50">
+        <header className="h-16 bg-neutral-900 flex items-center justify-between px-6">
+          <div className="flex items-center gap-2 text-white">
+            <Shield size={20} />
+            <span className="font-bold">caPOS — Super Admin</span>
+            <span className="text-xs bg-white/10 px-2 py-0.5 rounded-full ml-2">Studio D13</span>
+          </div>
+        </header>
+        <div className="p-6 space-y-8 max-w-5xl mx-auto">
+          <SkeletonStatGrid count={4} gridClassName="grid-cols-2 sm:grid-cols-4" />
+          <section>
+            <Skeleton className="h-4 w-48 mb-1" />
+            <Skeleton className="h-3 w-full max-w-lg mb-4" />
+            <SkeletonList rows={5} withAvatar={false} />
+          </section>
+        </div>
       </div>
     );
   }

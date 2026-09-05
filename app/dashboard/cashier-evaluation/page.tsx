@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ClipboardCheck, Loader2, Trophy, Clock } from "lucide-react";
+import { ClipboardCheck, Trophy, Clock } from "lucide-react";
 import { formatRupiah, cx } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
+import { Skeleton } from "@/components/Skeleton";
 
 type Period = "7" | "30" | "month";
 
@@ -142,8 +143,26 @@ export default function CashierEvaluationPage() {
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center h-48 text-neutral-400">
-          <Loader2 className="animate-spin mr-2" size={18} /> Menghitung evaluasi...
+        <div className="grid grid-cols-1 gap-4">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="card p-5 flex flex-wrap items-center gap-4 justify-between">
+              <div className="flex items-center gap-3 min-w-0">
+                <Skeleton className="w-10 h-10 rounded-full shrink-0" />
+                <div className="space-y-2 min-w-0">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-3 w-20" />
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-6">
+                {Array.from({ length: 4 }).map((_, j) => (
+                  <div key={j} className="space-y-1.5">
+                    <Skeleton className="h-2.5 w-16" />
+                    <Skeleton className="h-4 w-14" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       ) : stats.length === 0 ? (
         <div className="card p-8 text-center text-neutral-400 text-sm">

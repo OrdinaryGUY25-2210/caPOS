@@ -8,6 +8,7 @@ import { whatsappLink, daysRemaining, formatRupiah } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { getTier, type Tier } from "@/lib/tier";
+import { Skeleton } from "@/components/Skeleton";
 
 declare global {
   interface Window {
@@ -32,12 +33,12 @@ const PLANS = [
     highlight: false, payable: false,
   },
   {
-    key: "monthly", name: "Pro", price: "Rp100.000", period: "/bulan", rawAmount: 100000,
+    key: "monthly", name: "Pro", price: "Rp99.000", period: "/bulan", rawAmount: 99000,
     features: ["Kasir Unlimited", "Menu Unlimited", "Riwayat Lengkap", "Kesehatan Penjualan"],
     highlight: true, payable: true,
   },
   {
-    key: "yearly", name: "Supreme", price: "Rp850.000", period: "/tahun", rawAmount: 850000,
+    key: "yearly", name: "Supreme", price: "Rp999.000", period: "/tahun", rawAmount: 999000,
     features: ["Semua fitur Pro", "Laporan Lengkap (Jam Ramai, Menu Terlaris)", "Export Excel & PDF", "Prioritas Support"],
     highlight: false, payable: true,
   },
@@ -46,7 +47,8 @@ const PLANS = [
 const COMPARISON_ROWS: { label: string; free: string | boolean; pro: string | boolean; supreme: string | boolean }[] = [
   { label: "Akun Kasir Tambahan", free: "Maks 2", pro: "Unlimited", supreme: "Unlimited" },
   { label: "Jumlah Menu", free: "Maks 10", pro: "Unlimited", supreme: "Unlimited" },
-  { label: "Riwayat Transaksi", free: "7 Hari Terakhir", pro: "Lengkap", supreme: "Lengkap" },
+  { label: "Jumlah Cabang", free: "Maks 1 Cabang", pro: "Maks 3 Cabang", supreme: "Unlimited" },
+  { label: "Riwayat Transaksi", free: "14 Hari Terakhir", pro: "30 Hari Terakhir", supreme: "Lengkap" },
   { label: "Grafik Omzet Harian", free: true, pro: true, supreme: true },
   { label: "Kesehatan Penjualan", free: false, pro: true, supreme: true },
   { label: "Jam Ramai (Peak Hours)", free: false, pro: false, supreme: true },
@@ -56,8 +58,13 @@ const COMPARISON_ROWS: { label: string; free: string | boolean; pro: string | bo
   { label: "Prioritas Support", free: false, pro: false, supreme: true },
   { label: "Laporan PDF Otomatis", free: "Riwayat 14 Hari", pro: "Riwayat 30 Hari", supreme: "Riwayat Lengkap" },
   { label: "Stok & HPP", free: true, pro: true, supreme: true },
+  { label: "Stok Opname (Multi-Cabang)", free: true, pro: true, supreme: true },
   { label: "Target Bulanan Owner", free: true, pro: true, supreme: true },
   { label: "Evaluasi Kasir", free: true, pro: true, supreme: true },
+  { label: "Kehadiran & Izin Karyawan", free: true, pro: true, supreme: true },
+  { label: "Persetujuan Menu/Harga (Approval)", free: true, pro: true, supreme: true },
+  { label: "Membership Pelanggan", free: true, pro: true, supreme: true },
+  { label: "Program Referral", free: true, pro: true, supreme: true },
 ];
 
 export default function SubscriptionPage() {
@@ -119,7 +126,9 @@ export default function SubscriptionPage() {
       }
 
       if (!window.snap) {
-        setPaymentError("Modul pembayaran belum siap, coba muat ulang halaman.");
+        setPaymentError(
+          "⚠️ Modul Midtrans tidak siap. Penyebab kemungkinan: (1) NEXT_PUBLIC_MIDTRANS_CLIENT_KEY kosong di env hosting, (2) Jaringan terputus saat load script snap.js. Muat ulang halaman & coba lagi."
+        );
         setPayingPlan(null);
         return;
       }
@@ -148,6 +157,15 @@ export default function SubscriptionPage() {
   }
 
   const isProduction = process.env.NEXT_PUBLIC_MIDTRANS_IS_PRODUCTION === "true";
+  const midtransClientKeyMissing = !process.env.NEXT_PUBLIC_MIDTRANS_CLIENT_KEY;
+
+  useEffect(() => {
+    if (midtransClientKeyMissing && !loading) {
+      setPaymentError(
+        "⚠️ Konfigurasi Midtrans belum lengkap. Hubungi admin: pastikan NEXT_PUBLIC_MIDTRANS_CLIENT_KEY & MIDTRANS_SERVER_KEY diisi di environment hosting, lalu redeploy."
+      );
+    }
+  }, [loading, midtransClientKeyMissing]);
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -163,8 +181,15 @@ export default function SubscriptionPage() {
       </div>
 
       {loading ? (
-        <div className="card p-5 flex items-center gap-2 text-neutral-400 text-sm">
-          <Loader2 className="animate-spin" size={16} /> Memuat status langganan...
+        <div className="card p-5 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Skeleton className="w-11 h-11 rounded-xl" />
+            <div className="space-y-2">
+              <Skeleton className="h-4 w-40" />
+              <Skeleton className="h-3 w-32" />
+            </div>
+          </div>
+          <Skeleton className="h-5 w-20 rounded-full" />
         </div>
       ) : (
         <div className="card p-5 flex items-center justify-between">
