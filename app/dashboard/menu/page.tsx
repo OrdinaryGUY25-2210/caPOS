@@ -130,7 +130,7 @@ export default function MenuPage() {
   if (loading) {
     return (
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-3">
           <div className="space-y-2">
             <Skeleton className="h-5 w-48" />
             <Skeleton className="h-3 w-64" />
@@ -144,7 +144,7 @@ export default function MenuPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-bold text-neutral-900">Kelola Menu & Stok</h1>
           <p className="text-sm text-neutral-500">

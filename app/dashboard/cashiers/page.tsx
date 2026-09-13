@@ -110,7 +110,7 @@ export default function CashiersPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-bold text-neutral-900">Manajemen Kasir</h1>
           <p className="text-sm text-neutral-500">

@@ -1,95 +1,70 @@
-# caPOS — Point of Sale Kafe by Studio D13
+# caPOS — Point of Sale Kafe/Restoran by Studio D13
 
-Aplikasi Web App SaaS POS Kafe berbasis Next.js (App Router), Tailwind CSS,
-Lucide Icons, Dexie.js (IndexedDB, offline-first), dan Supabase (Auth +
-Postgres + Storage + Realtime) — PWA, integrasi pembayaran Midtrans, sistem
-tier Free Trial / Pro / Supreme, role Owner/Manager/Kasir dengan alur
-persetujuan, dan Program Referral.
+Aplikasi web SaaS POS untuk kafe/restoran berbasis Next.js (App Router),
+Tailwind CSS, Dexie.js (IndexedDB, offline-first), dan Supabase
+(Auth + Postgres + Storage + Realtime).
+
+**Paket ini adalah hasil PENGGABUNGAN 4 fase pengembangan** menjadi satu
+basis kode yang konsisten. Kalau ini pertama kalinya kamu membuka proyek
+ini, baca urutan berikut:
+
+1. **`docs/PANDUAN_INSTALASI_WEB.md`** — cara deploy dari nol **lewat
+   dashboard web saja** (GitHub, Vercel, Supabase) — tidak perlu install
+   apa pun di komputer/laptop kamu.
+2. **`docs/PANDUAN_RESET_SUPABASE.md`** — simpan ini untuk jaga-jaga.
+   Langkah-langkah mengosongkan & mengulang dari nol project Supabase
+   kalau suatu saat perlu (data rusak, mau mulai bersih, dsb).
+3. **`docs/CATATAN_PENGGABUNGAN.md`** — penting dibaca kalau kamu (atau
+   developer lain) akan melanjutkan coding di proyek ini. Berisi
+   keputusan desain, bug yang diperbaiki saat penggabungan, dan hal-hal
+   yang sengaja BELUM dikerjakan (technical debt yang disadari).
 
 ---
 
-## 1. Fitur Utama
+## 1. Empat Fase Fitur
 
-### Akun & Akses
-- Registrasi terbuka (`/register`) tanpa kode wajib, verifikasi via kode OTP.
-  Kolom Kode Referral bersifat opsional.
-- 4 Role: `super_admin`, `owner`, `manager` (akses dashboard setara owner +
-  kelola kehadiran karyawan), `cashier` (akses `/pos` saja).
-- Manajemen Karyawan (`/dashboard/employees`) — Owner buat akun Manager/Kasir
-  dengan password asli + konfirmasi (bukan password sementara), plus label
-  jabatan bebas (mis. "Barista").
+### Fase 1 — Inti POS & SaaS
+- Registrasi tenant, 4 role (`super_admin`/`owner`/`manager`/`cashier`),
+  kasir offline-first (Dexie), member/loyalti dasar, langganan
+  Free Trial/Pro/Supreme via Midtrans, Program Referral, multi-cabang,
+  stok opname, Laporan PDF Otomatis, Target Bulanan, Evaluasi Kasir.
 
-### Sistem Persetujuan (Anti-Kecurangan Harga)
-- Kasir bisa usulkan menu baru langsung dari `/pos` — masuk antrean, tidak
-  langsung tayang di kasir manapun.
-- Manager/Owner dapat notifikasi lonceng real-time (Supabase Realtime) di
-  navbar dashboard, approve/reject dari situ.
-- Perubahan ke tabel products hanya terjadi lewat fungsi database
-  `review_approval_request()` setelah disetujui — tidak bisa dilewati dari client.
+### Fase 2 — Dapur, Shift & Kas
+- **Kitchen Display System** (`/kitchen`) — pesanan masuk real-time,
+  dikelompokkan per stasiun (Barista/Dapur/dll), status
+  Baru→Diterima→Disiapkan→Siap→Disajikan.
+- **Shift & Kas** — buka/tutup shift dengan modal awal & rekonsiliasi
+  kas fisik, catat kas masuk/keluar di luar transaksi.
+- **Pembayaran Split** — satu transaksi dibayar dengan lebih dari satu
+  metode (mis. sebagian tunai, sebagian QRIS).
 
-### Kasir (`/pos`)
-- Cari & pilih menu, keranjang, diskon member, cetak struk, shift kasir
-  otomatis, checkout dihitung ulang di server, tetap jalan offline.
+### Fase 3 — Purchasing, CRM & Analitik Lanjutan
+- **Pemasok & Purchase Order** (`/dashboard/purchasing/*`) — PO ke
+  supplier, penerimaan barang (GRN), stok & HPP (rata-rata tertimbang)
+  ter-update otomatis.
+- **CRM & Loyalitas** (`/dashboard/crm/customers`) — profil pelanggan,
+  riwayat kunjungan & belanja, tingkatan/tier member.
+- **Promosi & Voucher** (`/dashboard/promotions`) — diskon %/nominal,
+  BOGO, bundle, dengan aturan (minimum belanja, khusus member, jam
+  tertentu).
+- **Analitik Lanjutan** — profitabilitas per produk, jam sibuk, laporan
+  waste/loss.
 
-### Dashboard Owner/Manager
-- Laporan & Omzet dari data transaksi asli + Kesehatan Penjualan (Pro+).
-- Riwayat Transaksi, Kelola Menu (kompresi gambar otomatis, kategori bebas,
-  harga bisa dikosongkan/ditulis manual — bukan terkunci di "0").
-- Kehadiran Karyawan — catat/tinjau izin, sakit, cuti.
-- Program Referral (`/dashboard/referral`) — lihat kode unik & progress.
-
-### Sistem Tier — Free Trial / Pro / Supreme
-
-| | Free Trial | Pro (Bulanan) | Supreme (Tahunan) |
-|---|---|---|---|
-| Akun karyawan tambahan (kasir+manager) | Maks 2 | Unlimited | Unlimited |
-| Jumlah menu | Maks 10 | Unlimited | Unlimited |
-| Riwayat transaksi | 14 hari terakhir | s.d. 30 hari | Unlimited |
-| Kesehatan Penjualan | Tidak | Ya | Ya |
-| Jam Ramai & Menu Terlaris, Export Excel/PDF | Tidak | Tidak | Ya |
-
-Ditegakkan lewat trigger database (`enforce_cashier_limit()`,
-`enforce_menu_limit()`), bukan cuma UI — tidak bisa dilewati lewat panggilan
-API langsung.
-
-### Program Referral
-- Tiap tenant otomatis dapat 1 kode unik permanen saat daftar.
-- Orang lain daftar pakai kode itu → begitu mereka top up pertama kali,
-  pemilik kode dapat +3% (akumulasi, maks 5 orang = 15%).
-- Pendaftar yang pakai kode referral apa pun dapat diskon 2% untuk
-  pembayaran pertamanya sendiri.
-- Reset terjadi setiap kali pemilik kode top up — memakai berapa pun
-  akumulasi yang terkumpul saat itu (tidak perlu menunggu penuh 5/5).
-  Kombinasi maksimal dalam satu transaksi: 2% + 15% = 17%.
-- Kode khusus Super Admin: dibuat & dikelola dari `/admin` (tabel
-  `admin_special_codes`, migration_010) — bisa banyak kode sekaligus, tiap
-  kode punya masa berlaku, lama trial Supreme, dan diskon pendaftar sendiri.
-  Pendaftar yang pakai kode ini dapat trial Supreme sesuai lama yang diatur,
-  lalu otomatis turun ke sisa trial standar (total tetap 28 hari), plus
-  tetap dapat diskon pendaftar sesuai kode tersebut.
-
-### Lainnya
-- Pembayaran Midtrans (Snap) dengan diskon otomatis terhitung & webhook
-  terverifikasi signature.
-- Super Admin (`/admin`) — statistik tenant, perpanjang/aktifkan langganan,
-  perbaiki kode referral tenant yang hilang, buat kode khusus (masa berlaku
-  sendiri) untuk campaign/partner.
-- PWA — install ke home screen, jalan offline.
-- Responsif di semua ukuran layar.
-
-### Laporan & Operasional (migration_009)
-- **Laporan PDF Otomatis** (`/dashboard/laporan-pdf`) — satu klik jadi PDF
-  rapi: omzet, estimasi laba kotor (dari HPP), omzet harian, menu terlaris,
-  metode pembayaran, kinerja kasir. Periode custom dibatasi sesuai tier.
-- **Stok & HPP** (`/dashboard/stock`) — HPP per menu, pelacakan stok
-  opsional per produk (otomatis berkurang saat checkout), restock, riwayat
-  pergerakan stok, alert stok menipis.
-- **Target Bulanan Owner** (`/dashboard/target`) — set target omzet
-  bulanan, progress bar, kebutuhan omzet/hari sisa bulan, riwayat vs
-  realisasi.
-- **Evaluasi Kasir** (`/dashboard/cashier-evaluation`) — ranking otomatis
-  kinerja kasir (omzet, transaksi, rata-rata, hari kerja) dibanding rata-rata
-  tim, per 7 hari/30 hari/bulan ini.
+### Fase 4 — QR Self-Order, Reservasi & Multi-channel
+- **QR Meja & Self-Order** (`/dashboard/qr-tables`) — generate QR per
+  meja, pelanggan pesan sendiri lewat HP tanpa login
+  (`/order/[cabang]/[meja]`), bayar QRIS langsung (Midtrans) atau ke kasir.
+- **Reservasi Meja** (`/dashboard/reservations`, publik di
+  `/reserve/[cabang]`) — kalender reservasi, status meja real-time.
+- **Online Order Hub** (`/dashboard/online-orders`) — catat pesanan dari
+  GoFood/GrabFood/ShopeeFood/Website di satu tempat, dengan estimasi
+  komisi platform.
+- **Harga per Kanal** (`/dashboard/channel-pricing`) — harga berbeda per
+  channel (mis. markup untuk kompensasi komisi platform online).
+- **Analitik Pertumbuhan** (`/dashboard/analytics/growth`) — statistik
+  kunjungan pelanggan, pelanggan tidak aktif; **Menu Engineering**
+  (`/dashboard/analytics/menu-engineering`) — klasifikasi menu
+  Star/Puzzle/Plowhorse/Dog berdasar popularitas & margin.
 
 ---
 
@@ -98,101 +73,79 @@ API langsung.
 ```
 capos/
 ├── app/
-│   ├── register/page.tsx            # Kode referral OPSIONAL + konfirmasi password
+│   ├── (auth)/login, register, forgot-password
+│   ├── pos/                     # Kasir (offline-first)
+│   ├── kitchen/                 # Kitchen Display System (Fase 2)
+│   ├── order/[branch]/[table]/  # Self-order publik via QR (Fase 4, TANPA login)
+│   ├── reserve/[branch]/        # Form reservasi publik (Fase 4, TANPA login)
+│   ├── admin/                   # Super Admin
+│   ├── actions/                 # Server Actions (Fase 3: purchasing/CRM/promosi)
 │   ├── api/
-│   │   ├── register/route.ts        # Handle kode referral, generate kode unik tenant baru
-│   │   ├── employees/route.ts       # Ganti dari /api/cashiers — role Manager/Kasir, password asli
-│   │   └── midtrans/
-│   │       ├── create-transaction/route.ts  # Hitung diskon referral sebelum kirim ke Midtrans
-│   │       └── notification/route.ts        # Proses reward + reset akumulasi referral
-│   ├── pos/page.tsx                 # + CashierQuickActions (usulkan menu)
+│   │   ├── midtrans/notification/route.ts   # Webhook GABUNGAN: langganan + QRIS pesanan
+│   │   └── orders/qris-charge/route.ts      # Generate QRIS dinamis utk pesanan QR
 │   └── dashboard/
-│       ├── employees/page.tsx       # Manajemen Karyawan (dulu "cashiers")
-│       ├── attendance/page.tsx      # Kehadiran Karyawan
-│       ├── referral/page.tsx        # Program Referral
-│       └── ... (menu, transactions, subscription, dst)
+│       ├── purchasing/, crm/, promotions/   # Fase 3
+│       └── qr-tables/, reservations/, online-orders/,
+│           channel-pricing/, analytics/growth/,
+│           analytics/menu-engineering/      # Fase 4
 ├── components/
-│   ├── NotificationBell.tsx         # Lonceng approval real-time
-│   ├── CashierQuickActions.tsx      # Tombol "Usulkan Menu" di POS
+│   ├── kitchen/, ShiftModal.tsx, MultiPaymentModal.tsx,
+│   │   SendToKitchenModal.tsx               # Fase 2
+│   ├── crm/, purchasing/, analytics/        # Fase 3
+│   ├── tables/, reservations/, order/, pos/QrOrderAlert.tsx  # Fase 4
 │   └── ...
 ├── lib/
-│   ├── role.ts                      # Helper role (Manager, dst)
-│   ├── generateReferralCode.ts
-│   └── tier.ts
+│   ├── types.ts              # SEMUA tipe (Fase 1-4 digabung satu file)
+│   ├── getCurrentProfile.ts  # versi CLIENT (dipakai di Client Component)
+│   ├── getServerProfile.ts   # versi SERVER (dipakai di Server Action)
+│   └── kitchenPrinter.ts, webBluetooth.d.ts  # cetak tiket dapur (Fase 2)
 └── supabase/
-    ├── schema.sql                   # Setup baru — sudah termasuk SEMUA fitur
-    ├── migration_007a_add_manager_role.sql   # WAJIB dijalankan SENDIRI (enum)
-    ├── migration_007b_manager_features.sql   # Approval, attendance, dst
-    ├── migration_008_referral_system.sql     # Sistem referral
-    └── reset_all.sql
+    ├── schema.sql                                              # Fondasi Fase 1
+    ├── migration_001 .. migration_011                          # Fase 1 lanjutan
+    ├── migration_012_phase2_kitchen_shift_cash.sql              # Fase 2
+    ├── migration_013_phase3_purchasing_crm_promosi_analitik.sql # Fase 3
+    ├── migration_014_phase4_qr_reservasi_multichannel_growth.sql# Fase 4
+    └── reset_all.sql                                            # Reset total (jaga-jaga)
 ```
 
 ---
 
 ## 3. Instalasi
 
-### Setup Supabase baru (dari nol)
-Jalankan `supabase/schema.sql` satu file saja — semua fitur di atas sudah termasuk.
+**Baca `docs/PANDUAN_INSTALASI_WEB.md` untuk langkah lengkap tanpa
+terminal/komputer lokal.** Ringkasannya:
 
-### Project Supabase yang sudah ada
-Jalankan berurutan, skip yang sudah pernah dijalankan (semua idempotent):
-1. migration_001, 2. migration_002 (kritis), 3. migration_003 (Midtrans),
-4. migration_004 (kolom plan), 5. migration_005 (tier/shift/analitik),
-6. migration_007a_add_manager_role.sql — WAJIB DIJALANKAN SENDIRI
-(nambah enum, tidak boleh digabung query lain dalam satu klik Run),
-7. migration_007b_manager_features.sql, 8. migration_008_referral_system.sql,
-9. migration_009_stock_hpp_target_evaluasi.sql (Stok & HPP, Target Bulanan,
-data pendukung Evaluasi Kasir & Laporan PDF Otomatis),
-10. migration_010_admin_tools.sql (perbaikan kode referral yang hilang +
-kode khusus Super Admin dengan masa berlaku, dari /admin).
+1. Buat project Supabase baru → jalankan `supabase/schema.sql`, lalu
+   `migration_001` s/d `migration_014` **berurutan** dari SQL Editor
+   (web, tidak perlu Supabase CLI).
+2. Upload folder ini ke repo GitHub baru (lewat web GitHub, drag & drop).
+3. Import repo itu ke Vercel, isi Environment Variables (lihat
+   `.env.local.example`), Deploy.
+4. Buka domain Vercel-nya → daftar akun Owner pertama lewat `/register`.
 
-Setelah migrasi 007b, cek Database → Replication di Supabase Dashboard,
-pastikan tabel approval_requests tercentang aktif di publication
-supabase_realtime (untuk notifikasi lonceng real-time).
+## 4. Kalau Perlu Reset Total
 
-### Environment Variables tambahan
-```
-NEXT_PUBLIC_STUDIO_D13_WHATSAPP=628xxxxxxxxxx   # nomor WA tombol "Hubungi Developer"
-```
-`SUPER_ADMIN_REFERRAL_CODE` TIDAK dipakai lagi sejak migration_010 — kode
-khusus Super Admin sekarang dibuat & dikelola langsung dari `/admin`
-(tabel `admin_special_codes`), boleh dihapus dari env kapan saja.
-
-Bucket Storage, SMTP, template OTP — sama seperti sebelumnya, lihat komentar
-di `.env.local.example`, lalu jalankan `npm install && npm run dev`.
+Baca **`docs/PANDUAN_RESET_SUPABASE.md`**. Jangan jalankan
+`supabase/reset_all.sql` kalau belum baca dokumen itu — file itu
+**menghapus semua data tanpa bisa dibatalkan**.
 
 ---
 
-## 4. Cara Uji Alur Approval
+## 5. Sistem Tier — Free Trial / Pro / Supreme
 
-1. Login Owner → Manajemen Karyawan → buat 1 akun Manager, 1 akun Kasir
-2. Login Kasir → `/pos` → klik "Usulkan Menu" → isi & kirim
-3. Login Manager/Owner → lihat lonceng di kanan atas dashboard → badge
-   merah muncul otomatis (real-time, tanpa refresh)
-4. Klik Setujui → cek menu muncul di Kelola Menu
+| | Free Trial | Pro (Bulanan) | Supreme (Tahunan) |
+|---|---|---|---|
+| Akun karyawan tambahan | Maks 2 | Unlimited | Unlimited |
+| Jumlah menu | Maks 10 | Unlimited | Unlimited |
+| Riwayat transaksi | 14 hari terakhir | s.d. 30 hari | Unlimited |
+| Kesehatan Penjualan | Tidak | Ya | Ya |
+| Jam Ramai, Menu Terlaris, Export | Tidak | Tidak | Ya |
 
----
-
-## 5. Catatan Implementasi Penting
-
-- Manager diperlakukan sama seperti Owner untuk akses dashboard, kecuali
-  membuat/menghapus akun karyawan (tetap wewenang Owner) dan `/admin`.
-- Harga menu: input disimpan sebagai string terpisah dari Product.price di
-  form — memperbaiki bug lama di mana kolom selalu balik ke "0" saat
-  dikosongkan (Number("") = 0 ditulis balik ke state).
-- Kategori menu bebas lewat datalist — bisa pilih yang sudah ada atau
-  ketik kategori baru.
-- Reset diskon referral terjadi di webhook, bukan di create-transaction —
-  supaya kalau pembayaran gagal/dibatalkan, akumulasi tidak hilang percuma.
-- Kode referral tidak bisa dipakai untuk kode sendiri (dicegah di
-  redeem_referral_code()).
-- Realtime butuh tabel didaftarkan ke publication supabase_realtime —
-  migrasi mencoba otomatis lewat ALTER PUBLICATION, tapi wajib dicek
-  manual di Dashboard karena ini kadang butuh konfirmasi UI.
+Ditegakkan lewat trigger database, bukan cuma UI.
 
 ---
 
 ## 6. Dukungan
 
-Hubungi Studio D13 lewat tombol WhatsApp di halaman FAQ dashboard, atau atur
-nomornya di `NEXT_PUBLIC_STUDIO_D13_WHATSAPP` (`.env.local`).
+Hubungi Studio D13 lewat tombol WhatsApp di halaman FAQ dashboard, atau
+atur nomornya di `NEXT_PUBLIC_STUDIO_D13_WHATSAPP` (`.env.local`).

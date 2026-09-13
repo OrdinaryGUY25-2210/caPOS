@@ -191,7 +191,7 @@ export default function StockOpnamePage() {
             <p className="font-semibold">Pilih cabang dulu</p>
             <p className="text-neutral-600 mt-0.5">
               Gunakan pemilih cabang di kanan atas navbar untuk memilih cabang mana yang mau di-opname. Stok opname
-              tidak bisa dilakukan untuk "Semua Cabang" sekaligus.
+              tidak bisa dilakukan untuk &quot;Semua Cabang&quot; sekaligus.
             </p>
           </div>
         </div>

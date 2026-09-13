@@ -26,6 +26,15 @@ export async function POST(request: Request) {
 
   const { order_id, status_code, gross_amount, signature_key, transaction_status, fraud_status } = body;
 
+  // Digabung dengan webhook Phase 4 (QR Self-Order) supaya cukup SATU
+  // Payment Notification URL di Midtrans Dashboard — order_id pesanan QR
+  // selalu diberi prefix "QRORDER-" saat dibuat (lihat submit_qr_order /
+  // charge QRIS di app/api/orders/qris-charge), jadi tinggal dicabangkan
+  // di sini sebelum masuk ke logika langganan di bawah.
+  if (typeof order_id === "string" && order_id.startsWith("QRORDER-")) {
+    return handleQrOrderNotification(body);
+  }
+
   const serverKey = process.env.MIDTRANS_SERVER_KEY;
   if (!serverKey) {
     console.error("MIDTRANS_SERVER_KEY belum diset di environment.");
@@ -105,5 +114,65 @@ export async function POST(request: Request) {
   // Midtrans mengharapkan response 200 apa pun hasilnya (selama sudah
   // diproses) — response non-200 akan membuat Midtrans retry notifikasi
   // yang sama berkali-kali.
+  return NextResponse.json({ message: "OK" });
+}
+
+/**
+ * Cabang khusus notifikasi pembayaran pesanan QRIS Self-Order (Phase 4).
+ * Ditulis ke tabel `qr_orders` (via RPC mark_qr_order_paid), BUKAN ke
+ * `payments`/`subscriptions` seperti webhook langganan di atas.
+ */
+async function handleQrOrderNotification(body: Record<string, unknown>) {
+  const { order_id, status_code, gross_amount, signature_key, transaction_status, fraud_status } = body as {
+    order_id: string;
+    status_code: string;
+    gross_amount: string;
+    signature_key: string;
+    transaction_status: string;
+    fraud_status?: string;
+  };
+
+  const serverKey = process.env.MIDTRANS_SERVER_KEY;
+  if (!serverKey) {
+    console.error("MIDTRANS_SERVER_KEY belum diset di environment.");
+    return NextResponse.json({ message: "Server misconfigured." }, { status: 500 });
+  }
+
+  const expectedSignature = crypto
+    .createHash("sha512")
+    .update(`${order_id}${status_code}${gross_amount}${serverKey}`)
+    .digest("hex");
+
+  if (signature_key !== expectedSignature) {
+    console.error("Midtrans webhook (QR order): signature tidak cocok untuk order_id", order_id);
+    return NextResponse.json({ message: "Invalid signature." }, { status: 403 });
+  }
+
+  const qrOrderId = order_id.replace("QRORDER-", "");
+  const svc = serviceClient();
+
+  let newStatus: "pending" | "paid" | "failed" = "pending";
+  if (transaction_status === "capture" || transaction_status === "settlement") {
+    newStatus = !fraud_status || fraud_status === "accept" ? "paid" : "failed";
+  } else if (transaction_status === "pending") {
+    newStatus = "pending";
+  } else if (["deny", "cancel", "expire", "failure"].includes(transaction_status)) {
+    newStatus = "failed";
+  }
+
+  // mark_qr_order_paid() TIDAK di-grant ke anon/authenticated (lihat
+  // migration Phase 4) — hanya bisa dipanggil lewat service role key,
+  // persis seperti yang dipakai di sini.
+  const { error } = await svc.rpc("mark_qr_order_paid", {
+    p_qr_order_id: qrOrderId,
+    p_payment_reference: order_id,
+    p_status: newStatus,
+  });
+
+  if (error) {
+    console.error("mark_qr_order_paid gagal:", error);
+    return NextResponse.json({ message: "Gagal memperbarui status pesanan." }, { status: 500 });
+  }
+
   return NextResponse.json({ message: "OK" });
 }

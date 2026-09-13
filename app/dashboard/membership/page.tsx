@@ -141,7 +141,7 @@ function MembershipPanel({ tenantId }: { tenantId: string }) {
   if (loading) {
     return (
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-3">
           <Skeleton className="h-5 w-40" />
           <Skeleton className="h-10 w-36 rounded-xl" />
         </div>
@@ -152,7 +152,7 @@ function MembershipPanel({ tenantId }: { tenantId: string }) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-bold text-neutral-900">Membership</h1>
           <p className="text-sm text-neutral-500">Kelola kartu langganan pelanggan kafe Anda</p>
