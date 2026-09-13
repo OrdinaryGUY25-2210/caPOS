@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Receipt as ReceiptIcon, Lock, User } from "lucide-react";
+import { Receipt as ReceiptIcon, Lock, User, RotateCcw } from "lucide-react";
 import Link from "next/link";
 import { formatRupiah } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
@@ -9,6 +9,7 @@ import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { getTier, FREE_TIER_LIMITS, TIER_LABEL, type Tier } from "@/lib/tier";
 import { useBranch, ALL_BRANCHES } from "@/lib/branchContext";
 import { Skeleton, SkeletonList } from "@/components/Skeleton";
+import RefundModal from "@/components/pos/RefundModal";
 
 interface TxRow {
   id: string;
@@ -25,6 +26,7 @@ export default function TransactionsPage() {
   const [rows, setRows] = useState<TxRow[]>([]);
   const [tier, setTier] = useState<Tier>("free");
   const [loading, setLoading] = useState(true);
+  const [refundTarget, setRefundTarget] = useState<TxRow | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -134,6 +136,12 @@ export default function TransactionsPage() {
             <div className="text-right shrink-0">
               <p className="font-bold text-neutral-900 text-sm">{formatRupiah(t.total_amount)}</p>
               <p className="text-xs text-neutral-400 uppercase">{t.payment_method}</p>
+              <button
+                onClick={() => setRefundTarget(t)}
+                className="text-xs text-urgent flex items-center gap-1 mt-1 ml-auto"
+              >
+                <RotateCcw size={11} /> Refund
+              </button>
             </div>
           </div>
         ))}
@@ -145,6 +153,15 @@ export default function TransactionsPage() {
           </p>
         )}
       </div>
+
+      {refundTarget && (
+        <RefundModal
+          transactionId={refundTarget.id}
+          invoiceNumber={refundTarget.invoice_number}
+          totalAmount={refundTarget.total_amount}
+          onClose={() => setRefundTarget(null)}
+        />
+      )}
     </div>
   );
 }

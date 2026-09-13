@@ -142,7 +142,7 @@ export default function TargetPage() {
           <Skeleton className="h-10 w-36 rounded-xl" />
         </div>
         <div className="card p-5 space-y-3">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-3">
             <Skeleton className="h-3 w-40" />
             <Skeleton className="h-3 w-10" />
           </div>

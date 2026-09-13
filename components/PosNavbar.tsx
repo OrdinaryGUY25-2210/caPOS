@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { LogOut, Wifi, WifiOff, Clock } from "lucide-react";
 import Modal from "./Modal";
+import QrOrderAlert from "./pos/QrOrderAlert";
 
 export default function PosNavbar({
   cashierName,
@@ -10,6 +11,7 @@ export default function PosNavbar({
   email,
   cafeName,
   branchName,
+  branchId,
   shiftStartedAt,
   onLogout,
 }: {
@@ -22,6 +24,8 @@ export default function PosNavbar({
   cafeName?: string | null;
   /** Nama cabang tempat kasir ini bertugas (migration_011), kalau ada. */
   branchName?: string | null;
+  /** BARU (Phase 4) — id cabang, dipakai QrOrderAlert untuk subscribe realtime pesanan QR/online masuk. */
+  branchId?: string | null;
   /** Jam mulai shift saat ini (ISO string), kalau ada. */
   shiftStartedAt?: string | null;
   onLogout: () => void;
@@ -145,6 +149,9 @@ export default function PosNavbar({
           </div>
         </Modal>
       )}
+
+      {/* Phase 4 — notifikasi pesanan baru dari QR Self-Order / Online Order Hub */}
+      <QrOrderAlert branchId={branchId ?? null} />
     </header>
   );
 }

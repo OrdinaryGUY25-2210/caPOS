@@ -17,6 +17,9 @@ export interface ReceiptData {
   wifiSsid?: string;
   wifiPassword?: string;
   width: "58mm" | "80mm";
+  /** Uang diterima & kembalian (khusus metode "cash") — Requirement 2. */
+  cashReceived?: number;
+  changeDue?: number;
 }
 
 export default function Receipt({ data }: { data: ReceiptData }) {
@@ -64,6 +67,18 @@ export default function Receipt({ data }: { data: ReceiptData }) {
         <span>{formatRupiah(data.total)}</span>
       </div>
       <p className="mt-1">Bayar: {data.paymentMethod.toUpperCase()}</p>
+      {typeof data.cashReceived === "number" && (
+        <div className="flex justify-between">
+          <span>Uang Diterima</span>
+          <span>{formatRupiah(data.cashReceived)}</span>
+        </div>
+      )}
+      {typeof data.changeDue === "number" && (
+        <div className="flex justify-between font-bold">
+          <span>Kembalian</span>
+          <span>{formatRupiah(data.changeDue)}</span>
+        </div>
+      )}
 
       <div className="border-t border-dashed border-black my-1" />
       <p className="text-center">Terima kasih atas kunjungan Anda!</p>

@@ -1,17 +1,25 @@
 "use client";
 
-import { useEffect, useMemo, useState, Suspense } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, Suspense } from "react";
 import { Search, Plus, Minus, Trash2, Printer, ScanLine } from "lucide-react";
 import PosNavbar from "@/components/PosNavbar";
 import Receipt, { type ReceiptData } from "@/components/Receipt";
 import Modal from "@/components/Modal";
 import CashierQuickActions from "@/components/CashierQuickActions";
 import AccessDeniedNotice from "@/components/AccessDeniedNotice";
+import SendToKitchenModal from "@/components/SendToKitchenModal";
+import OpenBillPanel from "@/components/pos/OpenBillPanel";
+import ShiftModal from "@/components/ShiftModal";
+import SoldOutToggle from "@/components/pos/SoldOutToggle";
+import { CustomerLoyaltyModal } from "@/components/crm/CustomerLoyaltyModal";
+import { UserRound, X as XIcon, Wallet } from "lucide-react";
+import { validateAndApplyVoucher } from "@/app/actions/purchasing-loyalty-actions";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { db } from "@/lib/dexie";
-import { formatRupiah, generateInvoiceNumber } from "@/lib/utils";
-import type { CartItem, Product } from "@/lib/types";
+import { useProductAvailabilityChannel } from "@/lib/useProductAvailabilityChannel";
+import { formatRupiah, generateInvoiceNumber, formatNumberWithDots, stripNumberDots, cx } from "@/lib/utils";
+import type { CartItem, KitchenStation, OrderWithItems, Product } from "@/lib/types";
 
 /**
  * Kolom stok (track_stock, stock_qty) ditambahkan lewat migration_009,
@@ -51,9 +59,17 @@ export default function PosPage() {
   const [stockNotice, setStockNotice] = useState<string | null>(null);
   const [memberCode, setMemberCode] = useState("");
   const [discountPct, setDiscountPct] = useState(0);
+  const [voucherCode, setVoucherCode] = useState("");
+  const [voucherDiscountPreview, setVoucherDiscountPreview] = useState(0);
+  const [voucherError, setVoucherError] = useState<string | null>(null);
+  const [selectedCustomer, setSelectedCustomer] = useState<{ id: string; customer_name: string } | null>(null);
+  const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [showCheckout, setShowCheckout] = useState(false);
   const [showCartSheet, setShowCartSheet] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("cash");
+  // Uang diterima (tunai) — dipakai modal Konfirmasi Pembayaran untuk
+  // kalkulasi kembalian otomatis + tombol preset (Requirement 2).
+  const [cashReceived, setCashReceived] = useState("");
   const [receipt, setReceipt] = useState<ReceiptData | null>(null);
   const [cashierName, setCashierName] = useState("Kasir");
   const [cashierEmail, setCashierEmail] = useState<string | null>(null);
@@ -62,6 +78,13 @@ export default function PosPage() {
   const [shiftStartedAt, setShiftStartedAt] = useState<string | null>(null);
   const [session, setSession] = useState<{ tenantId: string; cashierId: string; branchId: string | null } | null>(null);
   const [branchName, setBranchName] = useState<string | null>(null);
+  // Phase 2 Update 1 — jalur KDS/meja (create_kitchen_order -> /kitchen -> checkout_order_v2),
+  // dijalankan BERDAMPINGAN dengan "Bayar Langsung" (checkout_transaction) lama, bukan menggantinya,
+  // supaya kasir tetap punya jalur cepat untuk item yang memang tidak butuh dapur/meja.
+  const [shiftId, setShiftId] = useState<string | null>(null);
+  const [kitchenStations, setKitchenStations] = useState<KitchenStation[]>([]);
+  const [showSendToKitchen, setShowSendToKitchen] = useState(false);
+  const [showOpenBills, setShowOpenBills] = useState(false);
   const [cafeSettings, setCafeSettings] = useState({
     name: "Kafe Demo",
     address: "Jl. Contoh No. 1",
@@ -69,6 +92,23 @@ export default function PosPage() {
     wifiSsid: "KafeDemo-WiFi",
     wifiPassword: "kopi1234",
   });
+
+  // --- Shift Closing Kasir (Blind Z-Report) ---
+  // Modal Buka/Tutup Shift (components/ShiftModal.tsx) sudah lama dibuat
+  // tapi belum pernah dipasang di halaman manapun — sebelumnya /pos
+  // otomatis membuka shift TANPA minta modal awal (RPC lama `open_shift`,
+  // lihat di bawah). Sekarang: cek dulu apakah kasir ini SUDAH punya
+  // shift 'open'; kalau belum, modal awal (Opening Float) WAJIB diisi
+  // lewat ShiftModal sebelum layar kasir bisa dipakai transaksi.
+  const [showShiftModal, setShowShiftModal] = useState(false);
+  const [shiftLoading, setShiftLoading] = useState(true);
+
+  // --- Sold Out / Menu 86 ---
+  const [savingProductIds, setSavingProductIds] = useState<Set<string>>(new Set());
+
+  // --- Keyboard shortcuts (F1 Cari Produk, F2 Bayar, F4 Diskon, ESC Batal) ---
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const [pendingDiscountFocus, setPendingDiscountFocus] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -103,21 +143,39 @@ export default function PosPage() {
       }
       setSession({ tenantId: profile.tenant_id, cashierId: userId, branchId: effectiveBranchId });
 
-      // Buka shift otomatis (idempotent — kalau sudah ada yang 'open'
-      // untuk akun ini, dipakai lagi, tidak bikin baru) supaya navbar bisa
-      // tampilkan "Shift dimulai HH:mm" dan tiap transaksi otomatis
-      // tertaut ke shift ini lewat checkout_transaction().
-      const { data: shiftId } = await supabase.rpc("open_shift", {
-        p_tenant_id: profile.tenant_id,
-        p_cashier_id: userId,
-      });
-      if (shiftId) {
-        const { data: shiftRow } = await supabase
-          .from("shifts")
-          .select("opened_at")
-          .eq("id", shiftId)
-          .single();
-        if (shiftRow) setShiftStartedAt(shiftRow.opened_at);
+      // Cek apakah kasir ini SUDAH punya shift 'open' — TIDAK lagi
+      // auto-buka shift baru tanpa modal awal (RPC lama `open_shift`
+      // dipanggil di sini sebelumnya, defaultnya opening_cash=0, jadi
+      // Shift Closing/Z-Report di akhir hari tidak punya modal awal yang
+      // benar untuk direkonsiliasi). Kalau belum ada shift terbuka,
+      // `showShiftModal` di bawah memaksa kasir mengisi Opening Float
+      // lewat ShiftModal (open_shift_v2) SEBELUM bisa mulai transaksi —
+      // lihat render <ShiftModal> di akhir file.
+      const { data: openShiftRow } = await supabase
+        .from("shifts")
+        .select("id, opened_at")
+        .eq("tenant_id", profile.tenant_id)
+        .eq("cashier_id", userId)
+        .eq("status", "open")
+        .maybeSingle();
+      if (openShiftRow) {
+        setShiftId(openShiftRow.id as string);
+        setShiftStartedAt(openShiftRow.opened_at);
+      } else {
+        setShowShiftModal(true);
+      }
+      setShiftLoading(false);
+
+      // Stasiun dapur cabang ini — dipakai SendToKitchenModal untuk cetak
+      // tiket per stasiun (Bar/Kitchen/Dessert) begitu order dikirim.
+      if (effectiveBranchId) {
+        const { data: stationRows } = await supabase
+          .from("kitchen_stations")
+          .select("*")
+          .eq("branch_id", effectiveBranchId)
+          .eq("is_active", true)
+          .order("sort_order");
+        setKitchenStations((stationRows as KitchenStation[]) ?? []);
       }
 
       const cached = await db.products.toArray();
@@ -141,12 +199,16 @@ export default function PosPage() {
 
       // Coba refresh menu dari Supabase (hanya milik tenant sendiri —
       // RLS juga menegakkan ini, filter di sini murni untuk performa query).
+      // CATATAN: filter `is_available=true` SENGAJA dihapus dari sini —
+      // kasir sekarang perlu melihat item yang sedang Sold Out juga
+      // (ditampilkan abu-abu dengan badge "Habis") supaya bisa langsung
+      // ditandai tersedia lagi lewat SoldOutToggle begitu stok datang,
+      // bukan menghilang sepenuhnya dari layar seperti sebelumnya.
       try {
         const { data } = await supabase
           .from("products")
           .select("*")
-          .eq("tenant_id", profile.tenant_id)
-          .eq("is_available", true);
+          .eq("tenant_id", profile.tenant_id);
 
         if (data && data.length > 0) {
           // Sejak migration_011, stok per menu dibaca dari branch_stock
@@ -191,6 +253,73 @@ export default function PosPage() {
     });
   }, [products, search, category]);
 
+  // Realtime ketersediaan menu (Migrasi 020) — dengar toggle Sold Out/
+  // Menu 86 dari perangkat lain (KDS, kasir lain, /dashboard/menu) dan
+  // langsung update grid tanpa reload; `broadcastAvailability` dipakai
+  // saat KASIR INI yang toggle, supaya halaman QR Self-Order publik yang
+  // tidak kena postgres_changes (RLS) tetap tahu secara instan.
+  const { broadcastAvailability } = useProductAvailabilityChannel(session?.tenantId ?? null, (payload) => {
+    if (payload.eventType === "DELETE") {
+      setProducts((prev) => prev.filter((p) => p.id !== payload.old?.id));
+      return;
+    }
+    const row = payload.new as Product;
+    if (!row?.id) return;
+    setProducts((prev) => {
+      // Merge HANYA kolom dasar `products` (name/price/category/
+      // is_available/image_url/track_stock) — stock_qty/low_stock_threshold
+      // di state ini hasil gabungan dari branch_stock (lihat fetch di
+      // atas), BUKAN kolom asli tabel products, jadi jangan ditimpa oleh
+      // payload realtime supaya angka stok cabang tidak "mundur".
+      const existing = prev.find((p) => p.id === row.id);
+      if (!existing) return [...prev, row as StockAwareProduct];
+      return prev.map((p) =>
+        p.id === row.id
+          ? { ...p, name: row.name, price: row.price, category: row.category, image_url: row.image_url, is_available: row.is_available, track_stock: (row as any).track_stock ?? p.track_stock }
+          : p
+      );
+    });
+  });
+
+  async function toggleSoldOut(product: StockAwareProduct) {
+    const next = !product.is_available;
+    setSavingProductIds((prev) => new Set(prev).add(product.id));
+    setProducts((prev) => prev.map((p) => (p.id === product.id ? { ...p, is_available: next } : p)));
+
+    const supabase = createClient();
+    const { error } = await supabase.from("products").update({ is_available: next }).eq("id", product.id);
+
+    setSavingProductIds((prev) => {
+      const copy = new Set(prev);
+      copy.delete(product.id);
+      return copy;
+    });
+
+    if (error) {
+      setProducts((prev) => prev.map((p) => (p.id === product.id ? { ...p, is_available: !next } : p)));
+      showStockNotice("Gagal mengubah status: " + error.message);
+      return;
+    }
+
+    await db.products.update(product.id, { is_available: next }).catch(() => {});
+    broadcastAvailability({
+      id: product.id,
+      name: product.name,
+      price: product.price,
+      category: product.category,
+      image_url: product.image_url,
+      is_available: next,
+    });
+
+    // Kalau produk yang barusan ditandai Sold Out sedang ada di keranjang
+    // (belum sempat dibayar), kasir perlu tahu — TIDAK otomatis dihapus
+    // dari keranjang (mungkin memang sudah disiapkan/dipegang), cukup
+    // notifikasi supaya sadar sebelum checkout.
+    if (next && cart.some((i) => i.id === product.id)) {
+      showStockNotice(`"${product.name}" ditandai Sold Out — masih ada di keranjang, cek sebelum bayar.`);
+    }
+  }
+
   // Batas maksimum yang boleh dimasukkan ke keranjang untuk satu produk.
   // Kalau produk ini track_stock=true, batasnya stock_qty (stok HPP yang
   // tersedia); produk yang tidak dilacak stoknya tidak dibatasi di sini.
@@ -205,6 +334,10 @@ export default function PosPage() {
   }
 
   function addToCart(product: StockAwareProduct) {
+    if (!product.is_available) {
+      showStockNotice(`"${product.name}" sedang Sold Out.`);
+      return;
+    }
     const limit = availableStock(product);
     setCart((prev) => {
       const existing = prev.find((i) => i.id === product.id);
@@ -244,13 +377,55 @@ export default function PosPage() {
     });
   }
 
+  // Phase 2A.2 §10 — cashier can type an exact quantity instead of tapping
+  // +/- one at a time (e.g. "12x Es Teh" for a big order). Same stock-limit
+  // guard as the +/- buttons; not a new business rule, just a faster way to
+  // reach the same state updateQty already allows one tap at a time.
+  function setQtyDirect(id: string, qty: number) {
+    setCart((prev) => {
+      const item = prev.find((i) => i.id === id);
+      if (!item) return prev;
+      if (!Number.isFinite(qty) || qty <= 0) {
+        return prev.filter((i) => i.id !== id);
+      }
+      const limit = availableStock(item);
+      if (qty > limit) {
+        showStockNotice(`Stok "${item.name}" tidak cukup — tersisa ${limit}.`);
+        return prev.map((i) => (i.id === id ? { ...i, qty: limit } : i));
+      }
+      return prev.map((i) => (i.id === id ? { ...i, qty } : i));
+    });
+  }
+
   function removeItem(id: string) {
     setCart((prev) => prev.filter((i) => i.id !== id));
   }
 
   const subtotal = cart.reduce((sum, i) => sum + i.price * i.qty, 0);
-  const discountAmount = Math.round((subtotal * discountPct) / 100);
-  const total = subtotal - discountAmount;
+  const memberDiscountAmount = Math.round((subtotal * discountPct) / 100);
+  // Preview saja (dari validateAndApplyVoucher, dipanggil terhadap subtotal
+  // yang sama dipakai server) — total yang benar-benar ditagih tetap
+  // dihitung ulang oleh checkout_transaction() saat submit. Kalau preview
+  // dan hasil server beda (mis. voucher habis di detik terakhir), struk
+  // yang dicetak di sini bisa saja tidak 100% match — kasir akan lihat
+  // error dari server sebelum itu terjadi (lihat handleCheckout).
+  const discountAmount = memberDiscountAmount + voucherDiscountPreview;
+  const total = Math.max(0, subtotal - discountAmount);
+
+  async function applyVoucherCode() {
+    setVoucherError(null);
+    if (!voucherCode.trim()) {
+      setVoucherDiscountPreview(0);
+      return;
+    }
+    const result = await validateAndApplyVoucher(voucherCode.trim().toUpperCase(), subtotal);
+    if (result.error || !result.data) {
+      setVoucherError(result.error ?? "Voucher tidak valid");
+      setVoucherDiscountPreview(0);
+      return;
+    }
+    setVoucherDiscountPreview(result.data.discount);
+  }
 
   async function applyMemberCode() {
     if (!memberCode.trim()) return;
@@ -270,6 +445,14 @@ export default function PosPage() {
   async function handleCheckout() {
     if (!session) {
       alert("Sesi tidak ditemukan. Silakan login ulang.");
+      return;
+    }
+
+    // Tunai: pastikan uang diterima cukup sebelum lanjut — tombol
+    // "Selesaikan Transaksi" sudah di-disable untuk kasus ini juga, cek
+    // di sini murni jaring pengaman kedua.
+    if (paymentMethod === "cash" && (!cashReceived || Number(cashReceived) < total)) {
+      alert("Uang diterima belum cukup / belum diisi.");
       return;
     }
 
@@ -293,7 +476,20 @@ export default function PosPage() {
       is_offline_sync: !isOnline,
       synced: 0 as const,
       created_at: new Date().toISOString(),
+      // Pelanggan/voucher hanya bisa diproses saat online (checkout_transaction
+      // butuh validasi server-side real-time terhadap sisa kuota voucher, dsb).
+      // Kalau offline, transaksi tetap masuk antrian TANPA keduanya — kasir
+      // sudah diberi tahu (lihat alert di bawah) supaya tidak salah kira
+      // poin/voucher sudah diterapkan.
+      customer_id: selectedCustomer?.id ?? null,
+      voucher_code: voucherCode.trim() || null,
     };
+
+    if (!isOnline && (selectedCustomer || voucherCode.trim())) {
+      alert(
+        "Sedang offline: transaksi tetap tersimpan, tapi poin loyalitas dan voucher TIDAK akan diterapkan (butuh koneksi untuk validasi server). Lanjutkan checkout, lalu terapkan voucher/poin manual setelah online kembali kalau perlu."
+      );
+    }
 
     // Queue locally first — this is what lets checkout keep working
     // even when the "Online" badge in the navbar flips to "Offline".
@@ -316,6 +512,8 @@ export default function PosPage() {
           p_member_code: memberCode || null,
           p_items: txPayload.items.map((i) => ({ product_id: i.product_id, qty: i.qty })),
           p_branch_id: session.branchId,
+          p_customer_id: selectedCustomer?.id ?? null,
+          p_voucher_code: voucherCode.trim() || null,
         });
         if (!error) {
           await db.pendingTransactions.update(localId, { synced: 1 });
@@ -331,7 +529,25 @@ export default function PosPage() {
           alert(error.message.replace(/^STOCK_INSUFFICIENT:\s*/, ""));
           return;
         } else {
+          // Server MENOLAK checkout_transaction() untuk alasan lain
+          // (voucher tidak valid, kode member kedaluwarsa, pelanggan
+          // tidak ditemukan, dll — lihat RAISE EXCEPTION di migration_017).
+          // Ini bukan kegagalan jaringan (kita online dan dapat respons),
+          // jadi tidak akan pernah berhasil di-retry oleh
+          // syncPendingTransactions(). Perlakukan sama seperti
+          // STOCK_INSUFFICIENT: batalkan antrean lokal dan JANGAN cetak
+          // struk untuk transaksi yang server tolak — sebelumnya alur ini
+          // hanya console.error lalu tetap lanjut ke setReceipt(), yang
+          // membuat kasir melihat struk "berhasil" untuk transaksi yang
+          // sebenarnya tidak pernah tersimpan di server.
           console.error("checkout_transaction gagal:", error.message);
+          await db.pendingTransactions.delete(localId);
+          alert(
+            "Transaksi tidak dapat diproses: " +
+              error.message.replace(/^STOCK_INSUFFICIENT:\s*/, "") +
+              "\nStruk tidak dicetak. Periksa voucher/member/pelanggan lalu coba lagi."
+          );
+          return;
         }
       } catch {
         // will be retried by syncPendingTransactions later
@@ -352,13 +568,117 @@ export default function PosPage() {
       wifiSsid: cafeSettings.wifiSsid,
       wifiPassword: cafeSettings.wifiPassword,
       width: "80mm",
+      // Uang diterima/kembalian (tunai) — kosong untuk metode lain.
+      cashReceived: paymentMethod === "cash" ? Number(cashReceived) : undefined,
+      changeDue: paymentMethod === "cash" ? Number(cashReceived) - total : undefined,
     });
 
     setCart([]);
     setMemberCode("");
     setDiscountPct(0);
+    setVoucherCode("");
+    setVoucherDiscountPreview(0);
+    setVoucherError(null);
+    setSelectedCustomer(null);
+    setCashReceived("");
     setShowCheckout(false);
   }
+
+  // Dipanggil begitu OpenBillPanel berhasil membayar sebuah order KDS
+  // lewat checkout_order_v2 — tampilkan struk yang sama dengan jalur
+  // Bayar Langsung, dari data order (bukan dari cart, karena cart di
+  // layar ini tidak dipakai untuk order yang sudah dikirim ke dapur).
+  function handleOpenBillPaid(_transactionId: string, order: OrderWithItems) {
+    setShowOpenBills(false);
+    const total = order.order_items.reduce((sum, i) => sum + i.subtotal, 0);
+    setReceipt({
+      cafeName: cafeSettings.name,
+      cafeAddress: cafeSettings.address,
+      invoiceNumber: order.order_number,
+      cashierName,
+      items: order.order_items.map((i) => ({ id: i.id, name: i.product_name, price: i.unit_price, qty: i.qty })) as unknown as ReceiptData["items"],
+      total,
+      discount: 0,
+      paymentMethod: "lihat rincian di kasir",
+      createdAt: new Date().toISOString(),
+      showWifi: cafeSettings.showWifi,
+      wifiSsid: cafeSettings.wifiSsid,
+      wifiPassword: cafeSettings.wifiPassword,
+      width: "80mm",
+    });
+  }
+
+  // Fokus otomatis ke input diskon (voucher/member) di CartPanel setelah
+  // bottom sheet mobile selesai terbuka (F4 di HP: buka sheet dulu, baru
+  // input-nya ada di DOM) — lihat pemicu di listener keydown di bawah.
+  useEffect(() => {
+    if (!pendingDiscountFocus) return;
+    const id = setTimeout(() => {
+      const inputs = document.querySelectorAll<HTMLInputElement>("[data-discount-input]");
+      for (const el of Array.from(inputs)) {
+        if (el.offsetParent !== null) {
+          el.focus();
+          break;
+        }
+      }
+      setPendingDiscountFocus(false);
+    }, 50);
+    return () => clearTimeout(id);
+  }, [pendingDiscountFocus, showCartSheet]);
+
+  // --- Keyboard Shortcuts (Requirement 2) ---
+  // F1 = Cari Produk, F2 = Bayar/Checkout, F4 = Diskon, ESC = Batal/Tutup
+  // Modal. Dipasang sebagai listener global (bukan per-elemen) supaya
+  // aktif dari mana pun fokus sedang berada di layar kasir — penting
+  // untuk alur cepat saat jam sibuk, kasir tidak perlu klik dulu.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "F1") {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        return;
+      }
+
+      if (e.key === "F2") {
+        e.preventDefault();
+        if (cart.length === 0) {
+          showStockNotice("Keranjang masih kosong — tidak ada yang bisa dibayar.");
+          return;
+        }
+        setShowCartSheet(false);
+        setShowCheckout(true);
+        return;
+      }
+
+      if (e.key === "F4") {
+        e.preventDefault();
+        const isDesktop = window.matchMedia("(min-width: 1024px)").matches;
+        if (isDesktop) {
+          document.querySelector<HTMLInputElement>("[data-discount-input]")?.focus();
+        } else {
+          setShowCartSheet(true);
+          setPendingDiscountFocus(true);
+        }
+        return;
+      }
+
+      if (e.key === "Escape") {
+        // Tutup modal yang sedang terbuka, dari yang paling "atas" —
+        // kalau tidak ada modal terbuka, ESC tidak melakukan apa-apa.
+        if (receipt) return setReceipt(null);
+        if (showCustomerModal) return setShowCustomerModal(false);
+        if (showOpenBills) return setShowOpenBills(false);
+        if (showSendToKitchen) return setShowSendToKitchen(false);
+        if (showCheckout) return setShowCheckout(false);
+        if (showShiftModal && shiftId) return setShowShiftModal(false); // hanya kalau BUKAN wajib buka shift
+        if (showCartSheet) return setShowCartSheet(false);
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [cart.length, receipt, showCustomerModal, showOpenBills, showSendToKitchen, showCheckout, showCartSheet, showShiftModal, shiftId]);
 
   return (
     <div className="h-screen flex flex-col bg-neutral-50">
@@ -371,6 +691,7 @@ export default function PosPage() {
         email={cashierEmail}
         cafeName={cafeSettings.name}
         branchName={branchName}
+        branchId={session?.branchId ?? null}
         shiftStartedAt={shiftStartedAt}
         onLogout={async () => {
           await createClient().auth.signOut();
@@ -387,9 +708,10 @@ export default function PosPage() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" size={18} />
               <input
+                ref={searchInputRef}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Cari menu..."
+                placeholder="Cari menu... (F1)"
                 className="input-field pl-10"
               />
             </div>
@@ -408,6 +730,21 @@ export default function PosPage() {
                 </button>
               ))}
             </div>
+            {session && (
+              <button onClick={() => setShowOpenBills(true)} className="btn-outline text-sm px-3 shrink-0 whitespace-nowrap">
+                Meja &amp; Bill Terbuka
+              </button>
+            )}
+            {/* Kas & Shift — buka ShiftModal (Cash In/Out/Tutup Shift) kapan
+                saja di tengah hari, bukan cuma paksaan di awal shift. */}
+            {session && shiftId && (
+              <button
+                onClick={() => setShowShiftModal(true)}
+                className="btn-outline text-sm px-3 shrink-0 whitespace-nowrap flex items-center gap-1.5"
+              >
+                <Wallet size={14} /> Kas &amp; Shift
+              </button>
+            )}
             {/* Cuma kasir yang lihat tombol ini — owner/manager sudah punya
                 akses penuh lewat Dashboard, tidak perlu jalur usulan. */}
             {role === "cashier" && session && (
@@ -418,13 +755,37 @@ export default function PosPage() {
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 overflow-y-auto pb-4">
             {filtered.map((product) => {
               const outOfStock = product.track_stock && (product.stock_qty ?? 0) <= 0;
+              const soldOut = !product.is_available;
+              const blocked = outOfStock || soldOut;
               return (
-                <button
+                <div
                   key={product.id}
-                  onClick={() => addToCart(product)}
-                  disabled={outOfStock}
-                  className="card p-3 text-left hover:border-primary hover:shadow-md transition-all active:scale-95 disabled:opacity-50 disabled:hover:border-neutral-200 disabled:hover:shadow-none disabled:active:scale-100"
+                  role="button"
+                  tabIndex={blocked ? -1 : 0}
+                  onClick={() => !blocked && addToCart(product)}
+                  onKeyDown={(e) => {
+                    if (!blocked && (e.key === "Enter" || e.key === " ")) addToCart(product);
+                  }}
+                  className={cx(
+                    "card p-3 text-left transition-all relative",
+                    blocked
+                      ? "opacity-60 cursor-default"
+                      : "hover:border-primary hover:shadow-md active:scale-95 cursor-pointer"
+                  )}
                 >
+                  {/* Sold Out / Menu 86 quick-toggle (Requirement 1) — elemen
+                      <button> TERPISAH dari card (yang sendiri bukan <button>
+                      lagi, supaya tombol ini valid & tidak ikut memicu
+                      addToCart lewat bubbling; stopPropagation tetap dijaga
+                      di SoldOutToggle sendiri sebagai lapis kedua). */}
+                  <SoldOutToggle
+                    isAvailable={product.is_available}
+                    saving={savingProductIds.has(product.id)}
+                    onToggle={() => toggleSoldOut(product)}
+                    size="sm"
+                    className="absolute top-1.5 left-1.5 z-10"
+                  />
+
                   <div className="aspect-square rounded-xl bg-neutral-100 mb-2 flex items-center justify-center text-neutral-300 text-3xl overflow-hidden relative">
                     {product.image_url ? (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -432,10 +793,15 @@ export default function PosPage() {
                     ) : (
                       "☕"
                     )}
+                    {soldOut && (
+                      <div className="absolute inset-0 bg-neutral-900/60 flex items-center justify-center">
+                        <span className="text-white text-xs font-bold uppercase tracking-wide bg-urgent px-2 py-1 rounded-full">Sold Out</span>
+                      </div>
+                    )}
                     {/* Sisa stok — hanya untuk produk yang dilacak stoknya
                         di menu Stok & HPP, supaya kasir tahu batasnya sebelum
                         mencoba menambah lebih dari yang tersedia. */}
-                    {product.track_stock && (
+                    {!soldOut && product.track_stock && (
                       <span
                         className={
                           outOfStock
@@ -449,9 +815,9 @@ export default function PosPage() {
                       </span>
                     )}
                   </div>
-                  <p className="text-sm font-semibold text-neutral-900 line-clamp-2">{product.name}</p>
-                  <p className="text-sm font-bold text-primary mt-1">{formatRupiah(product.price)}</p>
-                </button>
+                  <p className={cx("text-sm font-semibold line-clamp-2", soldOut ? "text-neutral-400" : "text-neutral-900")}>{product.name}</p>
+                  <p className={cx("text-sm font-bold mt-1", soldOut ? "text-neutral-400" : "text-primary")}>{formatRupiah(product.price)}</p>
+                </div>
               );
             })}
             {filtered.length === 0 && (
@@ -469,13 +835,23 @@ export default function PosPage() {
             memberCode={memberCode}
             setMemberCode={setMemberCode}
             applyMemberCode={applyMemberCode}
+            voucherCode={voucherCode}
+            setVoucherCode={setVoucherCode}
+            applyVoucherCode={applyVoucherCode}
+            voucherError={voucherError}
+            voucherDiscountPreview={voucherDiscountPreview}
+            selectedCustomer={selectedCustomer}
+            onOpenCustomerModal={() => setShowCustomerModal(true)}
+            onClearCustomer={() => setSelectedCustomer(null)}
             updateQty={updateQty}
+            setQty={setQtyDirect}
             removeItem={removeItem}
             subtotal={subtotal}
             discountPct={discountPct}
             discountAmount={discountAmount}
             total={total}
             onCheckout={() => setShowCheckout(true)}
+            onSendToKitchen={() => setShowSendToKitchen(true)}
           />
         </div>
       </div>
@@ -507,7 +883,16 @@ export default function PosPage() {
             memberCode={memberCode}
             setMemberCode={setMemberCode}
             applyMemberCode={applyMemberCode}
+            voucherCode={voucherCode}
+            setVoucherCode={setVoucherCode}
+            applyVoucherCode={applyVoucherCode}
+            voucherError={voucherError}
+            voucherDiscountPreview={voucherDiscountPreview}
+            selectedCustomer={selectedCustomer}
+            onOpenCustomerModal={() => setShowCustomerModal(true)}
+            onClearCustomer={() => setSelectedCustomer(null)}
             updateQty={updateQty}
+            setQty={setQtyDirect}
             removeItem={removeItem}
             subtotal={subtotal}
             discountPct={discountPct}
@@ -517,43 +902,122 @@ export default function PosPage() {
               setShowCartSheet(false);
               setShowCheckout(true);
             }}
+            onSendToKitchen={() => {
+              setShowCartSheet(false);
+              setShowSendToKitchen(true);
+            }}
             embedded
           />
         </Modal>
       )}
 
       {/* Checkout modal */}
-      {showCheckout && (
-        <Modal
-          title="Konfirmasi Pembayaran"
-          onClose={() => setShowCheckout(false)}
-          footer={
-            <button onClick={handleCheckout} className="btn-primary w-full">
-              Selesaikan Transaksi
-            </button>
-          }
-        >
-          <p className="text-2xl font-bold text-primary">{formatRupiah(total)}</p>
+      {showCheckout && (() => {
+        const received = Number(cashReceived) || 0;
+        const change = received - total;
+        const cashInsufficient = paymentMethod === "cash" && (!cashReceived || received < total);
+        return (
+          <Modal
+            title="Konfirmasi Pembayaran"
+            onClose={() => setShowCheckout(false)}
+            footer={
+              <button disabled={cashInsufficient} onClick={handleCheckout} className="btn-primary w-full disabled:opacity-50">
+                Selesaikan Transaksi
+              </button>
+            }
+          >
+            <p className="text-2xl font-bold text-primary">{formatRupiah(total)}</p>
 
-          <div>
-            <label className="text-sm font-medium text-neutral-700 mb-1 block">Metode Pembayaran</label>
-            <div className="grid grid-cols-3 gap-2">
-              {["cash", "qris", "debit"].map((m) => (
-                <button
-                  key={m}
-                  onClick={() => setPaymentMethod(m)}
-                  className={
-                    m === paymentMethod
-                      ? "py-2 rounded-xl bg-primary text-white text-sm font-medium uppercase"
-                      : "py-2 rounded-xl border border-neutral-200 text-neutral-600 text-sm font-medium uppercase hover:bg-neutral-100"
-                  }
-                >
-                  {m}
-                </button>
-              ))}
+            <div>
+              <label className="text-sm font-medium text-neutral-700 mb-1 block">Metode Pembayaran</label>
+              <div className="grid grid-cols-3 gap-2">
+                {["cash", "qris", "debit"].map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => {
+                      setPaymentMethod(m);
+                      if (m !== "cash") setCashReceived("");
+                    }}
+                    className={
+                      m === paymentMethod
+                        ? "py-2 rounded-xl bg-primary text-white text-sm font-medium uppercase"
+                        : "py-2 rounded-xl border border-neutral-200 text-neutral-600 text-sm font-medium uppercase hover:bg-neutral-100"
+                    }
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-        </Modal>
+
+            {/* Quick Cash Buttons — kalkulasi kembalian otomatis (Requirement 2) */}
+            {paymentMethod === "cash" && (
+              <div className="space-y-2 pt-1">
+                <label className="text-sm font-medium text-neutral-700 block">Uang Diterima</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoFocus
+                  value={formatNumberWithDots(cashReceived)}
+                  onChange={(e) => setCashReceived(stripNumberDots(e.target.value))}
+                  placeholder="Contoh: 100.000"
+                  className="input-field text-lg font-semibold"
+                />
+                <div className="grid grid-cols-4 gap-2">
+                  {[
+                    { label: "Uang Pas", value: total },
+                    { label: "Rp 20rb", value: 20000 },
+                    { label: "Rp 50rb", value: 50000 },
+                    { label: "Rp 100rb", value: 100000 },
+                  ].map((preset) => (
+                    <button
+                      key={preset.label}
+                      onClick={() => setCashReceived(String(preset.value))}
+                      className={cx(
+                        "py-2 rounded-xl border text-xs font-semibold transition-colors",
+                        Number(cashReceived) === preset.value
+                          ? "bg-primary border-primary text-white"
+                          : "border-neutral-200 text-neutral-600 hover:bg-neutral-100"
+                      )}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+
+                {cashReceived && (
+                  <p className={cx("text-sm font-semibold text-right", change < 0 ? "text-urgent" : "text-emerald-600")}>
+                    {change < 0 ? `Kurang ${formatRupiah(-change)}` : `Kembalian: ${formatRupiah(change)}`}
+                  </p>
+                )}
+              </div>
+            )}
+          </Modal>
+        );
+      })()}
+
+      {/* Kirim ke Dapur — jalur KDS/meja (Phase 2 Update 1) */}
+      {showSendToKitchen && session && shiftId && (
+        <SendToKitchenModal
+          tenantId={session.tenantId}
+          branchId={session.branchId}
+          shiftId={shiftId}
+          cashierId={session.cashierId}
+          cashierName={cashierName}
+          cart={cart.map((i) => ({ product_id: i.id, name: i.name, qty: i.qty }))}
+          stations={kitchenStations}
+          onClose={() => setShowSendToKitchen(false)}
+          onSent={() => {
+            setShowSendToKitchen(false);
+            setCart([]);
+            setShowCartSheet(false);
+          }}
+        />
+      )}
+
+      {/* Meja & Bill Terbuka (Phase 2 Update 1) */}
+      {showOpenBills && (
+        <OpenBillPanel branchId={session?.branchId ?? null} cashierName={cashierName} role={role} onClose={() => setShowOpenBills(false)} onPaid={handleOpenBillPaid} />
       )}
 
       {/* Receipt modal */}
@@ -576,6 +1040,49 @@ export default function PosPage() {
           </div>
         </Modal>
       )}
+
+      {/* Cari/pilih pelanggan untuk transaksi ini — poin loyalitas hanya
+          dihitung server-side (lihat checkout_transaction, migration_017)
+          kalau ada customer_id yang terpasang di sini. */}
+      <CustomerLoyaltyModal
+        isOpen={showCustomerModal}
+        onClose={() => setShowCustomerModal(false)}
+        transactionAmount={total}
+        onSelectCustomer={(customer) => {
+          setSelectedCustomer({ id: customer.id, customer_name: customer.customer_name });
+          setShowCustomerModal(false);
+        }}
+      />
+
+      {/* Buka Shift (wajib, modal awal) & Manajemen Kas Shift (Requirement 3) —
+          shiftId null berarti kasir ini BELUM punya shift 'open', modal
+          tampil sebagai form Opening Cash yang wajib diisi (onClose no-op,
+          tidak bisa ditutup paksa) sebelum layar kasir bisa dipakai. Kalau
+          shiftId sudah ada, modal ini juga dipakai untuk Cash In/Out dan
+          Blind Closing (Z-Report) lewat tombol "Kas & Shift" di atas. */}
+      {session && shiftLoading === false && (showShiftModal || !shiftId) && (
+        <ShiftModal
+          tenantId={session.tenantId}
+          branchId={session.branchId}
+          cashierId={session.cashierId}
+          shiftId={shiftId}
+          onOpened={(id, openedAt) => {
+            setShiftId(id);
+            setShiftStartedAt(openedAt);
+            setShowShiftModal(false);
+          }}
+          onClosed={() => {
+            // Shift baru saja ditutup (Z-Report sudah ditampilkan & di-
+            // acknowledge kasir) — kembalikan layar ke status "belum ada
+            // shift", memaksa Opening Float baru diisi sebelum transaksi
+            // berikutnya (giliran shift baru, kasir sama atau berikutnya).
+            setShiftId(null);
+            setShiftStartedAt(null);
+            setShowShiftModal(false);
+          }}
+          onClose={() => setShowShiftModal(false)}
+        />
+      )}
     </div>
   );
 }
@@ -585,26 +1092,46 @@ function CartPanel({
   memberCode,
   setMemberCode,
   applyMemberCode,
+  voucherCode,
+  setVoucherCode,
+  applyVoucherCode,
+  voucherError,
+  voucherDiscountPreview,
+  selectedCustomer,
+  onOpenCustomerModal,
+  onClearCustomer,
   updateQty,
+  setQty,
   removeItem,
   subtotal,
   discountPct,
   discountAmount,
   total,
   onCheckout,
+  onSendToKitchen,
   embedded = false,
 }: {
   cart: CartItem[];
   memberCode: string;
   setMemberCode: (v: string) => void;
   applyMemberCode: () => void;
+  voucherCode: string;
+  setVoucherCode: (v: string) => void;
+  applyVoucherCode: () => void;
+  voucherError: string | null;
+  voucherDiscountPreview: number;
+  selectedCustomer: { id: string; customer_name: string } | null;
+  onOpenCustomerModal: () => void;
+  onClearCustomer: () => void;
   updateQty: (id: string, delta: number) => void;
+  setQty: (id: string, qty: number) => void;
   removeItem: (id: string) => void;
   subtotal: number;
   discountPct: number;
   discountAmount: number;
   total: number;
   onCheckout: () => void;
+  onSendToKitchen: () => void;
   /** true saat dipakai di dalam Modal (bottom sheet mobile) — modal sudah
    * punya header/padding sendiri, jadi header "Keranjang" internal ini
    * disembunyikan supaya tidak dobel. */
@@ -632,7 +1159,16 @@ function CartPanel({
               <button onClick={() => updateQty(item.id, -1)} className="w-7 h-7 rounded-full border border-neutral-200 flex items-center justify-center hover:bg-neutral-100">
                 <Minus size={12} />
               </button>
-              <span className="text-sm font-medium w-5 text-center">{item.qty}</span>
+              <input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                value={item.qty}
+                onChange={(e) => setQty(item.id, parseInt(e.target.value, 10))}
+                onFocus={(e) => e.target.select()}
+                aria-label={`Jumlah ${item.name}`}
+                className="text-sm font-medium w-9 text-center bg-transparent border-b border-transparent focus:border-primary outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              />
               <button onClick={() => updateQty(item.id, 1)} className="w-7 h-7 rounded-full border border-neutral-200 flex items-center justify-center hover:bg-neutral-100">
                 <Plus size={12} />
               </button>
@@ -653,10 +1189,48 @@ function CartPanel({
               onChange={(e) => setMemberCode(e.target.value)}
               placeholder="Kode Member / Scan QR"
               className="input-field pl-9 text-sm"
+              // Dipakai shortcut keyboard F4 (Diskon) untuk auto-focus ke
+              // sini — lihat listener F4 di komponen utama PosPage.
+              data-discount-input
             />
           </div>
           <button onClick={applyMemberCode} className="btn-outline text-sm px-3 shrink-0">Pakai</button>
         </div>
+
+        <div className="flex gap-2">
+          <input
+            value={voucherCode}
+            onChange={(e) => setVoucherCode(e.target.value)}
+            placeholder="Kode Voucher"
+            className="input-field flex-1 text-sm"
+          />
+          <button onClick={applyVoucherCode} className="btn-outline text-sm px-3 shrink-0">Cek</button>
+        </div>
+        {voucherError && <p className="text-xs text-urgent -mt-2">{voucherError}</p>}
+
+        <button
+          onClick={onOpenCustomerModal}
+          className="w-full flex items-center justify-between rounded-xl border border-neutral-200 px-3 py-2 text-sm hover:bg-neutral-50"
+        >
+          <span className="flex items-center gap-2 text-neutral-700">
+            <UserRound size={15} />
+            {selectedCustomer ? selectedCustomer.customer_name : "Pelanggan / Poin Loyalitas"}
+          </span>
+          {selectedCustomer ? (
+            <span
+              role="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onClearCustomer();
+              }}
+              className="text-neutral-400 hover:text-urgent"
+            >
+              <XIcon size={14} />
+            </span>
+          ) : (
+            <span className="text-primary text-xs font-medium">Pilih</span>
+          )}
+        </button>
 
         <div className="space-y-1 text-sm">
           <div className="flex justify-between text-neutral-500">
@@ -666,7 +1240,13 @@ function CartPanel({
           {discountPct > 0 && (
             <div className="flex justify-between text-primary">
               <span>Diskon Member ({discountPct}%)</span>
-              <span>-{formatRupiah(discountAmount)}</span>
+              <span>-{formatRupiah((subtotal * discountPct) / 100)}</span>
+            </div>
+          )}
+          {voucherDiscountPreview > 0 && (
+            <div className="flex justify-between text-primary">
+              <span>Diskon Voucher</span>
+              <span>-{formatRupiah(voucherDiscountPreview)}</span>
             </div>
           )}
           <div className="flex justify-between font-bold text-neutral-900 text-base pt-1">
@@ -675,12 +1255,24 @@ function CartPanel({
           </div>
         </div>
 
+        {/* Jalur utama F&B (Phase 2): kirim ke dapur dulu, lalu bayar
+            begitu siap/disajikan lewat "Meja & Bill Terbuka". */}
+        <button
+          disabled={cart.length === 0}
+          onClick={onSendToKitchen}
+          className="btn-primary w-full"
+        >
+          Kirim ke Dapur
+        </button>
+        {/* Jalur cepat lama — dipertahankan untuk item yang memang tidak
+            butuh dapur/meja (mis. air mineral kemasan, retail rak). Tidak
+            membuat order KDS/tidak mengisi meja. */}
         <button
           disabled={cart.length === 0}
           onClick={onCheckout}
-          className="btn-primary w-full"
+          className="btn-outline w-full text-sm"
         >
-          Bayar
+          Bayar Langsung (tanpa dapur)
         </button>
       </div>
     </>

@@ -69,6 +69,7 @@ const COMPARISON_ROWS: { label: string; free: string | boolean; pro: string | bo
 
 export default function SubscriptionPage() {
   const [loading, setLoading] = useState(true);
+  const [snapReady, setSnapReady] = useState(false);
   const [status, setStatus] = useState<string>("trial");
   const [currentTier, setCurrentTier] = useState<Tier>("free");
   const [daysLeft, setDaysLeft] = useState<number>(0);
@@ -111,6 +112,15 @@ export default function SubscriptionPage() {
     setPaymentError(null);
     setPayingPlan(planKey);
 
+    // Cek snap ready dulu sebelum fetch API
+    if (!snapReady || !window.snap) {
+      setPaymentError(
+        "⚠️ Modul Midtrans masih loading. Tunggu sebentar & coba lagi, atau coba: (1) Refresh halaman, (2) Nonaktifkan adblocker, (3) Pastikan NEXT_PUBLIC_MIDTRANS_CLIENT_KEY diisi di environment hosting."
+      );
+      setPayingPlan(null);
+      return;
+    }
+
     try {
       const res = await fetch("/api/midtrans/create-transaction", {
         method: "POST",
@@ -125,9 +135,10 @@ export default function SubscriptionPage() {
         return;
       }
 
+      // Double-check snap masih ada (redundant tapi aman)
       if (!window.snap) {
         setPaymentError(
-          "⚠️ Modul Midtrans tidak siap. Penyebab kemungkinan: (1) NEXT_PUBLIC_MIDTRANS_CLIENT_KEY kosong di env hosting, (2) Jaringan terputus saat load script snap.js. Muat ulang halaman & coba lagi."
+          "⚠️ Modul Midtrans hilang saat transaksi. Muat ulang halaman & coba lagi."
         );
         setPayingPlan(null);
         return;
@@ -160,12 +171,13 @@ export default function SubscriptionPage() {
   const midtransClientKeyMissing = !process.env.NEXT_PUBLIC_MIDTRANS_CLIENT_KEY;
 
   useEffect(() => {
-    if (midtransClientKeyMissing && !loading) {
+    // Jika CLIENT_KEY kosong, snap tidak akan siap sama sekali
+    if (midtransClientKeyMissing && !loading && !paymentError) {
       setPaymentError(
         "⚠️ Konfigurasi Midtrans belum lengkap. Hubungi admin: pastikan NEXT_PUBLIC_MIDTRANS_CLIENT_KEY & MIDTRANS_SERVER_KEY diisi di environment hosting, lalu redeploy."
       );
     }
-  }, [loading, midtransClientKeyMissing]);
+  }, [loading, midtransClientKeyMissing, paymentError]);
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -173,6 +185,20 @@ export default function SubscriptionPage() {
         src={isProduction ? "https://app.midtrans.com/snap/snap.js" : "https://app.sandbox.midtrans.com/snap/snap.js"}
         data-client-key={process.env.NEXT_PUBLIC_MIDTRANS_CLIENT_KEY}
         strategy="afterInteractive"
+        onLoad={() => {
+          // Delay 500ms supaya window.snap dijamin sudah terbentuk lengkap
+          setTimeout(() => {
+            if (window.snap) {
+              setSnapReady(true);
+            }
+          }, 500);
+        }}
+        onError={() => {
+          console.error("Gagal memuat snap.js dari Midtrans");
+          setPaymentError(
+            "⚠️ Gagal memuat script Midtrans. Periksa: (1) Koneksi internet, (2) CSP header di server, (3) Domain tidak di-block firewall. Muat ulang halaman & coba lagi."
+          );
+        }}
       />
 
       <div>
@@ -217,6 +243,13 @@ export default function SubscriptionPage() {
 
       {paymentError && (
         <div className="badge-urgent w-full justify-start px-3 py-2 rounded-lg">{paymentError}</div>
+      )}
+
+      {!snapReady && !paymentError && !loading && (
+        <div className="card p-3 flex items-center gap-2 text-sm text-neutral-600 bg-blue-50 border border-blue-100">
+          <Loader2 size={16} className="animate-spin text-blue-600" />
+          <span>Memuat modul pembayaran Midtrans...</span>
+        </div>
       )}
 
       {availableDiscountPct > 0 && (
@@ -265,14 +298,14 @@ export default function SubscriptionPage() {
             {plan.payable ? (
               <button
                 onClick={() => handlePay(plan.key)}
-                disabled={payingPlan !== null}
+                disabled={payingPlan !== null || !snapReady}
                 className={
                   (plan.highlight ? "btn-primary" : "btn-outline") +
                   " w-full mt-5 flex items-center justify-center gap-2 disabled:opacity-60"
                 }
               >
                 {payingPlan === plan.key && <Loader2 className="animate-spin" size={16} />}
-                Perpanjang Sekarang
+                {!snapReady && payingPlan !== plan.key ? "Memuat Midtrans..." : "Perpanjang Sekarang"}
               </button>
             ) : (
               <div className="w-full mt-5 text-center text-xs text-neutral-400 py-2.5">
