@@ -11,6 +11,7 @@ import SendToKitchenModal from "@/components/SendToKitchenModal";
 import OpenBillPanel from "@/components/pos/OpenBillPanel";
 import ShiftModal from "@/components/ShiftModal";
 import SoldOutToggle from "@/components/pos/SoldOutToggle";
+import ProductConfigModal, { type ProductGroupWithModifiers, type ConfiguredCartPayload } from "@/components/pos/ProductConfigModal";
 import { CustomerLoyaltyModal } from "@/components/crm/CustomerLoyaltyModal";
 import { UserRound, X as XIcon, Wallet } from "lucide-react";
 import { validateAndApplyVoucher } from "@/app/actions/purchasing-loyalty-actions";
@@ -19,8 +20,9 @@ import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { db } from "@/lib/dexie";
 import { useProductAvailabilityChannel } from "@/lib/useProductAvailabilityChannel";
 import { formatRupiah, generateInvoiceNumber, formatNumberWithDots, stripNumberDots, cx } from "@/lib/utils";
-import type { CartItem, KitchenStation, OrderWithItems, Product } from "@/lib/types";
+import type { CartItem, KitchenStation, OrderWithItems, Product, ProductVariant, ModifierGroup, Modifier } from "@/lib/types";
 
+import { toast } from "@/components/Toast";
 /**
  * Kolom stok (track_stock, stock_qty) ditambahkan lewat migration_009,
  * belum ada di lib/types.ts — diperluas di sini saja (pola yang sama
@@ -33,7 +35,22 @@ interface StockAwareProduct extends Product {
   low_stock_threshold?: number;
 }
 
-type StockAwareCartItem = StockAwareProduct & { qty: number };
+/**
+ * Phase 2A.3 — baris keranjang sekarang membawa konfigurasi terstruktur
+ * (varian + modifier), bukan cuma product+qty. `cartItemId` (bukan `id`
+ * product) yang jadi kunci identitas baris supaya 2 konfigurasi berbeda
+ * dari produk yang sama tidak digabung (Requirement 8), sementara
+ * `availableStock()` tetap menjumlahkan qty lintas baris per product_id
+ * yang sama (stok dilacak per produk, bukan per varian — lihat branch_stock).
+ */
+type StockAwareCartItem = StockAwareProduct & {
+  qty: number;
+  cartItemId: string;
+  variantId: string | null;
+  variantName: string | null;
+  modifiers: { modifier_id: string; name: string; price_adjustment: number }[];
+  unitPrice: number;
+};
 
 const CATEGORIES = ["Semua", "Kopi", "Non-Kopi", "Makanan", "Dessert"];
 
@@ -56,6 +73,13 @@ export default function PosPage() {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("Semua");
   const [cart, setCart] = useState<StockAwareCartItem[]>([]);
+  // Phase 2A.3 — master data varian/modifier per produk (product_id -> ...),
+  // dimuat sekali bersamaan dengan daftar produk supaya kartu menu bisa tahu
+  // instan apakah sebuah produk butuh modal konfigurasi sebelum masuk
+  // keranjang (lihat productNeedsConfig()) tanpa query tambahan per tap.
+  const [variantsByProduct, setVariantsByProduct] = useState<Map<string, ProductVariant[]>>(new Map());
+  const [groupsByProduct, setGroupsByProduct] = useState<Map<string, ProductGroupWithModifiers[]>>(new Map());
+  const [configModalProduct, setConfigModalProduct] = useState<StockAwareProduct | null>(null);
   const [stockNotice, setStockNotice] = useState<string | null>(null);
   const [memberCode, setMemberCode] = useState("");
   const [discountPct, setDiscountPct] = useState(0);
@@ -87,10 +111,16 @@ export default function PosPage() {
   const [showOpenBills, setShowOpenBills] = useState(false);
   const [cafeSettings, setCafeSettings] = useState({
     name: "Kafe Demo",
-    address: "Jl. Contoh No. 1",
+    // Phase 2A.2 §5 — dulu ada `address` hardcode ("Jl. Contoh No. 1") yang
+    // ikut tercetak di struk ASLI pelanggan walau tidak pernah cocok dengan
+    // alamat kafe sebenarnya (`tenants` belum punya kolom address — lihat
+    // docs/PHASE_2A2_DB_CHANGE_PROPOSAL.md Case E). Dihapus: lebih baik
+    // struk tidak menampilkan alamat sama sekali daripada menampilkan
+    // alamat yang salah.
     showWifi: true,
     wifiSsid: "KafeDemo-WiFi",
     wifiPassword: "kopi1234",
+    logoUrl: null as string | null,
   });
 
   // --- Shift Closing Kasir (Blind Z-Report) ---
@@ -195,6 +225,19 @@ export default function PosPage() {
           wifiSsid: tenant.wifi_ssid ?? prev.wifiSsid,
           wifiPassword: tenant.wifi_password ?? prev.wifiPassword,
         }));
+
+        // Logo kafi (Storage, path tetap `${tenant_id}/cafe-logo.jpg`) —
+        // list() dulu supaya struk tidak mencoba render <img> ke file yang
+        // belum pernah diunggah (lihat Pengaturan Kafe untuk upload).
+        const { data: logoFiles } = await supabase.storage
+          .from("menu-images")
+          .list(profile.tenant_id, { search: "cafe-logo" });
+        if (logoFiles && logoFiles.length > 0) {
+          const { data: pub } = supabase.storage
+            .from("menu-images")
+            .getPublicUrl(`${profile.tenant_id}/cafe-logo.jpg`);
+          setCafeSettings((prev) => ({ ...prev, logoUrl: pub.publicUrl }));
+        }
       }
 
       // Coba refresh menu dari Supabase (hanya milik tenant sendiri —
@@ -241,6 +284,53 @@ export default function PosPage() {
       } catch {
         // offline — cache lokal (kalau ada) tetap dipakai
         if (cached.length === 0) setProducts(FALLBACK_PRODUCTS);
+      }
+
+      // Phase 2A.3 — muat varian + modifier group SEKALI di awal (bukan
+      // per-tap kartu produk) supaya menambah item ke keranjang tetap
+      // instan dan tidak menimbulkan query berulang (Requirement 25).
+      // Modal konfigurasi HANYA butuh varian/modifier yang aktif — item
+      // nonaktif difilter lagi di ProductConfigModal sebagai jaring kedua.
+      try {
+        const [{ data: variantRows }, { data: pmgRows }, { data: groupRows }, { data: modifierRows }] = await Promise.all([
+          supabase.from("product_variants").select("*").eq("tenant_id", profile.tenant_id).eq("is_available", true),
+          supabase.from("product_modifier_groups").select("*"),
+          supabase.from("modifier_groups").select("*").eq("tenant_id", profile.tenant_id),
+          supabase.from("modifiers").select("*").eq("is_available", true),
+        ]);
+
+        const vMap = new Map<string, ProductVariant[]>();
+        for (const v of (variantRows as ProductVariant[]) ?? []) {
+          const list = vMap.get(v.product_id) ?? [];
+          list.push(v);
+          vMap.set(v.product_id, list);
+        }
+        for (const list of vMap.values()) list.sort((a, b) => a.display_order - b.display_order);
+        setVariantsByProduct(vMap);
+
+        const groupsById = new Map<string, ModifierGroup>();
+        for (const g of (groupRows as ModifierGroup[]) ?? []) groupsById.set(g.id, g);
+        const modifiersByGroup = new Map<string, Modifier[]>();
+        for (const m of (modifierRows as Modifier[]) ?? []) {
+          const list = modifiersByGroup.get(m.modifier_group_id) ?? [];
+          list.push(m);
+          modifiersByGroup.set(m.modifier_group_id, list);
+        }
+        for (const list of modifiersByGroup.values()) list.sort((a, b) => a.display_order - b.display_order);
+
+        const gMap = new Map<string, ProductGroupWithModifiers[]>();
+        for (const pmg of (pmgRows as { product_id: string; modifier_group_id: string; display_order: number }[]) ?? []) {
+          const group = groupsById.get(pmg.modifier_group_id);
+          if (!group) continue;
+          const list = gMap.get(pmg.product_id) ?? [];
+          list.push({ group, modifiers: modifiersByGroup.get(group.id) ?? [] });
+          gMap.set(pmg.product_id, list);
+        }
+        for (const list of gMap.values()) list.sort((a, b) => a.group.display_order - b.group.display_order);
+        setGroupsByProduct(gMap);
+      } catch {
+        // Varian/modifier gagal dimuat (mis. offline) — produk tetap bisa
+        // dijual sebagai item polos, hanya tanpa opsi konfigurasi.
       }
     })();
   }, []);
@@ -328,9 +418,29 @@ export default function PosPage() {
     return Math.max(0, product.stock_qty ?? 0);
   }
 
+  // Phase 2A.3 — stok tetap dilacak per PRODUK (branch_stock keyed by
+  // product_id, bukan per varian), jadi kalau kasir punya 2 baris keranjang
+  // untuk produk yang sama dengan konfigurasi berbeda (mis. Large+Oat dan
+  // Large+Full Cream), batas stok harus dihitung dari TOTAL qty semua baris
+  // produk itu, bukan per baris.
+  function qtyInCartForProduct(cart: StockAwareCartItem[], productId: string, excludeCartItemId?: string) {
+    return cart.reduce((sum, i) => (i.id === productId && i.cartItemId !== excludeCartItemId ? sum + i.qty : sum), 0);
+  }
+
   function showStockNotice(message: string) {
     setStockNotice(message);
     setTimeout(() => setStockNotice(null), 3000);
+  }
+
+  // Requirement 5 — produk dengan varian dan/atau modifier group terpasang
+  // wajib melalui ProductConfigModal dulu; produk polos tetap langsung
+  // masuk keranjang (tidak menambah langkah yang tidak perlu).
+  function productNeedsConfig(product: StockAwareProduct) {
+    return (variantsByProduct.get(product.id)?.length ?? 0) > 0 || (groupsByProduct.get(product.id)?.length ?? 0) > 0;
+  }
+
+  function buildCartItemId(productId: string, variantId: string | null, modifierIds: string[]) {
+    return `${productId}::${variantId ?? "base"}::${[...modifierIds].sort().join(",")}`;
   }
 
   function addToCart(product: StockAwareProduct) {
@@ -338,10 +448,15 @@ export default function PosPage() {
       showStockNotice(`"${product.name}" sedang Sold Out.`);
       return;
     }
+    if (productNeedsConfig(product)) {
+      setConfigModalProduct(product);
+      return;
+    }
+
     const limit = availableStock(product);
     setCart((prev) => {
-      const existing = prev.find((i) => i.id === product.id);
-      const currentQty = existing?.qty ?? 0;
+      const cartItemId = buildCartItemId(product.id, null, []);
+      const currentQty = qtyInCartForProduct(prev, product.id);
 
       // Perbaikan bug: sebelumnya tidak ada pengecekan sama sekali di sini,
       // jadi kasir bisa terus menambah qty melebihi stock_qty yang
@@ -352,27 +467,67 @@ export default function PosPage() {
         return prev;
       }
 
+      const existing = prev.find((i) => i.cartItemId === cartItemId);
       if (existing) {
-        return prev.map((i) => (i.id === product.id ? { ...i, qty: i.qty + 1 } : i));
+        return prev.map((i) => (i.cartItemId === cartItemId ? { ...i, qty: i.qty + 1 } : i));
       }
-      return [...prev, { ...product, qty: 1 }];
+      return [
+        ...prev,
+        { ...product, qty: 1, cartItemId, variantId: null, variantName: null, modifiers: [], unitPrice: product.price },
+      ];
     });
   }
 
-  function updateQty(id: string, delta: number) {
+  // Dipanggil dari ProductConfigModal setelah kasir memilih varian/modifier
+  // dan menekan "Tambah". `unitPrice` di sini murni untuk pratinjau struk —
+  // create_kitchen_order() menghitung ulang harga akhir dari sisi server
+  // (Requirement 6/26), jadi kasir tidak bisa memanipulasinya lewat DevTools.
+  function confirmAddConfigured(payload: ConfiguredCartPayload) {
+    const product = payload.product as StockAwareProduct;
+    const limit = availableStock(product);
+    const cartItemId = buildCartItemId(product.id, payload.variantId, payload.modifiers.map((m) => m.modifier_id));
+
     setCart((prev) => {
+      const currentQty = qtyInCartForProduct(prev, product.id);
+      if (currentQty + payload.qty > limit) {
+        showStockNotice(`Stok "${product.name}" tidak cukup — tersisa ${limit - currentQty < 0 ? 0 : limit - currentQty}.`);
+        return prev;
+      }
+
+      const existing = prev.find((i) => i.cartItemId === cartItemId);
+      if (existing) {
+        return prev.map((i) => (i.cartItemId === cartItemId ? { ...i, qty: i.qty + payload.qty } : i));
+      }
+      return [
+        ...prev,
+        {
+          ...product,
+          qty: payload.qty,
+          cartItemId,
+          variantId: payload.variantId,
+          variantName: payload.variantName,
+          modifiers: payload.modifiers,
+          unitPrice: payload.unitPrice,
+        },
+      ];
+    });
+    setConfigModalProduct(null);
+  }
+
+  function updateQty(cartItemId: string, delta: number) {
+    setCart((prev) => {
+      const item = prev.find((i) => i.cartItemId === cartItemId);
+      if (!item) return prev;
       if (delta > 0) {
-        const item = prev.find((i) => i.id === id);
-        if (item) {
-          const limit = availableStock(item);
-          if (item.qty + delta > limit) {
-            showStockNotice(`Stok "${item.name}" tidak cukup — tersisa ${limit}.`);
-            return prev;
-          }
+        const limit = availableStock(item);
+        const otherQty = qtyInCartForProduct(prev, item.id, cartItemId);
+        if (otherQty + item.qty + delta > limit) {
+          showStockNotice(`Stok "${item.name}" tidak cukup — tersisa ${Math.max(0, limit - otherQty - item.qty)}.`);
+          return prev;
         }
       }
       return prev
-        .map((i) => (i.id === id ? { ...i, qty: i.qty + delta } : i))
+        .map((i) => (i.cartItemId === cartItemId ? { ...i, qty: i.qty + delta } : i))
         .filter((i) => i.qty > 0);
     });
   }
@@ -381,27 +536,36 @@ export default function PosPage() {
   // +/- one at a time (e.g. "12x Es Teh" for a big order). Same stock-limit
   // guard as the +/- buttons; not a new business rule, just a faster way to
   // reach the same state updateQty already allows one tap at a time.
-  function setQtyDirect(id: string, qty: number) {
+  function setQtyDirect(cartItemId: string, qty: number) {
     setCart((prev) => {
-      const item = prev.find((i) => i.id === id);
+      const item = prev.find((i) => i.cartItemId === cartItemId);
       if (!item) return prev;
       if (!Number.isFinite(qty) || qty <= 0) {
-        return prev.filter((i) => i.id !== id);
+        return prev.filter((i) => i.cartItemId !== cartItemId);
       }
       const limit = availableStock(item);
-      if (qty > limit) {
-        showStockNotice(`Stok "${item.name}" tidak cukup — tersisa ${limit}.`);
-        return prev.map((i) => (i.id === id ? { ...i, qty: limit } : i));
+      const otherQty = qtyInCartForProduct(prev, item.id, cartItemId);
+      if (otherQty + qty > limit) {
+        const capped = Math.max(0, limit - otherQty);
+        showStockNotice(`Stok "${item.name}" tidak cukup — tersisa ${capped}.`);
+        return prev.map((i) => (i.cartItemId === cartItemId ? { ...i, qty: capped } : i)).filter((i) => i.qty > 0);
       }
-      return prev.map((i) => (i.id === id ? { ...i, qty } : i));
+      return prev.map((i) => (i.cartItemId === cartItemId ? { ...i, qty } : i));
     });
   }
 
-  function removeItem(id: string) {
-    setCart((prev) => prev.filter((i) => i.id !== id));
+  function removeItem(cartItemId: string) {
+    setCart((prev) => prev.filter((i) => i.cartItemId !== cartItemId));
   }
 
-  const subtotal = cart.reduce((sum, i) => sum + i.price * i.qty, 0);
+  const subtotal = cart.reduce((sum, i) => sum + i.unitPrice * i.qty, 0);
+  // Requirement 15/26 — jalur "Bayar Langsung" (checkout_transaction) hanya
+  // menerima product_id+qty di server (lihat migration_012, deduct_recipe_
+  // stock_for_transaction), jadi TIDAK bisa membawa varian/modifier apa pun.
+  // Kalau keranjang berisi item yang sudah dikonfigurasi, kasir wajib lewat
+  // "Kirim ke Dapur" (create_kitchen_order -> checkout_order_v2) supaya
+  // konfigurasinya tidak diam-diam hilang saat dibayar.
+  const cartHasConfiguredItems = cart.some((i) => i.variantId || (i.modifiers?.length ?? 0) > 0);
   const memberDiscountAmount = Math.round((subtotal * discountPct) / 100);
   // Preview saja (dari validateAndApplyVoucher, dipanggil terhadap subtotal
   // yang sama dipakai server) — total yang benar-benar ditagih tetap
@@ -437,14 +601,23 @@ export default function PosPage() {
       if (memberCode.trim().toUpperCase().startsWith("MBR")) {
         setDiscountPct(10);
       } else {
-        alert("Kode member tidak ditemukan atau tidak aktif.");
+        toast.error("Kode member tidak ditemukan atau tidak aktif.");
       }
     }
   }
 
   async function handleCheckout() {
     if (!session) {
-      alert("Sesi tidak ditemukan. Silakan login ulang.");
+      toast.error("Sesi tidak ditemukan. Silakan login ulang.");
+      return;
+    }
+
+    // Requirement 15/26 — "Bayar Langsung" tidak punya jalur server untuk
+    // varian/modifier (checkout_transaction hanya menerima product_id+qty).
+    // Daripada diam-diam menjual item tanpa konfigurasinya, tolak di sini
+    // dan arahkan kasir ke "Kirim ke Dapur" yang memang mendukungnya penuh.
+    if (cartHasConfiguredItems) {
+      toast.error('Keranjang berisi item dengan varian/modifier — gunakan "Kirim ke Dapur" untuk item ini, bukan Bayar Langsung.');
       return;
     }
 
@@ -452,7 +625,7 @@ export default function PosPage() {
     // "Selesaikan Transaksi" sudah di-disable untuk kasus ini juga, cek
     // di sini murni jaring pengaman kedua.
     if (paymentMethod === "cash" && (!cashReceived || Number(cashReceived) < total)) {
-      alert("Uang diterima belum cukup / belum diisi.");
+      toast.error("Uang diterima belum cukup / belum diisi.");
       return;
     }
 
@@ -472,7 +645,7 @@ export default function PosPage() {
       total_amount: total,
       payment_method: paymentMethod,
       member_id: null,
-      items: cart.map((i) => ({ product_id: i.id, qty: i.qty, subtotal: i.price * i.qty })),
+      items: cart.map((i) => ({ product_id: i.id, qty: i.qty, subtotal: i.unitPrice * i.qty })),
       is_offline_sync: !isOnline,
       synced: 0 as const,
       created_at: new Date().toISOString(),
@@ -486,7 +659,7 @@ export default function PosPage() {
     };
 
     if (!isOnline && (selectedCustomer || voucherCode.trim())) {
-      alert(
+      toast.info(
         "Sedang offline: transaksi tetap tersimpan, tapi poin loyalitas dan voucher TIDAK akan diterapkan (butuh koneksi untuk validasi server). Lanjutkan checkout, lalu terapkan voucher/poin manual setelah online kembali kalau perlu."
       );
     }
@@ -526,7 +699,7 @@ export default function PosPage() {
           // TOLAK — ini bagian inti dari perbaikan "kasir bisa menjual
           // melebihi stok".
           await db.pendingTransactions.delete(localId);
-          alert(error.message.replace(/^STOCK_INSUFFICIENT:\s*/, ""));
+          toast.error(error.message.replace(/^STOCK_INSUFFICIENT:\s*/, ""));
           return;
         } else {
           // Server MENOLAK checkout_transaction() untuk alasan lain
@@ -542,7 +715,7 @@ export default function PosPage() {
           // sebenarnya tidak pernah tersimpan di server.
           console.error("checkout_transaction gagal:", error.message);
           await db.pendingTransactions.delete(localId);
-          alert(
+          toast.error(
             "Transaksi tidak dapat diproses: " +
               error.message.replace(/^STOCK_INSUFFICIENT:\s*/, "") +
               "\nStruk tidak dicetak. Periksa voucher/member/pelanggan lalu coba lagi."
@@ -556,7 +729,7 @@ export default function PosPage() {
 
     setReceipt({
       cafeName: cafeSettings.name,
-      cafeAddress: cafeSettings.address,
+      cafeLogoUrl: cafeSettings.logoUrl,
       invoiceNumber,
       cashierName,
       items: cart,
@@ -593,10 +766,18 @@ export default function PosPage() {
     const total = order.order_items.reduce((sum, i) => sum + i.subtotal, 0);
     setReceipt({
       cafeName: cafeSettings.name,
-      cafeAddress: cafeSettings.address,
+      cafeLogoUrl: cafeSettings.logoUrl,
       invoiceNumber: order.order_number,
       cashierName,
-      items: order.order_items.map((i) => ({ id: i.id, name: i.product_name, price: i.unit_price, qty: i.qty })) as unknown as ReceiptData["items"],
+      items: order.order_items.map((i) => ({
+        id: i.id,
+        name: i.product_name,
+        price: i.unit_price,
+        unitPrice: i.unit_price,
+        qty: i.qty,
+        variantName: i.variant_name ?? null,
+        modifiers: i.modifier_selections ?? [],
+      })) as unknown as ReceiptData["items"],
       total,
       discount: 0,
       paymentMethod: "lihat rincian di kasir",
@@ -693,6 +874,7 @@ export default function PosPage() {
         branchName={branchName}
         branchId={session?.branchId ?? null}
         shiftStartedAt={shiftStartedAt}
+        showDashboardLink={role === "owner" || role === "manager"}
         onLogout={async () => {
           await createClient().auth.signOut();
           window.location.href = "/login";
@@ -852,6 +1034,7 @@ export default function PosPage() {
             total={total}
             onCheckout={() => setShowCheckout(true)}
             onSendToKitchen={() => setShowSendToKitchen(true)}
+            quickPayDisabled={cartHasConfiguredItems}
           />
         </div>
       </div>
@@ -906,6 +1089,7 @@ export default function PosPage() {
               setShowCartSheet(false);
               setShowSendToKitchen(true);
             }}
+            quickPayDisabled={cartHasConfiguredItems}
             embedded
           />
         </Modal>
@@ -996,6 +1180,18 @@ export default function PosPage() {
         );
       })()}
 
+      {/* Konfigurasi varian/modifier (Phase 2A.3) — muncul sebelum item
+          bervarian/modifier masuk keranjang. */}
+      {configModalProduct && (
+        <ProductConfigModal
+          product={configModalProduct}
+          variants={variantsByProduct.get(configModalProduct.id) ?? []}
+          groups={groupsByProduct.get(configModalProduct.id) ?? []}
+          onConfirm={confirmAddConfigured}
+          onClose={() => setConfigModalProduct(null)}
+        />
+      )}
+
       {/* Kirim ke Dapur — jalur KDS/meja (Phase 2 Update 1) */}
       {showSendToKitchen && session && shiftId && (
         <SendToKitchenModal
@@ -1004,7 +1200,16 @@ export default function PosPage() {
           shiftId={shiftId}
           cashierId={session.cashierId}
           cashierName={cashierName}
-          cart={cart.map((i) => ({ product_id: i.id, name: i.name, qty: i.qty }))}
+          cart={cart.map((i) => ({
+            cartItemId: i.cartItemId,
+            product_id: i.id,
+            name: i.name,
+            qty: i.qty,
+            variant_id: i.variantId,
+            variant_name: i.variantName,
+            modifiers: i.modifiers,
+            unit_price: i.unitPrice,
+          }))}
           stations={kitchenStations}
           onClose={() => setShowSendToKitchen(false)}
           onSent={() => {
@@ -1109,6 +1314,7 @@ function CartPanel({
   total,
   onCheckout,
   onSendToKitchen,
+  quickPayDisabled = false,
   embedded = false,
 }: {
   cart: CartItem[];
@@ -1132,6 +1338,8 @@ function CartPanel({
   total: number;
   onCheckout: () => void;
   onSendToKitchen: () => void;
+  /** true kalau keranjang berisi item bervarian/modifier — jalur Bayar Langsung dimatikan untuk transaksi ini. */
+  quickPayDisabled?: boolean;
   /** true saat dipakai di dalam Modal (bottom sheet mobile) — modal sudah
    * punya header/padding sendiri, jadi header "Keranjang" internal ini
    * disembunyikan supaya tidak dobel. */
@@ -1149,35 +1357,43 @@ function CartPanel({
         {cart.length === 0 && (
           <p className="text-center text-neutral-400 text-sm py-10">Belum ada item dipilih.</p>
         )}
-        {cart.map((item) => (
-          <div key={item.id} className="flex items-center gap-3">
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-neutral-900 truncate">{item.name}</p>
-              <p className="text-xs text-neutral-500">{formatRupiah(item.price)}</p>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <button onClick={() => updateQty(item.id, -1)} className="w-7 h-7 rounded-full border border-neutral-200 flex items-center justify-center hover:bg-neutral-100">
-                <Minus size={12} />
+        {cart.map((item) => {
+          const lineKey = item.cartItemId ?? item.id;
+          const unitPrice = item.unitPrice ?? item.price;
+          const configParts = [item.variantName, ...(item.modifiers ?? []).map((m) => m.name)].filter(Boolean);
+          return (
+            <div key={lineKey} className="flex items-center gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-neutral-900 truncate">{item.name}</p>
+                {configParts.length > 0 && (
+                  <p className="text-xs text-primary-dark truncate">{configParts.join(" · ")}</p>
+                )}
+                <p className="text-xs text-neutral-500">{formatRupiah(unitPrice)}</p>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button onClick={() => updateQty(lineKey, -1)} className="w-7 h-7 rounded-full border border-neutral-200 flex items-center justify-center hover:bg-neutral-100">
+                  <Minus size={12} />
+                </button>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  value={item.qty}
+                  onChange={(e) => setQty(lineKey, parseInt(e.target.value, 10))}
+                  onFocus={(e) => e.target.select()}
+                  aria-label={`Jumlah ${item.name}`}
+                  className="text-sm font-medium w-9 text-center bg-transparent border-b border-transparent focus:border-primary outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                />
+                <button onClick={() => updateQty(lineKey, 1)} className="w-7 h-7 rounded-full border border-neutral-200 flex items-center justify-center hover:bg-neutral-100">
+                  <Plus size={12} />
+                </button>
+              </div>
+              <button onClick={() => removeItem(lineKey)} className="text-neutral-300 hover:text-urgent p-1">
+                <Trash2 size={14} />
               </button>
-              <input
-                type="number"
-                inputMode="numeric"
-                min={1}
-                value={item.qty}
-                onChange={(e) => setQty(item.id, parseInt(e.target.value, 10))}
-                onFocus={(e) => e.target.select()}
-                aria-label={`Jumlah ${item.name}`}
-                className="text-sm font-medium w-9 text-center bg-transparent border-b border-transparent focus:border-primary outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-              />
-              <button onClick={() => updateQty(item.id, 1)} className="w-7 h-7 rounded-full border border-neutral-200 flex items-center justify-center hover:bg-neutral-100">
-                <Plus size={12} />
-              </button>
             </div>
-            <button onClick={() => removeItem(item.id)} className="text-neutral-300 hover:text-urgent p-1">
-              <Trash2 size={14} />
-            </button>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className={embedded ? "space-y-3 pt-4 mt-4 border-t border-neutral-100" : "p-4 border-t border-neutral-200 space-y-3 shrink-0"}>
@@ -1266,14 +1482,21 @@ function CartPanel({
         </button>
         {/* Jalur cepat lama — dipertahankan untuk item yang memang tidak
             butuh dapur/meja (mis. air mineral kemasan, retail rak). Tidak
-            membuat order KDS/tidak mengisi meja. */}
+            membuat order KDS/tidak mengisi meja. Dimatikan kalau keranjang
+            berisi item dengan varian/modifier — jalur ini tidak punya cara
+            membawa konfigurasi itu ke server (Requirement 15/26). */}
         <button
-          disabled={cart.length === 0}
+          disabled={cart.length === 0 || quickPayDisabled}
           onClick={onCheckout}
           className="btn-outline w-full text-sm"
         >
           Bayar Langsung (tanpa dapur)
         </button>
+        {quickPayDisabled && cart.length > 0 && (
+          <p className="text-[11px] text-neutral-400 text-center -mt-1">
+            Ada item bervarian/modifier — gunakan &quot;Kirim ke Dapur&quot;.
+          </p>
+        )}
       </div>
     </>
   );

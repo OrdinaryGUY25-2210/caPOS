@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Clock, Utensils, ShoppingBag, Bike, Printer, XCircle } from "lucide-react";
 import type { OrderWithItems, OrderStatus } from "@/lib/types";
-import { cx } from "@/lib/utils";
+import { cx, formatItemConfigLine } from "@/lib/utils";
 
 const ORDER_TYPE_ICON: Record<string, typeof Utensils> = {
   dine_in: Utensils,
@@ -133,14 +133,17 @@ export default function OrderCard({
       </div>
 
       <div className="space-y-1.5 border-t border-b border-dashed border-neutral-200 py-2">
-        {order.order_items.map((item) => (
-          <div key={item.id} className="text-sm">
-            <span className="font-semibold text-neutral-900">{item.qty}x {item.product_name}</span>
-            {item.variant_notes && (
-              <p className="text-xs text-primary-dark pl-4">↳ {item.variant_notes}</p>
-            )}
-          </div>
-        ))}
+        {order.order_items.map((item) => {
+          const configLine = formatItemConfigLine(item);
+          return (
+            <div key={item.id} className="text-sm">
+              <span className="font-semibold text-neutral-900">{item.qty}x {item.product_name}</span>
+              {configLine && (
+                <p className="text-xs text-primary-dark pl-4">↳ {configLine}</p>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {order.notes && <p className="text-xs text-neutral-500 italic">Catatan: {order.notes}</p>}
