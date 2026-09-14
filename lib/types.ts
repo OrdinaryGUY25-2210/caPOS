@@ -105,6 +105,19 @@ export interface TransactionItem {
 
 export interface CartItem extends Product {
   qty: number;
+  /**
+   * BARU (Phase 2A.3) — kunci unik baris keranjang: `${product_id}::${variant_id ?? "base"}::${sorted modifier_ids}`.
+   * Berbeda dari `id` (product id) supaya 2 konfigurasi berbeda dari produk
+   * yang sama (mis. Large+Oat vs Large+Full Cream) TIDAK otomatis digabung
+   * jadi satu baris. Item lama/tanpa konfigurasi tetap boleh pakai `id`
+   * sebagai fallback (opsional, backward-compatible).
+   */
+  cartItemId?: string;
+  variantId?: string | null;
+  variantName?: string | null;
+  modifiers?: { modifier_id: string; name: string; price_adjustment: number }[];
+  /** Harga akhir per unit = base/variant price + total price_adjustment modifier. Fallback ke `price` kalau tidak ada konfigurasi. */
+  unitPrice?: number;
 }
 
 /* =========================================================

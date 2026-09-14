@@ -22,6 +22,7 @@
  */
 
 import type { OrderWithItems, OrderItem, OrderType } from "@/lib/types";
+import { formatItemConfigLine } from "@/lib/utils";
 
 // Service/characteristic UUID standar printer thermal ESC/POS Bluetooth
 // (mengikuti profil "Generic Serial" yang dipakai mayoritas printer
@@ -145,7 +146,8 @@ export async function printStationTicket(
 
   for (const item of items) {
     lines.push({ text: `${item.qty}x ${item.product_name}`, bold: true });
-    if (item.variant_notes) lines.push({ text: `   -> ${item.variant_notes}` });
+    const configLine = formatItemConfigLine(item);
+    if (configLine) lines.push({ text: `   -> ${configLine}` });
   }
 
   if (order.notes) {

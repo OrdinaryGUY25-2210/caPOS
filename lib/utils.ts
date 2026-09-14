@@ -42,3 +42,23 @@ export function formatNumberWithDots(value: string | number) {
 export function stripNumberDots(value: string) {
   return value.replace(/[^0-9]/g, "");
 }
+
+/**
+ * BARU (Phase 2A.3) — satu baris ringkas konfigurasi item (varian + modifier
+ * terstruktur), dipakai KDS/struk/tiket dapur/Meja & Bill Terbuka supaya
+ * semuanya menampilkan format yang sama. Fallback ke `variant_notes` bebas
+ * teks lama kalau item belum punya konfigurasi terstruktur (order lama).
+ */
+export function formatItemConfigLine(item: {
+  variant_name?: string | null;
+  modifier_selections?: { name: string }[] | null;
+  variant_notes?: string | null;
+}): string | null {
+  const parts: string[] = [];
+  if (item.variant_name) parts.push(item.variant_name);
+  if (item.modifier_selections && item.modifier_selections.length > 0) {
+    parts.push(item.modifier_selections.map((m) => m.name).join(", "));
+  }
+  if (parts.length > 0) return parts.join(" · ");
+  return item.variant_notes || null;
+}
