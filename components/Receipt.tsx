@@ -6,6 +6,8 @@ import type { CartItem } from "@/lib/types";
 export interface ReceiptData {
   cafeName: string;
   cafeAddress?: string;
+  /** URL logo kafe (Supabase Storage, opsional — lihat Pengaturan Kafe). */
+  cafeLogoUrl?: string | null;
   invoiceNumber: string;
   cashierName: string;
   items: CartItem[];
@@ -23,7 +25,7 @@ export interface ReceiptData {
 }
 
 export default function Receipt({ data }: { data: ReceiptData }) {
-  const subtotal = data.items.reduce((sum, i) => sum + i.price * i.qty, 0);
+  const subtotal = data.items.reduce((sum, i) => sum + (i.unitPrice ?? i.price) * i.qty, 0);
 
   return (
     <div
@@ -32,6 +34,10 @@ export default function Receipt({ data }: { data: ReceiptData }) {
       style={{ width: data.width === "58mm" ? "58mm" : "80mm" }}
     >
       <div className="text-center mb-2">
+        {data.cafeLogoUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={data.cafeLogoUrl} alt="" className="w-14 h-14 object-contain mx-auto mb-1" />
+        )}
         <p className="font-bold text-sm">{data.cafeName}</p>
         {data.cafeAddress && <p>{data.cafeAddress}</p>}
       </div>
@@ -41,15 +47,20 @@ export default function Receipt({ data }: { data: ReceiptData }) {
       <p>{new Date(data.createdAt).toLocaleString("id-ID")}</p>
       <div className="border-t border-dashed border-black my-1" />
 
-      {data.items.map((item) => (
-        <div key={item.id} className="mb-1">
-          <p>{item.name}</p>
-          <div className="flex justify-between">
-            <span>{item.qty} x {formatRupiah(item.price)}</span>
-            <span>{formatRupiah(item.price * item.qty)}</span>
+      {data.items.map((item) => {
+        const unitPrice = item.unitPrice ?? item.price;
+        const configParts = [item.variantName, ...(item.modifiers ?? []).map((m) => m.name)].filter(Boolean);
+        return (
+          <div key={item.cartItemId ?? item.id} className="mb-1">
+            <p>{item.name}</p>
+            {configParts.length > 0 && <p className="pl-2 text-[10px]">↳ {configParts.join(", ")}</p>}
+            <div className="flex justify-between">
+              <span>{item.qty} x {formatRupiah(unitPrice)}</span>
+              <span>{formatRupiah(unitPrice * item.qty)}</span>
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
 
       <div className="border-t border-dashed border-black my-1" />
       <div className="flex justify-between">

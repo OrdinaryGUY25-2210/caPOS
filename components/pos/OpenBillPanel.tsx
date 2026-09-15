@@ -8,7 +8,7 @@ import MultiPaymentModal from "@/components/MultiPaymentModal";
 import SupervisorPinModal from "@/components/SupervisorPinModal";
 import SplitBillModal from "@/components/pos/SplitBillModal";
 import { createClient } from "@/lib/supabase/client";
-import { formatRupiah } from "@/lib/utils";
+import { formatRupiah, formatItemConfigLine } from "@/lib/utils";
 import type { OrderWithItems, OrderStatus, TableLiveStatus, SensitiveAction } from "@/lib/types";
 
 const STATUS_SEQUENCE: OrderStatus[] = ["NEW", "ACCEPTED", "PREPARING", "READY", "SERVED"];
@@ -346,7 +346,7 @@ export default function OpenBillPanel({
                       {item.voided_qty > 0 && <span className="text-xs text-urgent font-normal"> ({item.voided_qty} dibatalkan)</span>}
                       {item.original_unit_price !== null && <span className="text-xs text-warning font-normal"> (harga diubah)</span>}
                     </p>
-                    {item.variant_notes && <p className="text-xs text-neutral-500">{item.variant_notes}</p>}
+                    {formatItemConfigLine(item) && <p className="text-xs text-neutral-500">{formatItemConfigLine(item)}</p>}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <span className="text-neutral-700">{formatRupiah(item.unit_price * remaining)}</span>
