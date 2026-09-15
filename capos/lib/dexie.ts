@@ -9,6 +9,11 @@ export interface CachedProduct {
   image_url: string | null;
   is_available: boolean;
   created_at: string;
+  /** Ditambahkan lewat migration_011 (opsional — hanya diisi kalau produk track_stock=true). */
+  track_stock?: boolean;
+  /** Stok cabang tempat kasir ini bertugas, sudah digabung dari branch_stock saat fetch (lihat app/pos/page.tsx). */
+  stock_qty?: number;
+  low_stock_threshold?: number;
 }
 
 export interface CachedMembership {
@@ -24,6 +29,8 @@ export interface PendingTransaction {
   local_id?: number;
   tenant_id: string;
   cashier_id: string;
+  /** Cabang tempat transaksi ini terjadi (migration_011) — diteruskan ke checkout_transaction() sebagai p_branch_id saat sinkron. */
+  branch_id?: string | null;
   invoice_number: string;
   total_amount: number;
   payment_method: string;
