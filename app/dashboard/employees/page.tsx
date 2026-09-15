@@ -41,7 +41,7 @@ export default function EmployeesPage() {
 
     const supabase = createClient();
     const [{ data }, { data: sub }] = await Promise.all([
-      supabase.from("profiles").select("*").eq("tenant_id", profile.tenant_id).in("role", ["cashier", "manager"]).order("created_at", { ascending: false }),
+      supabase.from("profiles").select("*").eq("tenant_id", profile.tenant_id).in("role", ["cashier", "manager", "kitchen"]).order("created_at", { ascending: false }),
       supabase.from("subscriptions").select("status, plan").eq("tenant_id", profile.tenant_id).single(),
     ]);
     setEmployees((data as Profile[]) ?? []);
@@ -164,7 +164,7 @@ export default function EmployeesPage() {
         <div>
           <h1 className="text-xl font-bold text-neutral-900">Manajemen Karyawan</h1>
           <p className="text-sm text-neutral-500">
-            Kelola akun Manager & Kasir kafe Anda
+            Satu-satunya tempat untuk membuat & mengelola akun Admin, Supervisor, Kasir, dan Dapur
             {tier === "free" && <> — {employees.length}/{FREE_TIER_LIMITS.maxCashiers} karyawan terpakai (paket {TIER_LABEL.free})</>}
           </p>
         </div>
@@ -253,7 +253,8 @@ export default function EmployeesPage() {
             <label className="text-sm font-medium text-neutral-700 mb-1 block">Jabatan/Role Sistem</label>
             <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} className="input-field">
               <option value="cashier">Kasir — akses POS saja</option>
-              <option value="manager">Manager — akses dashboard penuh + approval</option>
+              <option value="manager">Supervisor — akses dashboard penuh + approval</option>
+              <option value="kitchen">Dapur — akses tampilan dapur (KDS) saja</option>
             </select>
           </div>
           <div>

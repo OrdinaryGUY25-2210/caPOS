@@ -2,25 +2,36 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, Trash2, Loader2, Lock } from "lucide-react";
+import { Loader2, Radio, CircleDot, Users } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
-import { getTier, FREE_TIER_LIMITS, TIER_LABEL, type Tier } from "@/lib/tier";
-import Modal from "@/components/Modal";
-import PasswordInput from "@/components/PasswordInput";
-import type { Profile } from "@/lib/types";
+import { cx } from "@/lib/utils";
 
-export default function CashiersPage() {
-  const [cashiers, setCashiers] = useState<Profile[]>([]);
-  const [tier, setTier] = useState<Tier>("free");
+/**
+ * Manajemen Kasir — MIGRATION_16: halaman ini TIDAK LAGI membuat/mengedit
+ * akun. Manajemen Karyawan (/dashboard/employees) adalah satu-satunya
+ * Single Source of Truth untuk membuat & mengelola semua akun/peran
+ * (Admin, Supervisor, Kasir, Dapur) — lihat migration_16.sql bagian A.
+ *
+ * Halaman ini murni MONITORING: siapa saja kasir yang sedang bertugas
+ * (shift status = open) saat ini, dibaca dari view v_active_cashier_shifts.
+ */
+interface ShiftRow {
+  cashier_id: string;
+  full_name: string | null;
+  email: string | null;
+  branch_name: string | null;
+  account_active: boolean;
+  shift_id: string | null;
+  opened_at: string | null;
+  is_on_shift: boolean;
+}
+
+export default function CashiersMonitorPage() {
+  const [rows, setRows] = useState<ShiftRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
-  const [limitReached, setLimitReached] = useState(false);
-  const [form, setForm] = useState({ full_name: "", email: "", password: "" });
 
-  async function loadCashiers() {
+  async function load() {
     setLoading(true);
     const { profile } = await getCurrentProfile();
     if (!profile) {
@@ -28,82 +39,30 @@ export default function CashiersPage() {
       return;
     }
     const supabase = createClient();
-    const [{ data }, { data: sub }] = await Promise.all([
-      supabase.from("profiles").select("*").eq("tenant_id", profile.tenant_id).eq("role", "cashier").order("created_at", { ascending: false }),
-      supabase.from("subscriptions").select("status, plan").eq("tenant_id", profile.tenant_id).single(),
-    ]);
-    setCashiers((data as Profile[]) ?? []);
-    setTier(profile.role === "super_admin" ? "supreme" : getTier(sub));
+    const { data } = await supabase
+      .from("v_active_cashier_shifts")
+      .select("*")
+      .eq("tenant_id", profile.tenant_id)
+      .order("is_on_shift", { ascending: false })
+      .order("full_name", { ascending: true });
+    setRows((data as ShiftRow[]) ?? []);
     setLoading(false);
   }
 
   useEffect(() => {
-    loadCashiers();
+    load();
+    // Refresh berkala supaya status shift (buka/tutup) terasa "live" tanpa
+    // perlu reload manual — cocok untuk dipantau sambil berjalan sepanjang hari.
+    const interval = setInterval(load, 30000);
+    return () => clearInterval(interval);
   }, []);
 
-  const atCashierLimit = tier === "free" && cashiers.length >= FREE_TIER_LIMITS.maxCashiers;
-
-  function openForm() {
-    if (atCashierLimit) {
-      setLimitReached(true);
-      return;
-    }
-    setLimitReached(false);
-    setShowForm(true);
-  }
-
-  async function addCashier() {
-    setFormError(null);
-    setSaving(true);
-    const res = await fetch("/api/cashiers", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fullName: form.full_name, email: form.email, password: form.password }),
-    });
-    const result = await res.json();
-    setSaving(false);
-
-    if (!res.ok) {
-      if (result.reason === "FREE_TIER_CASHIER_LIMIT") {
-        setShowForm(false);
-        setLimitReached(true);
-      } else {
-        setFormError(result.message || "Gagal membuat akun kasir.");
-      }
-      return;
-    }
-
-    setForm({ full_name: "", email: "", password: "" });
-    setShowForm(false);
-    loadCashiers();
-  }
-
-  async function toggleActive(cashier: Profile) {
-    const supabase = createClient();
-    const next = !cashier.is_active;
-    setCashiers((prev) => prev.map((c) => (c.id === cashier.id ? { ...c, is_active: next } : c)));
-    const { error } = await supabase.from("profiles").update({ is_active: next }).eq("id", cashier.id);
-    if (error) {
-      setCashiers((prev) => prev.map((c) => (c.id === cashier.id ? { ...c, is_active: !next } : c)));
-    }
-  }
-
-  async function removeCashier(id: string) {
-    if (!confirm("Hapus akun kasir ini secara permanen?")) return;
-    const res = await fetch(`/api/cashiers?id=${id}`, { method: "DELETE" });
-    if (res.ok) {
-      setCashiers((prev) => prev.filter((c) => c.id !== id));
-      setLimitReached(false);
-    } else {
-      const result = await res.json();
-      alert(result.message || "Gagal menghapus kasir.");
-    }
-  }
+  const onShiftCount = rows.filter((r) => r.is_on_shift).length;
 
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64 text-neutral-400">
-        <Loader2 className="animate-spin mr-2" size={18} /> Memuat data kasir...
+        <Loader2 className="animate-spin mr-2" size={18} /> Memuat status kasir...
       </div>
     );
   }
@@ -114,92 +73,57 @@ export default function CashiersPage() {
         <div>
           <h1 className="text-xl font-bold text-neutral-900">Manajemen Kasir</h1>
           <p className="text-sm text-neutral-500">
-            Kelola akun staf kasir kafe Anda
-            {tier === "free" && <> — {cashiers.length}/{FREE_TIER_LIMITS.maxCashiers} kasir terpakai (paket {TIER_LABEL.free})</>}
+            Monitoring kasir yang sedang bertugas (shift aktif). Untuk membuat, mengedit, atau menghapus akun kasir,
+            gunakan{" "}
+            <Link href="/dashboard/employees" className="text-primary font-medium hover:underline">
+              Manajemen Karyawan
+            </Link>
+            .
           </p>
         </div>
-        <button onClick={openForm} className="btn-primary flex items-center gap-2">
-          {atCashierLimit ? <Lock size={16} /> : <Plus size={16} />} Tambah Kasir
-        </button>
+        <div className="flex items-center gap-2 rounded-xl bg-primary-light text-primary-dark px-4 py-2 text-sm font-semibold">
+          <Radio size={16} /> {onShiftCount} kasir sedang bertugas
+        </div>
       </div>
 
-      {limitReached && (
-        <div className="card p-4 flex items-center justify-between gap-3 border-warning bg-warning-light">
-          <p className="text-sm text-neutral-800">
-            Paket {TIER_LABEL.free} maksimal {FREE_TIER_LIMITS.maxCashiers} akun kasir. Upgrade ke Pro untuk kasir unlimited.
-          </p>
-          <Link href="/dashboard/subscription" className="btn-primary text-sm whitespace-nowrap">
-            Lihat Paket
-          </Link>
-        </div>
-      )}
-
       <div className="card divide-y divide-neutral-100">
-        {cashiers.map((c) => (
-          <div key={c.id} className="flex items-center justify-between p-4">
+        {rows.map((r) => (
+          <div key={r.cashier_id} className="flex items-center justify-between p-4">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-primary-light text-primary-dark flex items-center justify-center font-bold text-sm">
-                {(c.full_name || c.email || "?").slice(0, 2).toUpperCase()}
+                {(r.full_name || r.email || "?").slice(0, 2).toUpperCase()}
               </div>
               <div>
-                <p className="font-medium text-neutral-900 text-sm">{c.full_name}</p>
-                <p className="text-xs text-neutral-500">{c.email}</p>
+                <p className="font-medium text-neutral-900 text-sm">{r.full_name}</p>
+                <p className="text-xs text-neutral-500">
+                  {r.email} · Cabang: {r.branch_name ?? "-"}
+                </p>
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <button
-                onClick={() => toggleActive(c)}
-                className={c.is_active ? "badge-active" : "badge-urgent"}
-              >
-                {c.is_active ? "Active" : "Nonaktif"}
-              </button>
-              <button onClick={() => removeCashier(c.id)} className="text-neutral-300 hover:text-urgent">
-                <Trash2 size={16} />
-              </button>
+              {!r.account_active && <span className="badge-urgent">Akun Nonaktif</span>}
+              {r.is_on_shift ? (
+                <span className="flex items-center gap-1.5 badge-active">
+                  <CircleDot size={12} className="animate-pulse" /> Shift Aktif
+                  {r.opened_at && (
+                    <span className="font-normal opacity-80">
+                      · sejak {new Date(r.opened_at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                  )}
+                </span>
+              ) : (
+                <span className={cx("text-xs px-2.5 py-1 rounded-full bg-neutral-100 text-neutral-500")}>Tidak Bertugas</span>
+              )}
             </div>
           </div>
         ))}
-        {cashiers.length === 0 && <p className="p-6 text-center text-neutral-400 text-sm">Belum ada akun kasir.</p>}
+        {rows.length === 0 && (
+          <p className="p-6 text-center text-neutral-400 text-sm flex flex-col items-center gap-2">
+            <Users size={24} className="text-neutral-300" />
+            Belum ada akun kasir. Tambahkan lewat halaman Manajemen Karyawan.
+          </p>
+        )}
       </div>
-
-      {showForm && (
-        <Modal
-          title="Tambah Akun Kasir"
-          onClose={() => setShowForm(false)}
-          footer={
-            <button
-              disabled={saving}
-              onClick={addCashier}
-              className="btn-primary w-full flex items-center justify-center gap-2"
-            >
-              {saving && <Loader2 className="animate-spin" size={16} />}
-              Buat Akun Kasir
-            </button>
-          }
-        >
-          {formError && (
-            <div className="badge-urgent w-full justify-start px-3 py-2 rounded-lg">{formError}</div>
-          )}
-          <div>
-            <label className="text-sm font-medium text-neutral-700 mb-1 block">Nama Lengkap</label>
-            <input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} className="input-field" maxLength={80} />
-          </div>
-          <div>
-            <label className="text-sm font-medium text-neutral-700 mb-1 block">Email</label>
-            <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="input-field" />
-          </div>
-          <div>
-            <label className="text-sm font-medium text-neutral-700 mb-1 block">Password Sementara</label>
-            <PasswordInput
-              value={form.password}
-              onChange={(v) => setForm({ ...form, password: v })}
-              minLength={8}
-              autoComplete="new-password"
-            />
-            <p className="text-xs text-neutral-400 mt-1">Minimal 8 karakter, kombinasi huruf & angka.</p>
-          </div>
-        </Modal>
-      )}
     </div>
   );
 }

@@ -1,0 +1,2 @@
+REMOVED (deleted as part of this change):
+- app/api/cashiers/route.ts  (account creation/deletion endpoint for Manajemen Kasir — fitur dihapus, digantikan sepenuhnya oleh /api/employees)

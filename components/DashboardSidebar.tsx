@@ -57,9 +57,13 @@ import { UserCog } from "lucide-react";
  * checked against the filesystem) — no page was renamed, moved, or removed.
  *
  * One gap found during the audit: /dashboard/cashiers existed as a real page
- * (managing cashier accounts) but had NO sidebar entry — it was only reachable
- * via a link buried in the FAQ page. It is restored here under "Cabang & Tim"
- * next to Employees/Attendance, since that's what it manages.
+ * but had NO sidebar entry — it was only reachable via a link buried in the
+ * FAQ page. It is restored here under "Cabang & Tim" next to Employees/
+ * Attendance, since that's what it monitors.
+ *
+ * migration_16 update: /dashboard/cashiers no longer manages accounts (that
+ * would duplicate /dashboard/employees, the single source of truth for all
+ * roles). It is now view-only — active cashier shift monitoring.
  *
  * Sections intentionally omitted (per "only expose modules that actually
  * exist"): a standalone "Finance" group (Expenses/Budgets/Cash Control/
@@ -134,7 +138,7 @@ const NAV_GROUPS: { label: string; items: { href: string; label: string; icon: a
     items: [
       { href: "/dashboard/branches", label: "Manajemen Cabang", icon: Building2 },
       { href: "/dashboard/employees", label: "Manajemen Karyawan", icon: Users },
-      { href: "/dashboard/cashiers", label: "Akun Kasir", icon: UserCog },
+      { href: "/dashboard/cashiers", label: "Monitoring Kasir", icon: UserCog },
       { href: "/dashboard/cashier-evaluation", label: "Evaluasi Kasir", icon: ClipboardCheck },
       { href: "/dashboard/attendance", label: "Kehadiran Karyawan", icon: CalendarCheck },
     ],

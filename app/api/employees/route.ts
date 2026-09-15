@@ -11,7 +11,7 @@ function serviceClient() {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SAFE_TEXT_RE = /^[\p{L}\p{N}\s.,'&()-]{2,80}$/u;
-const ALLOWED_ROLES = ["cashier", "manager"] as const;
+const ALLOWED_ROLES = ["cashier", "manager", "kitchen"] as const;
 
 function sanitize(input: unknown, max = 200) {
   if (typeof input !== "string") return "";
@@ -148,7 +148,7 @@ export async function DELETE(request: Request) {
     .eq("id", employeeId)
     .single();
 
-  if (!target || target.tenant_id !== auth.profile.tenant_id || !["cashier", "manager"].includes(target.role)) {
+  if (!target || target.tenant_id !== auth.profile.tenant_id || !["cashier", "manager", "kitchen"].includes(target.role)) {
     return NextResponse.json({ message: "Karyawan tidak ditemukan di tenant Anda." }, { status: 404 });
   }
 

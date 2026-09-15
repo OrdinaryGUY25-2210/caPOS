@@ -1,4 +1,4 @@
-export type UserRole = "super_admin" | "owner" | "manager" | "cashier";
+export type UserRole = "super_admin" | "owner" | "manager" | "cashier" | "kitchen";
 export type SubStatus = "trial" | "active" | "past_due" | "expired";
 
 export interface Tenant {

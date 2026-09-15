@@ -1,7 +1,8 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-// Direct Role Routing: super_admin -> /admin, owner/manager -> /dashboard, cashier -> /pos
+// Direct Role Routing: super_admin -> /admin, owner/manager -> /dashboard,
+// cashier -> /pos, kitchen -> /kitchen (migration_16: role "Dapur")
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request: { headers: request.headers } });
 
@@ -47,6 +48,7 @@ export async function middleware(request: NextRequest) {
       owner: "/dashboard",
       manager: "/dashboard",
       cashier: "/pos",
+      kitchen: "/kitchen",
     };
 
     // Redirect logged-in users away from login/register to their home
