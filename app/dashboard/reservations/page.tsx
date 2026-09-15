@@ -154,7 +154,7 @@ export default function ReservationsPage() {
                       </span>
                     )}
                   </div>
-                  {r.notes && <p className="text-xs text-neutral-400 mt-1 italic">"{r.notes}"</p>}
+                  {r.notes && <p className="text-xs text-neutral-400 mt-1 italic">&quot;{r.notes}&quot;</p>}
                 </div>
                 <span className={cx("text-[11px] font-semibold px-2.5 py-1 rounded-full shrink-0", STATUS_STYLE[r.status])}>
                   {STATUS_LABEL[r.status]}

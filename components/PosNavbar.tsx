@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
-import { LogOut, Wifi, WifiOff, Clock, LayoutDashboard } from "lucide-react";
+import { LogOut, Wifi, WifiOff, Clock } from "lucide-react";
 import Modal from "./Modal";
 import QrOrderAlert from "./pos/QrOrderAlert";
 
@@ -14,7 +13,6 @@ export default function PosNavbar({
   branchName,
   branchId,
   shiftStartedAt,
-  showDashboardLink,
   onLogout,
 }: {
   cashierName: string;
@@ -30,11 +28,6 @@ export default function PosNavbar({
   branchId?: string | null;
   /** Jam mulai shift saat ini (ISO string), kalau ada. */
   shiftStartedAt?: string | null;
-  /** Phase 2A.2 §1 — hanya true untuk owner/manager: mereka datang dari
-      Dashboard dan perlu jalan pulang tanpa logout. Cashier TIDAK dapat link
-      ini — otorisasi rute /dashboard tetap sepenuhnya ditentukan middleware,
-      tombol ini murni navigasi, bukan sumber izin. */
-  showDashboardLink?: boolean;
   onLogout: () => void;
 }) {
   const [isOnline, setIsOnline] = useState(true);
@@ -75,16 +68,6 @@ export default function PosNavbar({
       </div>
 
       <div className="flex items-center gap-4">
-        {showDashboardLink && (
-          <Link
-            href="/dashboard"
-            className="flex items-center gap-1.5 text-sm font-medium text-neutral-600 hover:text-primary-dark hover:bg-neutral-100 rounded-lg px-2.5 py-1.5 -my-1.5 transition-colors"
-            title="Kembali ke Dashboard"
-          >
-            <LayoutDashboard size={16} />
-            <span className="hidden sm:inline">Dashboard</span>
-          </Link>
-        )}
         <span className="text-sm font-mono text-neutral-500 hidden sm:inline">
           {now.toLocaleTimeString("id-ID")}
         </span>
@@ -113,7 +96,7 @@ export default function PosNavbar({
             {roleLabel && <span className="text-[10px] text-neutral-400 uppercase tracking-wide">{roleLabel}</span>}
           </div>
         </button>
-        <button onClick={onLogout} aria-label="Logout" className="text-neutral-400 hover:text-urgent transition-colors" title="Logout">
+        <button onClick={onLogout} className="text-neutral-400 hover:text-urgent transition-colors" title="Logout">
           <LogOut size={18} />
         </button>
       </div>

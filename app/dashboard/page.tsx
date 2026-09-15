@@ -5,7 +5,7 @@ import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from "recharts";
-import { Download, Printer, TrendingUp, TrendingDown, Minus, Sparkles, HeartPulse } from "lucide-react";
+import { Download, Printer, TrendingUp, TrendingDown, Minus, Sparkles, HeartPulse, Wheat } from "lucide-react";
 import Link from "next/link";
 import * as XLSX from "xlsx";
 import { formatRupiah } from "@/lib/utils";
@@ -33,8 +33,20 @@ export default function ReportsPage() {
   const [peakHours, setPeakHours] = useState<PeakPoint[]>([]);
   const [bestSellers, setBestSellers] = useState<BestSellerPoint[]>([]);
   const [healthTrendPct, setHealthTrendPct] = useState<number | null>(null);
+  // Phase 2A.2 §9 — "how is my business doing right now" operational snapshot.
+  // Both counts are derived from existing tables only (Case A/C — no schema
+  // change): orders.status for active orders, and the exact same
+  // branch_ingredients_stock/ingredients low-stock rule already canonical in
+  // app/dashboard/ingredients/page.tsx's branchStockFor(), replicated here so
+  // the definition of "low stock" never disagrees between the two pages.
+  const [activeOrdersCount, setActiveOrdersCount] = useState<number | null>(null);
+  const [lowStockCount, setLowStockCount] = useState<number | null>(null);
 
   const isPremium = tier === "supreme";
+  // Sesuai keputusan: Excel Lengkap + PDF sekarang juga untuk Pro (bukan
+  // cuma Supreme) — supaya cocok dengan janji di kartu paket Pro. Jam
+  // Ramai (Peak Hours) tetap eksklusif Supreme, TIDAK diubah.
+  const canExportExcel = tier === "pro" || tier === "supreme";
   const showHealth = hasSalesHealth(tier);
   const totalOmzet = omzetData.reduce((s, d) => s + d.omzet, 0);
   const totalOrders = omzetData.reduce((s, d) => s + d.orders, 0);
@@ -135,6 +147,52 @@ export default function ReportsPage() {
         );
       }
 
+      // Active orders right now (not yet SERVED/COMPLETED/CANCELLED).
+      let activeOrdersQuery = supabase
+        .from("orders")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", profile.tenant_id)
+        .not("status", "in", "(SERVED,COMPLETED,CANCELLED)");
+      if (selectedBranchId !== ALL_BRANCHES) activeOrdersQuery = activeOrdersQuery.eq("branch_id", selectedBranchId);
+      const { count: activeCount } = await activeOrdersQuery;
+      setActiveOrdersCount(activeCount ?? 0);
+
+      // Low-stock ingredients right now — same rule as the Ingredients page's
+      // branchStockFor(): consolidated view sums stock across branches against
+      // the ingredient's own threshold; a single branch uses that branch's
+      // stock_qty against its own threshold override (falling back to the
+      // ingredient's threshold).
+      const [{ data: ingRows }, { data: stockRows }] = await Promise.all([
+        supabase.from("ingredients").select("id, low_stock_threshold").eq("tenant_id", profile.tenant_id),
+        supabase
+          .from("branch_ingredients_stock")
+          .select("branch_id, ingredient_id, stock_qty, low_stock_threshold")
+          .eq("tenant_id", profile.tenant_id),
+      ]);
+      const isConsolidated = selectedBranchId === ALL_BRANCHES;
+      const stockByIngredient = new Map<string, { branch_id: string; stock_qty: number; low_stock_threshold: number | null }[]>();
+      for (const row of (stockRows as any[]) ?? []) {
+        const list = stockByIngredient.get(row.ingredient_id) ?? [];
+        list.push(row);
+        stockByIngredient.set(row.ingredient_id, list);
+      }
+      let lowCount = 0;
+      for (const ing of (ingRows as { id: string; low_stock_threshold: number }[]) ?? []) {
+        const rows = stockByIngredient.get(ing.id) ?? [];
+        let low: boolean;
+        if (isConsolidated) {
+          const qty = rows.reduce((s, r) => s + Number(r.stock_qty), 0);
+          low = qty <= ing.low_stock_threshold;
+        } else {
+          const row = rows.find((r) => r.branch_id === selectedBranchId);
+          const qty = row ? Number(row.stock_qty) : 0;
+          const th = row?.low_stock_threshold ?? ing.low_stock_threshold;
+          low = qty <= th;
+        }
+        if (low) lowCount++;
+      }
+      setLowStockCount(lowCount);
+
       setLoading(false);
     })();
   }, [selectedBranchId]);
@@ -178,7 +236,9 @@ export default function ReportsPage() {
       const peakSheet = XLSX.utils.json_to_sheet(peakHours.map((d) => ({ Jam: d.hour, "Jumlah Order": d.orders })));
       peakSheet["!cols"] = [{ wch: 10 }, { wch: 14 }];
       XLSX.utils.book_append_sheet(wb, peakSheet, "Jam Ramai");
+    }
 
+    if (canExportExcel) {
       const bestSellerSheet = XLSX.utils.json_to_sheet(bestSellers.map((d) => ({ Menu: d.name, "Terjual (pcs)": d.value })));
       bestSellerSheet["!cols"] = [{ wch: 24 }, { wch: 14 }];
       XLSX.utils.book_append_sheet(wb, bestSellerSheet, "Menu Terlaris");
@@ -197,7 +257,7 @@ export default function ReportsPage() {
           </div>
           <Skeleton className="h-9 w-32 rounded-xl" />
         </div>
-        <SkeletonStatGrid count={3} />
+        <SkeletonStatGrid count={5} />
         <div className="card p-5 space-y-4">
           <Skeleton className="h-4 w-32" />
           <Skeleton className="h-64 w-full" />
@@ -222,9 +282,9 @@ export default function ReportsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {isPremium ? (
+          {canExportExcel ? (
             <>
-              <button onClick={exportExcel} className="btn-outline flex items-center gap-1.5 text-sm" title="Excel lengkap: Ringkasan, Omzet Harian, Jam Ramai, Menu Terlaris">
+              <button onClick={exportExcel} className="btn-outline flex items-center gap-1.5 text-sm" title="Excel lengkap: Ringkasan, Omzet Harian, Menu Terlaris (+ Jam Ramai untuk Supreme)">
                 <Download size={14} /> Excel Lengkap
               </button>
               <button onClick={() => window.print()} className="btn-outline flex items-center gap-1.5 text-sm">
@@ -266,6 +326,31 @@ export default function ReportsPage() {
             {totalOrders > 0 ? formatRupiah(Math.round(totalOmzet / totalOrders)) : "Rp0"}
           </p>
         </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Link href="/kitchen" className="card p-5 flex items-center justify-between hover:border-primary/40 transition-colors">
+          <div>
+            <p className="text-sm text-neutral-500">Order Aktif Sekarang</p>
+            <p className="text-2xl font-bold text-neutral-900 mt-1">{activeOrdersCount ?? "–"}</p>
+            <p className="text-xs text-neutral-500 mt-0.5">Belum served/selesai · lihat KDS</p>
+          </div>
+          <div className="w-11 h-11 rounded-2xl bg-primary-light flex items-center justify-center shrink-0">
+            <Sparkles className="text-primary-dark" size={20} />
+          </div>
+        </Link>
+        <Link href="/dashboard/ingredients" className="card p-5 flex items-center justify-between hover:border-primary/40 transition-colors">
+          <div>
+            <p className="text-sm text-neutral-500">Bahan Baku Stok Menipis</p>
+            <p className={"text-2xl font-bold mt-1 " + ((lowStockCount ?? 0) > 0 ? "text-urgent" : "text-neutral-900")}>
+              {lowStockCount ?? "–"}
+            </p>
+            <p className="text-xs text-neutral-500 mt-0.5">Di bawah batas minimum · lihat Bahan Baku</p>
+          </div>
+          <div className={"w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 " + ((lowStockCount ?? 0) > 0 ? "bg-urgent-light" : "bg-neutral-100")}>
+            <Wheat className={(lowStockCount ?? 0) > 0 ? "text-urgent" : "text-neutral-400"} size={20} />
+          </div>
+        </Link>
       </div>
 
       {showHealth && (

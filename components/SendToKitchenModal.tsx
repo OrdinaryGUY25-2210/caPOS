@@ -10,15 +10,9 @@ import { printAllStationTickets } from "@/lib/kitchenPrinter";
 import type { KitchenStation, OrderType, OrderWithItems, TableLiveStatus } from "@/lib/types";
 
 interface KitchenCartItem {
-  /** Phase 2A.3 — kunci baris (product+variant+modifier); fallback ke product_id untuk pemanggil lama. */
-  cartItemId?: string;
   product_id: string;
   name: string;
   qty: number;
-  variant_id?: string | null;
-  variant_name?: string | null;
-  modifiers?: { modifier_id: string; name: string; price_adjustment: number }[];
-  unit_price?: number;
 }
 
 /**
@@ -80,13 +74,7 @@ export default function SendToKitchenModal({
       p_items: cart.map((i) => ({
         product_id: i.product_id,
         qty: i.qty,
-        variant_id: i.variant_id ?? null,
-        modifier_ids: (i.modifiers ?? []).map((m) => m.modifier_id),
-        // Catatan bebas teks TAMBAHAN (mis. "less ice") — konfigurasi utama
-        // (varian/modifier) sudah datang terstruktur lewat variant_id/
-        // modifier_ids di atas, jadi field ini murni pelengkap, bukan
-        // pembawa satu-satunya seperti sebelum Phase 2A.3.
-        variant_notes: variantNotes[i.cartItemId ?? i.product_id] || null,
+        variant_notes: variantNotes[i.product_id] || null,
       })),
     });
 
@@ -180,27 +168,18 @@ export default function SendToKitchenModal({
       )}
 
       <div className="space-y-2 border-t border-neutral-100 pt-3">
-        <p className="text-xs font-semibold text-neutral-500 uppercase">Catatan Tambahan per Item</p>
-        {cart.map((item) => {
-          const lineKey = item.cartItemId ?? item.product_id;
-          const configParts = [item.variant_name, ...(item.modifiers ?? []).map((m) => m.name)].filter(Boolean);
-          return (
-            <div key={lineKey}>
-              <label className="text-sm text-neutral-700 mb-1 block">
-                {item.qty}x {item.name}
-                {configParts.length > 0 && (
-                  <span className="text-primary-dark font-normal"> — {configParts.join(", ")}</span>
-                )}
-              </label>
-              <input
-                value={variantNotes[lineKey] ?? ""}
-                onChange={(e) => setVariantNotes((prev) => ({ ...prev, [lineKey]: e.target.value }))}
-                placeholder={configParts.length > 0 ? "Catatan tambahan (opsional)" : "Contoh: Oat Milk, Less Sugar"}
-                className="input-field text-sm"
-              />
-            </div>
-          );
-        })}
+        <p className="text-xs font-semibold text-neutral-500 uppercase">Varian / Catatan per Item</p>
+        {cart.map((item) => (
+          <div key={item.product_id}>
+            <label className="text-sm text-neutral-700 mb-1 block">{item.qty}x {item.name}</label>
+            <input
+              value={variantNotes[item.product_id] ?? ""}
+              onChange={(e) => setVariantNotes((prev) => ({ ...prev, [item.product_id]: e.target.value }))}
+              placeholder="Contoh: Oat Milk, Less Sugar"
+              className="input-field text-sm"
+            />
+          </div>
+        ))}
       </div>
 
       <div>

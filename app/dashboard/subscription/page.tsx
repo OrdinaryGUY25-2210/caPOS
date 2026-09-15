@@ -10,6 +10,7 @@ import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { getTier, type Tier } from "@/lib/tier";
 import { Skeleton } from "@/components/Skeleton";
 
+import { toast } from "@/components/Toast";
 declare global {
   interface Window {
     snap?: {
@@ -33,13 +34,13 @@ const PLANS = [
     highlight: false, payable: false,
   },
   {
-    key: "monthly", name: "Pro", price: "Rp99.000", period: "/bulan", rawAmount: 99000,
-    features: ["Kasir Unlimited", "Menu Unlimited", "Riwayat Lengkap", "Kesehatan Penjualan"],
+    key: "monthly", name: "Pro", price: "Rp100.000", period: "/bulan", rawAmount: 100000,
+    features: ["Kasir Unlimited", "Menu Unlimited", "Riwayat 30 Hari", "Kesehatan Penjualan", "Export Excel & PDF", "Menu Terlaris"],
     highlight: true, payable: true,
   },
   {
-    key: "yearly", name: "Supreme", price: "Rp999.000", period: "/tahun", rawAmount: 999000,
-    features: ["Semua fitur Pro", "Laporan Lengkap (Jam Ramai, Menu Terlaris)", "Export Excel & PDF", "Prioritas Support"],
+    key: "yearly", name: "Supreme", price: "Rp900.000", period: "/tahun", rawAmount: 900000,
+    features: ["Semua fitur Pro", "Riwayat Lengkap", "Jam Ramai (Peak Hours)", "Prioritas Support"],
     highlight: false, payable: true,
   },
 ] as const;
@@ -52,9 +53,9 @@ const COMPARISON_ROWS: { label: string; free: string | boolean; pro: string | bo
   { label: "Grafik Omzet Harian", free: true, pro: true, supreme: true },
   { label: "Kesehatan Penjualan", free: false, pro: true, supreme: true },
   { label: "Jam Ramai (Peak Hours)", free: false, pro: false, supreme: true },
-  { label: "Menu Terlaris", free: false, pro: false, supreme: true },
+  { label: "Menu Terlaris", free: false, pro: true, supreme: true },
   { label: "Export CSV Sederhana", free: true, pro: true, supreme: true },
-  { label: "Export Excel Multi-sheet + PDF", free: false, pro: false, supreme: true },
+  { label: "Export Excel Multi-sheet + PDF", free: false, pro: true, supreme: true },
   { label: "Prioritas Support", free: false, pro: false, supreme: true },
   { label: "Laporan PDF Otomatis", free: "Riwayat 14 Hari", pro: "Riwayat 30 Hari", supreme: "Riwayat Lengkap" },
   { label: "Stok & HPP", free: true, pro: true, supreme: true },
@@ -151,7 +152,7 @@ export default function SubscriptionPage() {
         },
         onPending: () => {
           setPayingPlan(null);
-          alert("Pembayaran tercatat pending. Status akan otomatis update begitu pembayaran dikonfirmasi.");
+          toast.info("Pembayaran tercatat pending. Status akan otomatis update begitu pembayaran dikonfirmasi.");
         },
         onError: () => {
           setPayingPlan(null);

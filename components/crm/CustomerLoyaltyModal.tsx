@@ -152,16 +152,16 @@ export function CustomerLoyaltyModal({
                   placeholder="Nama, kode, atau nomor telepon..."
                   value={searchQuery}
                   onChange={handleSearch}
-                  className="input-field"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                 />
               </div>
 
               {/* Search Results */}
               <div className="border rounded-lg max-h-64 overflow-y-auto">
                 {isSearching ? (
-                  <div className="p-4 text-center text-neutral-500">Mencari...</div>
+                  <div className="p-4 text-center text-gray-500">Mencari...</div>
                 ) : searchResults.length === 0 ? (
-                  <div className="p-4 text-center text-neutral-500">
+                  <div className="p-4 text-center text-gray-500">
                     {searchQuery.length < 2
                       ? 'Mulai ketik untuk mencari pelanggan'
                       : 'Pelanggan tidak ditemukan'}
@@ -198,7 +198,7 @@ export function CustomerLoyaltyModal({
               {/* New Customer Button */}
               <button
                 onClick={() => setShowNewCustomerForm(true)}
-                className="w-full px-4 py-2 border-2 border-dashed border-neutral-300 rounded-lg text-neutral-600 hover:border-primary hover:text-primary-dark transition"
+                className="w-full px-4 py-2 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-blue-500 hover:text-blue-600 transition"
               >
                 + Tambah Pelanggan Baru
               </button>
@@ -233,7 +233,7 @@ export function CustomerLoyaltyModal({
                       <div className="text-2xl font-bold text-blue-600">
                         {customerProfile.loyaltyBalance || 0}
                       </div>
-                      <div className="text-xs text-neutral-500 mt-1">Poin tersedia</div>
+                      <div className="text-xs text-gray-500 mt-1">Poin tersedia</div>
                     </div>
 
                     <div className="bg-green-50 p-4 rounded-lg">
@@ -241,7 +241,7 @@ export function CustomerLoyaltyModal({
                       <div className="text-xl font-bold text-green-600">
                         Rp {customerProfile.lifetime_spend?.toLocaleString('id-ID')}
                       </div>
-                      <div className="text-xs text-neutral-500 mt-1">Sepanjang waktu</div>
+                      <div className="text-xs text-gray-500 mt-1">Sepanjang waktu</div>
                     </div>
 
                     <div className="bg-purple-50 p-4 rounded-lg">
@@ -249,7 +249,7 @@ export function CustomerLoyaltyModal({
                       <div className="text-xl font-bold text-purple-600">
                         {customerProfile.tier_id ? 'Gold' : 'Silver'}
                       </div>
-                      <div className="text-xs text-neutral-500 mt-1">Tingkat keanggotaan</div>
+                      <div className="text-xs text-gray-500 mt-1">Tingkat keanggotaan</div>
                     </div>
                   </div>
 
@@ -276,7 +276,7 @@ export function CustomerLoyaltyModal({
                         {customerProfile.recentTransactions.map((tx: any) => (
                           <div
                             key={tx.id}
-                            className="flex items-center justify-between p-2 bg-neutral-50 rounded"
+                            className="flex items-center justify-between p-2 bg-gray-50 rounded"
                           >
                             <div className="text-sm">
                               <div className="font-medium">{tx.invoice_number}</div>
@@ -303,7 +303,7 @@ export function CustomerLoyaltyModal({
                     </button>
                     <button
                       onClick={handleClose}
-                      className="flex-1 btn-outline"
+                      className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
                     >
                       Tutup
                     </button>
@@ -331,7 +331,7 @@ export function CustomerLoyaltyModal({
                     customer_name: e.target.value,
                   }))
                 }
-                className="input-field"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
               />
             </div>
 
@@ -346,7 +346,7 @@ export function CustomerLoyaltyModal({
                     phone_number: e.target.value,
                   }))
                 }
-                className="input-field"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
               />
             </div>
 
@@ -361,7 +361,7 @@ export function CustomerLoyaltyModal({
                     whatsapp_number: e.target.value,
                   }))
                 }
-                className="input-field"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
               />
             </div>
 
@@ -376,7 +376,7 @@ export function CustomerLoyaltyModal({
                     email: e.target.value,
                   }))
                 }
-                className="input-field"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
               />
             </div>
 
@@ -390,7 +390,7 @@ export function CustomerLoyaltyModal({
               <button
                 type="button"
                 onClick={() => setShowNewCustomerForm(false)}
-                className="flex-1 btn-outline"
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
               >
                 Batal
               </button>
@@ -495,7 +495,7 @@ export function PromotionBuilder({ isOpen, onClose }: PromotionBuilderProps) {
           <button
             type="button"
             onClick={onClose}
-            className="flex-1 py-2.5 rounded-xl border border-neutral-300 text-sm font-semibold"
+            className="flex-1 py-2.5 rounded-xl border border-gray-300 text-sm font-semibold"
           >
             Batal
           </button>
@@ -533,7 +533,7 @@ export function PromotionBuilder({ isOpen, onClose }: PromotionBuilderProps) {
               onChange={(e) =>
                 setFormData((prev) => ({ ...prev, promo_name: e.target.value }))
               }
-              className="input-field"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
               placeholder="Misalnya: Diskon Kopi Hari Jumat"
             />
           </div>
@@ -549,7 +549,7 @@ export function PromotionBuilder({ isOpen, onClose }: PromotionBuilderProps) {
                     promo_type: e.target.value as any,
                   }))
                 }
-                className="input-field"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
               >
                 <option value="PERCENTAGE">Diskon Persentase (%)</option>
                 <option value="NOMINAL">Diskon Nominal (Rp)</option>
@@ -573,7 +573,7 @@ export function PromotionBuilder({ isOpen, onClose }: PromotionBuilderProps) {
                     discount_value: parseFloat(e.target.value),
                   }))
                 }
-                className="input-field"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
               />
             </div>
           </div>
@@ -586,7 +586,7 @@ export function PromotionBuilder({ isOpen, onClose }: PromotionBuilderProps) {
                 setFormData((prev) => ({ ...prev, description: e.target.value }))
               }
               rows={3}
-              className="input-field"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
             />
           </div>
 
@@ -599,7 +599,7 @@ export function PromotionBuilder({ isOpen, onClose }: PromotionBuilderProps) {
                 onChange={(e) =>
                   setFormData((prev) => ({ ...prev, promo_code: e.target.value }))
                 }
-                className="input-field"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 placeholder="PROMO2026"
               />
             </div>
@@ -613,7 +613,7 @@ export function PromotionBuilder({ isOpen, onClose }: PromotionBuilderProps) {
                 onChange={(e) =>
                   setFormData((prev) => ({ ...prev, start_date: e.target.value }))
                 }
-                className="input-field"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
               />
             </div>
           </div>
@@ -626,7 +626,7 @@ export function PromotionBuilder({ isOpen, onClose }: PromotionBuilderProps) {
               onChange={(e) =>
                 setFormData((prev) => ({ ...prev, end_date: e.target.value }))
               }
-              className="input-field"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
             />
           </div>
 
@@ -652,7 +652,7 @@ export function PromotionBuilder({ isOpen, onClose }: PromotionBuilderProps) {
                     newRules[idx].rule_type = e.target.value;
                     setFormData((prev) => ({ ...prev, rules: newRules }));
                   }}
-                  className="input-field"
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm"
                 >
                   <option value="">-- Pilih Tipe Aturan --</option>
                   {ruleTypes.map((rt) => (
@@ -671,7 +671,7 @@ export function PromotionBuilder({ isOpen, onClose }: PromotionBuilderProps) {
                     newRules[idx].rule_value = e.target.value;
                     setFormData((prev) => ({ ...prev, rules: newRules }));
                   }}
-                  className="input-field"
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm"
                 />
 
                 <button

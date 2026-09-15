@@ -60,7 +60,7 @@ export function ProductProfitabilityAnalytics() {
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as any)}
-            className="input-field"
+            className="px-4 py-2 border border-gray-300 rounded-lg"
           >
             <option value="profit">Urutkan: Profit Terbesar</option>
             <option value="revenue">Urutkan: Revenue Terbesar</option>
@@ -71,49 +71,49 @@ export function ProductProfitabilityAnalytics() {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-4 gap-4">
-        <div className="card p-6">
+        <div className="bg-white rounded-lg p-6 shadow">
           <div className="text-sm text-gray-600">Total Revenue</div>
           <div className="text-2xl font-bold mt-2">
             Rp {totalRevenue.toLocaleString('id-ID')}
           </div>
-          <div className="text-xs text-neutral-500 mt-1">{profitData.length} produk</div>
+          <div className="text-xs text-gray-500 mt-1">{profitData.length} produk</div>
         </div>
 
-        <div className="card p-6">
+        <div className="bg-white rounded-lg p-6 shadow">
           <div className="text-sm text-gray-600">Total HPP (COGS)</div>
           <div className="text-2xl font-bold mt-2">
             Rp {totalCOGS.toLocaleString('id-ID')}
           </div>
-          <div className="text-xs text-neutral-500 mt-1">
+          <div className="text-xs text-gray-500 mt-1">
             {((totalCOGS / totalRevenue) * 100).toFixed(1)}% dari revenue
           </div>
         </div>
 
-        <div className="card p-6">
+        <div className="bg-white rounded-lg p-6 shadow">
           <div className="text-sm text-gray-600">Gross Profit</div>
           <div className="text-2xl font-bold text-green-600 mt-2">
             Rp {totalGrossProfit.toLocaleString('id-ID')}
           </div>
-          <div className="text-xs text-neutral-500 mt-1">Laba kotor</div>
+          <div className="text-xs text-gray-500 mt-1">Laba kotor</div>
         </div>
 
-        <div className="card p-6">
+        <div className="bg-white rounded-lg p-6 shadow">
           <div className="text-sm text-gray-600">Avg Margin</div>
           <div className="text-2xl font-bold text-blue-600 mt-2">{avgProfitMargin}%</div>
-          <div className="text-xs text-neutral-500 mt-1">Rata-rata margin</div>
+          <div className="text-xs text-gray-500 mt-1">Rata-rata margin</div>
         </div>
       </div>
 
       {/* Profitability Table */}
-      <div className="card overflow-hidden">
+      <div className="bg-white rounded-lg shadow overflow-hidden">
         {isLoading ? (
-          <div className="p-8 text-center text-neutral-500">Memuat data...</div>
+          <div className="p-8 text-center text-gray-500">Memuat data...</div>
         ) : profitData.length === 0 ? (
-          <div className="p-8 text-center text-neutral-500">Belum ada data penjualan</div>
+          <div className="p-8 text-center text-gray-500">Belum ada data penjualan</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead className="bg-neutral-50 border-b">
+              <thead className="bg-gray-50 border-b">
                 <tr>
                   <th className="px-6 py-3 text-left text-sm font-semibold">Produk</th>
                   <th className="px-6 py-3 text-center text-sm font-semibold">Terjual (pcs)</th>
@@ -125,7 +125,7 @@ export function ProductProfitabilityAnalytics() {
               </thead>
               <tbody>
                 {profitData.map((item) => (
-                  <tr key={item.id} className="border-b hover:bg-neutral-50">
+                  <tr key={item.id} className="border-b hover:bg-gray-50">
                     <td className="px-6 py-3">
                       <div className="font-semibold">{item.product_name}</div>
                       <div className="text-xs text-gray-600">{item.category_name}</div>
@@ -188,12 +188,12 @@ export function PeakHoursAnalytics() {
       </div>
 
       {/* Heatmap Visualization */}
-      <div className="card p-6">
+      <div className="bg-white rounded-lg p-6 shadow">
         <div className="space-y-4">
           {isLoading ? (
-            <div className="text-center py-8 text-neutral-500">Memuat data...</div>
+            <div className="text-center py-8 text-gray-500">Memuat data...</div>
           ) : peakData.length === 0 ? (
-            <div className="text-center py-8 text-neutral-500">Belum ada data transaksi</div>
+            <div className="text-center py-8 text-gray-500">Belum ada data transaksi</div>
           ) : (
             <>
               {Array.from({ length: 24 }, (_, i) => {
@@ -243,7 +243,7 @@ export function PeakHoursAnalytics() {
 
           return (
             <>
-              <div className="card p-6">
+              <div className="bg-white rounded-lg p-6 shadow">
                 <div className="text-sm text-gray-600">Jam Puncak (Transaksi)</div>
                 {sortedByTx.length > 0 && (
                   <div className="mt-2">
@@ -257,7 +257,7 @@ export function PeakHoursAnalytics() {
                 )}
               </div>
 
-              <div className="card p-6">
+              <div className="bg-white rounded-lg p-6 shadow">
                 <div className="text-sm text-gray-600">Jam Puncak (Revenue)</div>
                 {sortedByRevenue.length > 0 && (
                   <div className="mt-2">
@@ -271,7 +271,7 @@ export function PeakHoursAnalytics() {
                 )}
               </div>
 
-              <div className="card p-6">
+              <div className="bg-white rounded-lg p-6 shadow">
                 <div className="text-sm text-gray-600">Total Jam Aktif</div>
                 <div className="mt-2">
                   <div className="text-2xl font-bold">{peakData.length} jam</div>
@@ -372,7 +372,7 @@ export function WasteLossReport() {
         </div>
         <button
           onClick={() => setShowForm(true)}
-          className="btn-danger"
+          className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
         >
           + Catat Kerugian
         </button>
@@ -389,7 +389,7 @@ export function WasteLossReport() {
         </div>
 
         {Object.entries(byType).map(([type, amount]) => (
-          <div key={type} className="card p-6">
+          <div key={type} className="bg-white rounded-lg p-6 shadow">
             <div className="text-sm text-gray-600">{type}</div>
             <div className="text-2xl font-bold mt-2 text-red-600">
               Rp {(amount as number).toLocaleString('id-ID')}
@@ -399,15 +399,15 @@ export function WasteLossReport() {
       </div>
 
       {/* Waste Logs Table */}
-      <div className="card">
+      <div className="bg-white rounded-lg shadow">
         {isLoading ? (
-          <div className="p-8 text-center text-neutral-500">Memuat data...</div>
+          <div className="p-8 text-center text-gray-500">Memuat data...</div>
         ) : wasteLogs.length === 0 ? (
-          <div className="p-8 text-center text-neutral-500">Belum ada pencatatan kerugian</div>
+          <div className="p-8 text-center text-gray-500">Belum ada pencatatan kerugian</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-neutral-50 border-b">
+              <thead className="bg-gray-50 border-b">
                 <tr>
                   <th className="px-6 py-3 text-left font-semibold">Produk</th>
                   <th className="px-6 py-3 text-center font-semibold">Jenis</th>
@@ -420,7 +420,7 @@ export function WasteLossReport() {
               </thead>
               <tbody>
                 {wasteLogs.map((log) => (
-                  <tr key={log.id} className="border-b hover:bg-neutral-50">
+                  <tr key={log.id} className="border-b hover:bg-gray-50">
                     <td className="px-6 py-3 font-semibold">{log.product_name}</td>
                     <td className="px-6 py-3 text-center">
                       <span className="px-2 py-1 bg-orange-100 text-orange-800 rounded text-xs">
@@ -449,7 +449,7 @@ export function WasteLossReport() {
       {/* Form Modal */}
       {showForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4">
+          <div className="bg-white rounded-lg p-8 max-w-md w-full mx-4">
             <h2 className="text-xl font-bold mb-4">Catat Kerugian Barang</h2>
 
             {error && <div className="p-3 bg-red-50 border border-red-200 rounded text-red-800 text-sm mb-4">{error}</div>}
@@ -467,7 +467,7 @@ export function WasteLossReport() {
                       product_name: e.target.value,
                     }))
                   }
-                  className="input-field"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 />
               </div>
 
@@ -481,7 +481,7 @@ export function WasteLossReport() {
                       waste_type: e.target.value as any,
                     }))
                   }
-                  className="input-field"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 >
                   <option value="EXPIRED">Kadaluarsa</option>
                   <option value="DAMAGED">Rusak</option>
@@ -504,7 +504,7 @@ export function WasteLossReport() {
                         qty_wasted: parseInt(e.target.value) || 0,
                       }))
                     }
-                    className="input-field"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                   />
                 </div>
 
@@ -521,7 +521,7 @@ export function WasteLossReport() {
                         cost_price: parseFloat(e.target.value) || 0,
                       }))
                     }
-                    className="input-field"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                   />
                 </div>
               </div>
@@ -537,21 +537,21 @@ export function WasteLossReport() {
                     }))
                   }
                   rows={3}
-                  className="input-field text-sm"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
                 />
               </div>
 
               <div className="flex gap-3 pt-4 border-t">
                 <button
                   type="submit"
-                  className="flex-1 btn-danger text-center"
+                  className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
                 >
                   Simpan
                 </button>
                 <button
                   type="button"
                   onClick={() => setShowForm(false)}
-                  className="flex-1 btn-outline"
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
                 >
                   Batal
                 </button>

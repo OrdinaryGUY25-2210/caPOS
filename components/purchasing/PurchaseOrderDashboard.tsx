@@ -242,13 +242,13 @@ export function PurchaseOrderDashboard() {
         <div className="flex gap-2">
           <button
             onClick={() => setShowPOForm(true)}
-            className="btn-primary"
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
           >
             + Buat PO
           </button>
           <button
             onClick={() => setShowGRNForm(true)}
-            className="btn-primary"
+            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
           >
             + Terima Barang (GRN)
           </button>
@@ -269,15 +269,15 @@ export function PurchaseOrderDashboard() {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-3 gap-4">
-        <div className="card p-6">
+        <div className="bg-white rounded-lg p-6 shadow">
           <div className="text-sm text-gray-600">PO Pending</div>
           <div className="text-3xl font-bold mt-2">-</div>
         </div>
-        <div className="card p-6">
+        <div className="bg-white rounded-lg p-6 shadow">
           <div className="text-sm text-gray-600">Barang Diterima</div>
           <div className="text-3xl font-bold mt-2">-</div>
         </div>
-        <div className="card p-6">
+        <div className="bg-white rounded-lg p-6 shadow">
           <div className="text-sm text-gray-600">Total Pembelian (30 hari)</div>
           <div className="text-3xl font-bold mt-2">Rp -</div>
         </div>
@@ -286,7 +286,7 @@ export function PurchaseOrderDashboard() {
       {/* PO Form Modal */}
       {showPOForm && (
       <Modal title="Buat Purchase Order Baru" onClose={() => setShowPOForm(false)} maxWidth="sm:max-w-4xl">
-        <div className="bg-white rounded-2xl p-8 max-w-4xl max-h-[90vh] overflow-y-auto">
+        <div className="bg-white rounded-lg p-8 max-w-4xl max-h-[90vh] overflow-y-auto">
           <h2 className="text-2xl font-bold mb-6">Buat Purchase Order Baru</h2>
 
           <form onSubmit={handleSubmitPO} className="space-y-6">
@@ -300,7 +300,7 @@ export function PurchaseOrderDashboard() {
                   onChange={(e) =>
                     setPoFormData((prev) => ({ ...prev, supplier_id: e.target.value }))
                   }
-                  className="input-field"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 >
                   <option value="">-- Pilih Pemasok --</option>
                   {suppliers.map((sup) => (
@@ -322,7 +322,7 @@ export function PurchaseOrderDashboard() {
                       expected_delivery_date: e.target.value,
                     }))
                   }
-                  className="input-field"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 />
               </div>
             </div>
@@ -332,7 +332,7 @@ export function PurchaseOrderDashboard() {
               <h3 className="text-lg font-semibold mb-4">Item PO</h3>
 
               {/* Item Input */}
-              <div className="bg-neutral-50 p-4 rounded-lg mb-4 space-y-3">
+              <div className="bg-gray-50 p-4 rounded-lg mb-4 space-y-3">
                 <div className="grid grid-cols-4 gap-3">
                   <div>
                     <label className="text-xs font-medium">Nama Produk</label>
@@ -387,7 +387,7 @@ export function PurchaseOrderDashboard() {
                     <button
                       type="button"
                       onClick={handleAddPOItem}
-                      className="w-full btn-primary text-sm py-2"
+                      className="w-full px-3 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700"
                     >
                       Tambah
                     </button>
@@ -398,10 +398,10 @@ export function PurchaseOrderDashboard() {
               {/* Items List */}
               <div className="border rounded-lg overflow-hidden">
                 {poFormData.items.length === 0 ? (
-                  <div className="p-4 text-center text-neutral-500">Belum ada item</div>
+                  <div className="p-4 text-center text-gray-500">Belum ada item</div>
                 ) : (
                   <table className="w-full text-sm">
-                    <thead className="bg-neutral-100">
+                    <thead className="bg-gray-100">
                       <tr>
                         <th className="px-4 py-2 text-left">Produk</th>
                         <th className="px-4 py-2 text-center">Qty</th>
@@ -432,7 +432,7 @@ export function PurchaseOrderDashboard() {
                           </td>
                         </tr>
                       ))}
-                      <tr className="bg-neutral-50 font-semibold">
+                      <tr className="bg-gray-50 font-semibold">
                         <td colSpan={3} className="px-4 py-2 text-right">
                           Total:
                         </td>
@@ -456,7 +456,7 @@ export function PurchaseOrderDashboard() {
                   setPoFormData((prev) => ({ ...prev, notes: e.target.value }))
                 }
                 rows={3}
-                className="input-field"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 placeholder="Catatan khusus untuk pemasok..."
               />
             </div>
@@ -465,7 +465,7 @@ export function PurchaseOrderDashboard() {
             <div className="flex gap-3 pt-4 border-t">
               <button
                 type="submit"
-                className="flex-1 btn-primary text-center"
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
               >
                 Buat PO
               </button>
@@ -475,7 +475,7 @@ export function PurchaseOrderDashboard() {
                   setShowPOForm(false);
                   resetPOForm();
                 }}
-                className="flex-1 btn-outline"
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
               >
                 Batal
               </button>
@@ -488,7 +488,7 @@ export function PurchaseOrderDashboard() {
       {/* GRN Form Modal */}
       {showGRNForm && (
       <Modal title="Terima Barang (Goods Receipt)" onClose={() => setShowGRNForm(false)} maxWidth="sm:max-w-4xl">
-        <div className="bg-white rounded-2xl p-8 max-w-4xl max-h-[90vh] overflow-y-auto">
+        <div className="bg-white rounded-lg p-8 max-w-4xl max-h-[90vh] overflow-y-auto">
           <h2 className="text-2xl font-bold mb-6">Penerimaan Barang (GRN)</h2>
 
           <form onSubmit={handleSubmitGrn} className="space-y-6">
@@ -502,9 +502,9 @@ export function PurchaseOrderDashboard() {
                 onChange={(e) =>
                   setGrnFormData((prev) => ({ ...prev, po_id: e.target.value }))
                 }
-                className="input-field"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
               />
-              <p className="text-xs text-neutral-500 mt-1">
+              <p className="text-xs text-gray-500 mt-1">
                 Fitur pencarian PO dapat ditambahkan di dashboard
               </p>
             </div>
@@ -514,7 +514,7 @@ export function PurchaseOrderDashboard() {
               <h3 className="text-lg font-semibold mb-4">Item Penerimaan</h3>
 
               {/* Item Input */}
-              <div className="bg-neutral-50 p-4 rounded-lg mb-4 space-y-3">
+              <div className="bg-gray-50 p-4 rounded-lg mb-4 space-y-3">
                 <div className="grid grid-cols-5 gap-3">
                   <div>
                     <label className="text-xs font-medium">Produk</label>
@@ -585,7 +585,7 @@ export function PurchaseOrderDashboard() {
                     <button
                       type="button"
                       onClick={handleAddGrnItem}
-                      className="w-full btn-primary text-sm py-2"
+                      className="w-full px-3 py-2 bg-green-600 text-white rounded text-sm hover:bg-green-700"
                     >
                       Tambah
                     </button>
@@ -596,10 +596,10 @@ export function PurchaseOrderDashboard() {
               {/* Items List */}
               <div className="border rounded-lg overflow-hidden">
                 {grnFormData.items.length === 0 ? (
-                  <div className="p-4 text-center text-neutral-500">Belum ada item</div>
+                  <div className="p-4 text-center text-gray-500">Belum ada item</div>
                 ) : (
                   <table className="w-full text-sm">
-                    <thead className="bg-neutral-100">
+                    <thead className="bg-gray-100">
                       <tr>
                         <th className="px-4 py-2 text-left">Produk</th>
                         <th className="px-4 py-2 text-center">Unit</th>
@@ -632,7 +632,7 @@ export function PurchaseOrderDashboard() {
                           </td>
                         </tr>
                       ))}
-                      <tr className="bg-neutral-50 font-semibold">
+                      <tr className="bg-gray-50 font-semibold">
                         <td colSpan={4} className="px-4 py-2 text-right">
                           Total Penerimaan:
                         </td>
@@ -656,7 +656,7 @@ export function PurchaseOrderDashboard() {
                   setGrnFormData((prev) => ({ ...prev, notes: e.target.value }))
                 }
                 rows={3}
-                className="input-field"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 placeholder="Kondisi barang, kerusakan, dll..."
               />
             </div>
@@ -665,14 +665,14 @@ export function PurchaseOrderDashboard() {
             <div className="flex gap-3 pt-4 border-t">
               <button
                 type="submit"
-                className="flex-1 btn-primary text-center"
+                className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
               >
                 Simpan GRN & Update Stok
               </button>
               <button
                 type="button"
                 onClick={() => setShowGRNForm(false)}
-                className="flex-1 btn-outline"
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
               >
                 Batal
               </button>

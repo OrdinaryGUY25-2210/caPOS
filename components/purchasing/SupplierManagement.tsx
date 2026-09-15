@@ -150,7 +150,7 @@ export function SupplierManagement() {
         </div>
         <button
           onClick={() => setShowForm(true)}
-          className="btn-primary"
+          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
         >
           + Tambah Pemasok
         </button>
@@ -169,19 +169,19 @@ export function SupplierManagement() {
       )}
 
       {/* Suppliers Table */}
-      <div className="card">
+      <div className="bg-white rounded-lg shadow">
         {isLoading ? (
-          <div className="p-8 text-center text-neutral-500">
+          <div className="p-8 text-center text-gray-500">
             Memuat data pemasok...
           </div>
         ) : suppliers.length === 0 ? (
-          <div className="p-8 text-center text-neutral-500">
+          <div className="p-8 text-center text-gray-500">
             Belum ada pemasok. Tambahkan pemasok baru untuk memulai.
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead className="bg-neutral-50 border-b">
+              <thead className="bg-gray-50 border-b">
                 <tr>
                   <th className="px-6 py-3 text-left text-sm font-semibold">Kode</th>
                   <th className="px-6 py-3 text-left text-sm font-semibold">Nama Perusahaan</th>
@@ -193,7 +193,7 @@ export function SupplierManagement() {
               </thead>
               <tbody>
                 {suppliers.map((supplier) => (
-                  <tr key={supplier.id} className="border-b hover:bg-neutral-50">
+                  <tr key={supplier.id} className="border-b hover:bg-gray-50">
                     <td className="px-6 py-3 text-sm font-mono">{supplier.supplier_code}</td>
                     <td className="px-6 py-3 text-sm font-semibold">{supplier.company_name}</td>
                     <td className="px-6 py-3 text-sm">
@@ -254,7 +254,7 @@ export function SupplierManagement() {
                   onChange={(e) =>
                     setFormData((prev) => ({ ...prev, supplier_code: e.target.value }))
                   }
-                  className="input-field"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                   placeholder="SUP-001"
                 />
               </div>
@@ -268,7 +268,7 @@ export function SupplierManagement() {
                   onChange={(e) =>
                     setFormData((prev) => ({ ...prev, company_name: e.target.value }))
                   }
-                  className="input-field"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 />
               </div>
 
@@ -280,7 +280,7 @@ export function SupplierManagement() {
                   onChange={(e) =>
                     setFormData((prev) => ({ ...prev, contact_person: e.target.value }))
                   }
-                  className="input-field"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 />
               </div>
 
@@ -292,7 +292,7 @@ export function SupplierManagement() {
                   onChange={(e) =>
                     setFormData((prev) => ({ ...prev, phone_number: e.target.value }))
                   }
-                  className="input-field"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 />
               </div>
 
@@ -304,7 +304,7 @@ export function SupplierManagement() {
                   onChange={(e) =>
                     setFormData((prev) => ({ ...prev, whatsapp_number: e.target.value }))
                   }
-                  className="input-field"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 />
               </div>
 
@@ -316,7 +316,7 @@ export function SupplierManagement() {
                   onChange={(e) =>
                     setFormData((prev) => ({ ...prev, email: e.target.value }))
                   }
-                  className="input-field"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 />
               </div>
 
@@ -328,7 +328,7 @@ export function SupplierManagement() {
                   onChange={(e) =>
                     setFormData((prev) => ({ ...prev, address: e.target.value }))
                   }
-                  className="input-field"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 />
               </div>
 
@@ -340,7 +340,7 @@ export function SupplierManagement() {
                   onChange={(e) =>
                     setFormData((prev) => ({ ...prev, city: e.target.value }))
                   }
-                  className="input-field"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 />
               </div>
 
@@ -352,7 +352,7 @@ export function SupplierManagement() {
                   onChange={(e) =>
                     setFormData((prev) => ({ ...prev, province: e.target.value }))
                   }
-                  className="input-field"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 />
               </div>
 
@@ -364,7 +364,7 @@ export function SupplierManagement() {
                   onChange={(e) =>
                     setFormData((prev) => ({ ...prev, postal_code: e.target.value }))
                   }
-                  className="input-field"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 />
               </div>
 
@@ -376,7 +376,7 @@ export function SupplierManagement() {
                   onChange={(e) =>
                     setFormData((prev) => ({ ...prev, payment_terms: e.target.value }))
                   }
-                  className="input-field"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                   placeholder="NET 30, COD"
                 />
               </div>
@@ -404,14 +404,14 @@ export function SupplierManagement() {
             <div className="flex gap-3 pt-4 border-t">
               <button
                 type="submit"
-                className="flex-1 btn-primary text-center"
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
               >
                 {editingId ? 'Simpan Perubahan' : 'Tambah Pemasok'}
               </button>
               <button
                 type="button"
                 onClick={handleCloseForm}
-                className="flex-1 btn-outline"
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
               >
                 Batal
               </button>

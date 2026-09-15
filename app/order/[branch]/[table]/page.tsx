@@ -55,6 +55,10 @@ export default async function SelfOrderPage({
       branchName={pageData.branch.name}
       tableCapacity={pageData.table.capacity}
       products={pageData.products ?? []}
+      // Migrasi 020 — dipakai murni sebagai nama topik broadcast realtime
+      // `products-<tenant_id>` untuk notifikasi Sold Out/Menu 86 instan,
+      // BUKAN untuk query apa pun langsung ke tabel dari klien publik ini.
+      tenantId={pageData.branch.tenant_id}
     />
   );
 }

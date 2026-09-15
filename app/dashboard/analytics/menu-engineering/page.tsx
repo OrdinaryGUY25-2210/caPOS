@@ -7,6 +7,8 @@ import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { formatRupiah } from "@/lib/utils";
 import type { MenuEngineeringRow, MenuEngineeringClass } from "@/lib/types";
+import { Skeleton, SkeletonBlock, SkeletonTableRows } from "@/components/Skeleton";
+import PremiumFeatureLock from "@/components/PremiumFeatureLock";
 
 const CLASS_COLOR: Record<MenuEngineeringClass, string> = {
   STAR: "#10B981",
@@ -29,6 +31,14 @@ const CLASS_LABEL: Record<MenuEngineeringClass, string> = {
  * yang sama (dihitung server-side lewat RPC menu_engineering_report()).
  */
 export default function MenuEngineeringPage() {
+  return (
+    <PremiumFeatureLock featureName="Menu Terlaris (Menu Engineering)" minTier="pro">
+      <MenuEngineeringContent />
+    </PremiumFeatureLock>
+  );
+}
+
+function MenuEngineeringContent() {
   const [rows, setRows] = useState<MenuEngineeringRow[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -48,8 +58,21 @@ export default function MenuEngineeringPage() {
 
   if (loading) {
     return (
-      <div className="flex justify-center py-16">
-        <Loader2 className="animate-spin text-neutral-300" size={28} />
+      <div className="max-w-5xl mx-auto space-y-6">
+        <div className="space-y-2">
+          <Skeleton className="h-5 w-56" />
+          <Skeleton className="h-3 w-96" />
+        </div>
+        <div className="card p-4">
+          <SkeletonBlock className="h-[360px] w-full" />
+        </div>
+        <div className="card overflow-x-auto">
+          <table className="w-full text-sm">
+            <tbody>
+              <SkeletonTableRows rows={6} cols={5} />
+            </tbody>
+          </table>
+        </div>
       </div>
     );
   }
@@ -66,7 +89,7 @@ export default function MenuEngineeringPage() {
         Kuadran popularitas (volume terjual) vs profitabilitas (margin HPP) — dibandingkan rata-rata seluruh menu.
       </p>
 
-      <div className="bg-white rounded-2xl border border-neutral-200 p-4 mb-6">
+      <div className="card p-4 mb-6">
         <ResponsiveContainer width="100%" height={360}>
           <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 10 }}>
             <XAxis type="number" dataKey="x" name="Qty Terjual" label={{ value: "Volume Penjualan →", position: "insideBottom", offset: -10, fontSize: 11 }} />
@@ -108,7 +131,7 @@ export default function MenuEngineeringPage() {
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-neutral-200 overflow-hidden">
+      <div className="card overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-neutral-50 text-neutral-500 text-xs">
             <tr>
