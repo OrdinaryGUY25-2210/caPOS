@@ -66,7 +66,7 @@ export default function MenuEngineeringPage() {
         Kuadran popularitas (volume terjual) vs profitabilitas (margin HPP) — dibandingkan rata-rata seluruh menu.
       </p>
 
-      <div className="card p-4 mb-6">
+      <div className="bg-white rounded-2xl border border-neutral-200 p-4 mb-6">
         <ResponsiveContainer width="100%" height={360}>
           <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 10 }}>
             <XAxis type="number" dataKey="x" name="Qty Terjual" label={{ value: "Volume Penjualan →", position: "insideBottom", offset: -10, fontSize: 11 }} />
@@ -108,7 +108,7 @@ export default function MenuEngineeringPage() {
         </div>
       </div>
 
-      <div className="card overflow-hidden">
+      <div className="bg-white rounded-2xl border border-neutral-200 overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-neutral-50 text-neutral-500 text-xs">
             <tr>

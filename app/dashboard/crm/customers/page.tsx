@@ -106,7 +106,7 @@ export default function CustomersPage() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Cari nama, kode, atau nomor telepon..."
-          className="input-field pl-9"
+          className="w-full pl-9 pr-3 py-2 border border-neutral-300 rounded-xl text-sm"
         />
       </div>
 
@@ -117,7 +117,7 @@ export default function CustomersPage() {
       ) : filtered.length === 0 ? (
         <p className="text-sm text-neutral-400 text-center py-10">Belum ada pelanggan.</p>
       ) : (
-        <div className="card divide-y divide-neutral-100">
+        <div className="bg-white rounded-2xl border border-neutral-200 divide-y divide-neutral-100">
           {filtered.map((c) => (
             <div key={c.id} className="flex items-center justify-between p-4">
               <div className="flex items-center gap-3">
@@ -178,13 +178,13 @@ export default function CustomersPage() {
               placeholder="Kode pelanggan (mis. CUST-001)"
               value={form.customer_code}
               onChange={(e) => setForm({ ...form, customer_code: e.target.value })}
-              className="input-field"
+              className="w-full px-3 py-2 border border-neutral-300 rounded-xl text-sm"
             />
             <input
               placeholder="Nama lengkap"
               value={form.customer_name}
               onChange={(e) => setForm({ ...form, customer_name: e.target.value })}
-              className="input-field"
+              className="w-full px-3 py-2 border border-neutral-300 rounded-xl text-sm"
             />
             <input
               placeholder="No. HP / WhatsApp"
@@ -192,13 +192,13 @@ export default function CustomersPage() {
               onChange={(e) =>
                 setForm({ ...form, phone_number: e.target.value, whatsapp_number: e.target.value })
               }
-              className="input-field"
+              className="w-full px-3 py-2 border border-neutral-300 rounded-xl text-sm"
             />
             <input
               placeholder="Email (opsional)"
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
-              className="input-field"
+              className="w-full px-3 py-2 border border-neutral-300 rounded-xl text-sm"
             />
           </div>
         </Modal>

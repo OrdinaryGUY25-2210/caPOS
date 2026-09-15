@@ -65,7 +65,7 @@ export default function PromotionsPage() {
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
           {promos.map((p) => (
-            <div key={p.id} className="card p-4">
+            <div key={p.id} className="bg-white rounded-2xl border border-neutral-200 p-4">
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-2">
                   <div className="w-9 h-9 rounded-full bg-primary-light flex items-center justify-center text-primary">

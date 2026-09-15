@@ -139,7 +139,7 @@ export default function ChannelPricingPage() {
           <Loader2 className="animate-spin text-neutral-300" size={28} />
         </div>
       ) : (
-        <div className="card overflow-hidden">
+        <div className="bg-white rounded-2xl border border-neutral-200 overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-neutral-50 text-neutral-500 text-xs">
               <tr>

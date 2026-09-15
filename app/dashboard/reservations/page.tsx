@@ -115,7 +115,7 @@ export default function ReservationsPage() {
         </button>
       </div>
 
-      <div className="flex items-center justify-center gap-4 mb-6 card p-3">
+      <div className="flex items-center justify-center gap-4 mb-6 bg-white rounded-2xl border border-neutral-200 p-3">
         <button onClick={() => shiftDate(-1)} className="p-2 rounded-lg hover:bg-neutral-100">
           <ChevronLeft size={18} />
         </button>
@@ -134,7 +134,7 @@ export default function ReservationsPage() {
       ) : (
         <div className="space-y-3">
           {reservations.map((r) => (
-            <div key={r.id} className="card p-4">
+            <div key={r.id} className="bg-white rounded-2xl border border-neutral-200 p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="font-bold text-neutral-900 text-sm">
@@ -154,7 +154,7 @@ export default function ReservationsPage() {
                       </span>
                     )}
                   </div>
-                  {r.notes && <p className="text-xs text-neutral-400 mt-1 italic">&quot;{r.notes}&quot;</p>}
+                  {r.notes && <p className="text-xs text-neutral-400 mt-1 italic">"{r.notes}"</p>}
                 </div>
                 <span className={cx("text-[11px] font-semibold px-2.5 py-1 rounded-full shrink-0", STATUS_STYLE[r.status])}>
                   {STATUS_LABEL[r.status]}

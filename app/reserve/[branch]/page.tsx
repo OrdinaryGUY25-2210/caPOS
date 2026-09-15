@@ -110,7 +110,7 @@ export default function PublicReservationPage({ params }: { params: { branch: st
           {branch.address && <p className="text-xs text-neutral-500 mt-1">{branch.address}</p>}
         </div>
 
-        <div className="card p-4 space-y-3">
+        <div className="bg-white rounded-2xl border border-neutral-200 p-4 space-y-3">
           <Field label="Nama Lengkap">
             <input value={name} onChange={(e) => setName(e.target.value)} className="input" placeholder="Nama Anda" />
           </Field>

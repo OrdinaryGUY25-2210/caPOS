@@ -75,7 +75,7 @@ export default function GrowthAnalyticsPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div>
           <h2 className="font-bold text-neutral-900 mb-3 text-sm">Pelanggan Bernilai Tertinggi (LTV)</h2>
-          <div className="card divide-y divide-neutral-100">
+          <div className="bg-white rounded-2xl border border-neutral-200 divide-y divide-neutral-100">
             {topCustomers.length === 0 && <p className="p-4 text-xs text-neutral-400 text-center">Belum ada data.</p>}
             {topCustomers.map((c) => (
               <div key={c.member_id} className="p-3 flex items-center justify-between text-sm">
@@ -93,7 +93,7 @@ export default function GrowthAnalyticsPage() {
           <h2 className="font-bold text-neutral-900 mb-3 text-sm">
             Pelanggan Tidak Aktif <span className="text-neutral-400 font-normal">— kandidat voucher comeback</span>
           </h2>
-          <div className="card divide-y divide-neutral-100">
+          <div className="bg-white rounded-2xl border border-neutral-200 divide-y divide-neutral-100">
             {inactive.length === 0 && <p className="p-4 text-xs text-neutral-400 text-center">Semua pelanggan aktif. 🎉</p>}
             {inactive.map((c) => (
               <div key={c.member_id} className="p-3 flex items-center justify-between text-sm">
@@ -122,7 +122,7 @@ export default function GrowthAnalyticsPage() {
 
 function StatCard({ icon: Icon, label, value, tone }: { icon: any; label: string; value: string; tone?: "primary" | "urgent" }) {
   return (
-    <div className="card p-4">
+    <div className="bg-white rounded-2xl border border-neutral-200 p-4">
       <Icon size={16} className={tone === "primary" ? "text-primary" : tone === "urgent" ? "text-urgent" : "text-neutral-400"} />
       <p className="text-xs text-neutral-500 mt-2">{label}</p>
       <p className="text-lg font-bold text-neutral-900 mt-0.5">{value}</p>

@@ -1,16 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { RefreshCw, Wifi, WifiOff, Ban } from "lucide-react";
+import { RefreshCw, Wifi, WifiOff } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { cx } from "@/lib/utils";
 import OrderCard from "@/components/kitchen/OrderCard";
-import MenuAvailabilityPanel from "@/components/kitchen/MenuAvailabilityPanel";
-import type { KitchenStation, OrderWithItems, OrderStatus, Product } from "@/lib/types";
+import type { KitchenStation, OrderWithItems, OrderStatus } from "@/lib/types";
 import { printStationTicket } from "@/lib/kitchenPrinter";
 import QrOrderAlert from "@/components/pos/QrOrderAlert";
-import { useProductAvailabilityChannel } from "@/lib/useProductAvailabilityChannel";
 
 // Order dianggap "aktif" di KDS selama belum SERVED/COMPLETED/CANCELLED.
 // SERVED tetap ditampilkan sebentar (kolom terakhir) supaya dapur tahu
@@ -27,13 +25,6 @@ export default function KitchenDisplayPage() {
   const [cashierNames, setCashierNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [isOnline, setIsOnline] = useState(true);
-
-  // Sold Out / Menu 86 — daftar produk tenant (untuk panel Kelola
-  // Ketersediaan Menu) + status simpan per-id (spinner tombol, cegah
-  // double-tap saat jaringan lambat).
-  const [products, setProducts] = useState<Product[]>([]);
-  const [showAvailabilityPanel, setShowAvailabilityPanel] = useState(false);
-  const [savingProductIds, setSavingProductIds] = useState<Set<string>>(new Set());
 
   const supabase = useMemo(() => createClient(), []);
 
@@ -87,68 +78,9 @@ export default function KitchenDisplayPage() {
         .order("sort_order", { ascending: true });
       setStations((stationRows as KitchenStation[]) ?? []);
 
-      // Katalog menu tenant (untuk panel Kelola Ketersediaan Menu / Sold
-      // Out) — semua produk, TERMASUK yang sedang is_available=false,
-      // supaya dapur bisa lihat & buka kembali item yang sebelumnya
-      // ditandai habis, bukan cuma yang masih tersedia.
-      const { data: productRows } = await supabase
-        .from("products")
-        .select("*")
-        .eq("tenant_id", profile.tenant_id)
-        .order("name");
-      setProducts((productRows as Product[]) ?? []);
-
       await loadOrders(profile.tenant_id, effectiveBranchId);
     })();
   }, [loadOrders, supabase]);
-
-  // Realtime ketersediaan menu (Migrasi 020) — dengar perubahan
-  // `products` tenant ini dari perangkat manapun (POS, KDS lain,
-  // /dashboard/menu) supaya panel di sini selalu sinkron; juga dipakai
-  // untuk broadcast ke halaman QR Self-Order publik saat toggle dari
-  // sini (lihat toggleSoldOut di bawah).
-  const { broadcastAvailability } = useProductAvailabilityChannel(tenantId, (payload) => {
-    if (payload.eventType === "DELETE") {
-      setProducts((prev) => prev.filter((p) => p.id !== payload.old?.id));
-      return;
-    }
-    const row = payload.new as Product;
-    if (!row?.id) return;
-    setProducts((prev) => {
-      const exists = prev.some((p) => p.id === row.id);
-      return exists ? prev.map((p) => (p.id === row.id ? { ...p, ...row } : p)) : [...prev, row].sort((a, b) => a.name.localeCompare(b.name));
-    });
-  });
-
-  async function toggleSoldOut(product: Product) {
-    const next = !product.is_available;
-    setSavingProductIds((prev) => new Set(prev).add(product.id));
-    setProducts((prev) => prev.map((p) => (p.id === product.id ? { ...p, is_available: next } : p)));
-
-    const { error } = await supabase.from("products").update({ is_available: next }).eq("id", product.id);
-
-    setSavingProductIds((prev) => {
-      const next = new Set(prev);
-      next.delete(product.id);
-      return next;
-    });
-
-    if (error) {
-      // Revert optimistic update kalau server menolak.
-      setProducts((prev) => prev.map((p) => (p.id === product.id ? { ...p, is_available: !next } : p)));
-      alert("Gagal mengubah status ketersediaan: " + error.message);
-      return;
-    }
-
-    broadcastAvailability({
-      id: product.id,
-      name: product.name,
-      price: product.price,
-      category: product.category,
-      image_url: product.image_url,
-      is_available: next,
-    });
-  }
 
   // Realtime: dengar INSERT/UPDATE di `orders` (order baru masuk, atau
   // status berubah dari perangkat lain — mis. kasir lain membatalkan
@@ -240,37 +172,21 @@ export default function KitchenDisplayPage() {
 
   return (
     <div className="min-h-screen bg-neutral-50 flex flex-col">
-      <header className="min-h-16 bg-white border-b border-neutral-200 flex items-center justify-between flex-wrap gap-2 px-4 py-2 shrink-0">
-        <div className="flex items-center gap-3 min-w-0">
-          <h1 className="font-bold text-neutral-900 truncate">
-            <span className="sm:hidden">KDS</span>
-            <span className="hidden sm:inline">Kitchen Display System</span>
-          </h1>
+      <header className="h-16 bg-white border-b border-neutral-200 flex items-center justify-between px-4 shrink-0">
+        <div className="flex items-center gap-3">
+          <h1 className="font-bold text-neutral-900">Kitchen Display System</h1>
           {isOnline ? (
-            <span className="badge-active shrink-0"><Wifi size={12} /> <span className="hidden sm:inline">Realtime Aktif</span></span>
+            <span className="badge-active"><Wifi size={12} /> Realtime Aktif</span>
           ) : (
-            <span className="badge-urgent shrink-0"><WifiOff size={12} /> <span className="hidden sm:inline">Offline</span></span>
+            <span className="badge-urgent"><WifiOff size={12} /> Offline</span>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowAvailabilityPanel(true)}
-            className="btn-outline text-xs flex items-center gap-1.5 px-3 py-2 relative"
-          >
-            <Ban size={14} /> <span className="hidden sm:inline">Sold Out</span>
-            {products.some((p) => !p.is_available) && (
-              <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-urgent text-white text-[10px] font-bold flex items-center justify-center">
-                {products.filter((p) => !p.is_available).length}
-              </span>
-            )}
-          </button>
-          <button
-            onClick={() => tenantId && loadOrders(tenantId, branchId)}
-            className="btn-outline text-xs flex items-center gap-1.5 px-3 py-2"
-          >
-            <RefreshCw size={14} /> <span className="hidden sm:inline">Muat Ulang</span>
-          </button>
-        </div>
+        <button
+          onClick={() => tenantId && loadOrders(tenantId, branchId)}
+          className="btn-outline text-xs flex items-center gap-1.5 px-3 py-2"
+        >
+          <RefreshCw size={14} /> Muat Ulang
+        </button>
       </header>
 
       {/* Phase 4 — notifikasi pesanan baru dari QR Self-Order / Online Order Hub */}
@@ -335,15 +251,6 @@ export default function KitchenDisplayPage() {
           </div>
         )}
       </main>
-
-      {showAvailabilityPanel && (
-        <MenuAvailabilityPanel
-          products={products}
-          savingIds={savingProductIds}
-          onToggle={toggleSoldOut}
-          onClose={() => setShowAvailabilityPanel(false)}
-        />
-      )}
     </div>
   );
 }

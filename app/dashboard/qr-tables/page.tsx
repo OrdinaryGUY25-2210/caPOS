@@ -101,7 +101,7 @@ export default function QrTablesPage() {
         )}
       </div>
 
-      <div className="card p-4 mb-6 flex flex-wrap items-end gap-3">
+      <div className="bg-white rounded-2xl border border-neutral-200 p-4 mb-6 flex flex-wrap items-end gap-3">
         <div>
           <label className="text-xs font-medium text-neutral-600">Nomor Meja</label>
           <input

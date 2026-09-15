@@ -125,7 +125,7 @@ export default function OnlineOrdersPage() {
       ) : (
         <div className="space-y-3">
           {orders.map((o) => (
-            <div key={o.id} className="card p-4 flex items-center justify-between gap-3 flex-wrap">
+            <div key={o.id} className="bg-white rounded-2xl border border-neutral-200 p-4 flex items-center justify-between gap-3 flex-wrap">
               <div>
                 <p className="font-bold text-neutral-900 text-sm flex items-center gap-2">
                   <Bike size={14} className="text-neutral-400" />
@@ -160,7 +160,7 @@ export default function OnlineOrdersPage() {
 
 function StatCard({ label, value, tone }: { label: string; value: string; tone?: "primary" | "urgent" }) {
   return (
-    <div className="card p-4">
+    <div className="bg-white rounded-2xl border border-neutral-200 p-4">
       <p className="text-xs text-neutral-500">{label}</p>
       <p className={cx("text-lg font-bold mt-1", tone === "primary" ? "text-primary" : tone === "urgent" ? "text-urgent" : "text-neutral-900")}>
         {value}
