@@ -1,9 +1,11 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   BarChart3,
+  ChevronDown,
   Receipt,
   Coffee,
   Users,
@@ -37,9 +39,13 @@ import {
   Layers,
   SlidersHorizontal,
   ChefHat,
+  UploadCloud,
+  Lock,
 } from "lucide-react";
 import { cx } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
+import { getCurrentProfile } from "@/lib/getCurrentProfile";
+import { getTier, type Tier } from "@/lib/tier";
 import { UserCog } from "lucide-react";
 
 /**
@@ -61,7 +67,7 @@ import { UserCog } from "lucide-react";
  * no such pages exist in this repo yet. Not added — see
  * docs/PHASE_2A2_UI_UX_AUDIT.md.
  */
-const NAV_GROUPS: { label: string; items: { href: string; label: string; icon: any }[] }[] = [
+const NAV_GROUPS: { label: string; items: { href: string; label: string; icon: any; premiumOnly?: true }[] }[] = [
   {
     label: "Ringkasan",
     items: [
@@ -119,7 +125,7 @@ const NAV_GROUPS: { label: string; items: { href: string; label: string; icon: a
       { href: "/dashboard/analytics/growth", label: "Analitik Pertumbuhan", icon: TrendingUp },
       { href: "/dashboard/analytics/menu-engineering", label: "Menu Engineering", icon: Grid3x3 },
       { href: "/dashboard/analytics/profitability", label: "Profitabilitas Produk", icon: LineChart },
-      { href: "/dashboard/analytics/peak-hours", label: "Jam Sibuk", icon: BarChart3 },
+      { href: "/dashboard/analytics/peak-hours", label: "Jam Sibuk", icon: BarChart3, premiumOnly: true },
       { href: "/dashboard/analytics/waste-loss", label: "Kerugian Barang", icon: Trash2 },
     ],
   },
@@ -137,21 +143,87 @@ const NAV_GROUPS: { label: string; items: { href: string; label: string; icon: a
     label: "Pengaturan",
     items: [
       { href: "/dashboard/settings", label: "Pengaturan Kafe", icon: Settings },
+      { href: "/dashboard/settings/import", label: "Import / Migrasi Data", icon: UploadCloud },
       { href: "/dashboard/subscription", label: "Status Langganan", icon: Zap },
       { href: "/dashboard/faq", label: "FAQ & Helpdesk", icon: HelpCircle },
     ],
   },
 ];
 
+const STORAGE_KEY = "capos:sidebar-collapsed-groups";
+
 /**
  * `onNavigate` dipanggil setiap kali sebuah link diklik — dipakai oleh
  * DashboardShell untuk menutup drawer mobile begitu owner memilih menu,
  * supaya tidak perlu tap tombol tutup terpisah. Di desktop (sidebar statis)
  * prop ini tidak perlu diisi.
+ *
+ * Phase 2A.2 §2/§4 — sidebar sekarang punya identitas visual gelap terpisah
+ * dari area konten dashboard (putih), dan tiap grup bisa di-collapse.
+ * Grup yang berisi rute aktif SELALU otomatis terbuka (computed dari
+ * pathname, bukan hanya state awal), jadi tidak mungkin halaman yang
+ * sedang dibuka jadi tersembunyi di grup yang collapsed.
  */
 export default function DashboardSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const router = useRouter();
+
+  const activeGroupLabel = NAV_GROUPS.find((g) =>
+    g.items.some((item) => pathname === item.href)
+  )?.label;
+
+  // Menyimpan grup yang MANUAL ditutup user (bukan yang terbuka) — supaya
+  // "grup aktif selalu terbuka" tidak pernah bisa dikalahkan oleh state lama
+  // yang tersimpan dari kunjungan sebelumnya.
+  const [manuallyClosed, setManuallyClosed] = useState<Set<string>>(new Set());
+  const [hydrated, setHydrated] = useState(false);
+  // §7 — Sisi sidebar dari perbaikan `PremiumFeatureLock`: item nav yang
+  // ditandai `premiumOnly` dapat ikon gembok kalau tenant belum Supreme.
+  // Ini murni indikator visual (§7 "locked features" harus terlihat) —
+  // penegakan sebenarnya tetap di halaman tujuan lewat PremiumFeatureLock,
+  // bukan di sini, supaya tidak ada dua sumber kebenaran untuk otorisasi.
+  const [tier, setTier] = useState<Tier | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      const { profile } = await getCurrentProfile();
+      if (!profile) return;
+      if (profile.role === "super_admin") {
+        setTier("supreme");
+        return;
+      }
+      const { data: sub } = await createClient()
+        .from("subscriptions")
+        .select("status, plan")
+        .eq("tenant_id", profile.tenant_id)
+        .single();
+      setTier(getTier(sub));
+    })();
+  }, []);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(STORAGE_KEY);
+      if (raw) setManuallyClosed(new Set(JSON.parse(raw)));
+    } catch {
+      // localStorage tidak tersedia (mode privat dll) — lanjut dengan semua grup terbuka.
+    }
+    setHydrated(true);
+  }, []);
+
+  function toggleGroup(label: string) {
+    setManuallyClosed((prev) => {
+      const next = new Set(prev);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      try {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify([...next]));
+      } catch {
+        // Persist bersifat opsional — gagal simpan tidak boleh mengganggu toggle itu sendiri.
+      }
+      return next;
+    });
+  }
 
   async function handleLogout() {
     await createClient().auth.signOut();
@@ -159,49 +231,68 @@ export default function DashboardSidebar({ onNavigate }: { onNavigate?: () => vo
   }
 
   return (
-    <aside className="w-72 sm:w-64 bg-white flex flex-col h-full shrink-0">
-      <div className="h-16 flex items-center gap-2 px-5 border-b border-neutral-200 shrink-0">
+    <aside className="w-72 sm:w-64 bg-sidebar flex flex-col h-full shrink-0">
+      <div className="h-16 flex items-center gap-2 px-5 border-b border-sidebar-border shrink-0">
         <img src="/logo.png" alt="caPOS" className="w-8 h-8 rounded-lg" />
-        <span className="font-bold text-neutral-900">caPOS</span>
+        <span className="font-bold text-sidebar-text-active">caPOS</span>
       </div>
 
-      <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-4">
-        {NAV_GROUPS.map((group) => (
-          <div key={group.label}>
-            <p className="px-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
-              {group.label}
-            </p>
-            <div className="space-y-1">
-              {group.items.map((item) => {
-                const active = pathname === item.href;
-                const Icon = item.icon;
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    onClick={onNavigate}
-                    aria-current={active ? "page" : undefined}
-                    className={cx(
-                      "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors",
-                      active
-                        ? "bg-primary-light text-primary-dark"
-                        : "text-neutral-600 hover:bg-neutral-100"
-                    )}
-                  >
-                    <Icon size={18} />
-                    {item.label}
-                  </Link>
-                );
-              })}
+      <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
+        {NAV_GROUPS.map((group) => {
+          // Sebelum hydrate dari localStorage, anggap semua terbuka supaya tidak
+          // ada "flash" grup tertutup lalu tiba-tiba terbuka.
+          const isOpen = group.label === activeGroupLabel || !hydrated || !manuallyClosed.has(group.label);
+          return (
+            <div key={group.label} className="pb-1">
+              <button
+                type="button"
+                onClick={() => toggleGroup(group.label)}
+                aria-expanded={isOpen}
+                className="w-full flex items-center justify-between px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-sidebar-group-label hover:text-sidebar-text transition-colors"
+              >
+                {group.label}
+                <ChevronDown
+                  size={13}
+                  className={cx("transition-transform duration-150", isOpen ? "rotate-0" : "-rotate-90")}
+                />
+              </button>
+              {isOpen && (
+                <div className="space-y-0.5 mt-0.5">
+                  {group.items.map((item) => {
+                    const active = pathname === item.href;
+                    const Icon = item.icon;
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        onClick={onNavigate}
+                        aria-current={active ? "page" : undefined}
+                        className={cx(
+                          "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors",
+                          active
+                            ? "bg-primary/15 text-primary-light border border-primary/20"
+                            : "text-sidebar-text hover:bg-sidebar-hover hover:text-sidebar-text-active"
+                        )}
+                      >
+                        <Icon size={18} className={active ? "text-primary" : undefined} />
+                        <span className="flex-1">{item.label}</span>
+                        {item.premiumOnly && tier !== null && tier !== "supreme" && (
+                          <Lock size={12} className="text-sidebar-group-label shrink-0" />
+                        )}
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
 
-        <div className="pt-3 mt-1 border-t border-neutral-100">
+        <div className="pt-3 mt-2 border-t border-sidebar-border">
           <Link
             href="/pos"
             onClick={onNavigate}
-            className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-primary-dark bg-primary-light/60 hover:bg-primary-light transition-colors"
+            className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-primary bg-primary/10 hover:bg-primary/15 transition-colors"
           >
             <ShoppingCart size={18} />
             Buka Halaman Kasir (POS)
@@ -209,10 +300,10 @@ export default function DashboardSidebar({ onNavigate }: { onNavigate?: () => vo
         </div>
       </nav>
 
-      <div className="p-3 border-t border-neutral-200 shrink-0">
+      <div className="p-3 border-t border-sidebar-border shrink-0">
         <button
           onClick={handleLogout}
-          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-neutral-500 hover:bg-neutral-100"
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-sidebar-text hover:bg-sidebar-hover hover:text-sidebar-text-active"
         >
           <LogOut size={18} />
           Keluar

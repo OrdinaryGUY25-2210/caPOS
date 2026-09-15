@@ -30,6 +30,18 @@ const config: Config = {
           700: "#334155",
           900: "#0F172A",
         },
+        // Phase 2A.2 §2 — sidebar gets its own dark surface identity,
+        // separate from the light dashboard content area, so green stays a
+        // strategic accent instead of the whole UI leaning on white+green.
+        sidebar: {
+          DEFAULT: "#12181F",
+          raised: "#1A222C",
+          border: "#232B36",
+          hover: "#1E2731",
+          text: "#94A3B8",
+          "text-active": "#F8FAFC",
+          "group-label": "#828FA1",
+        },
       },
       fontFamily: {
         sans: ["var(--font-inter)", "system-ui", "sans-serif"],

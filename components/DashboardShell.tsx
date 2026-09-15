@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useState, Suspense } from "react";
-import { Menu } from "lucide-react";
+import { useEffect, useRef, useState, Suspense } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { Menu, User, CreditCard, Building2, Settings, Zap, LogOut, ChevronDown, type LucideIcon } from "lucide-react";
 import DashboardSidebar from "./DashboardSidebar";
 import TrialBanner from "./TrialBanner";
 import LandscapeNotice from "./LandscapeNotice";
@@ -9,6 +11,8 @@ import AccessDeniedNotice from "./AccessDeniedNotice";
 import NotificationBell from "./NotificationBell";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { isManagerOrOwner, ROLE_LABEL } from "@/lib/role";
+import { getTier, TIER_LABEL } from "@/lib/tier";
+import { createClient } from "@/lib/supabase/client";
 import { BranchProvider } from "@/lib/branchContext";
 import BranchSwitcher from "./BranchSwitcher";
 
@@ -25,11 +29,19 @@ export default function DashboardShell({
   daysLeft: number;
   children: React.ReactNode;
 }) {
+  const router = useRouter();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [tenantId, setTenantId] = useState<string | null>(null);
   const [name, setName] = useState("");
+  const [email, setEmail] = useState<string | null>(null);
   const [role, setRole] = useState<string>("owner");
+  const [tierLabel, setTierLabel] = useState<string | null>(null);
   const [showBell, setShowBell] = useState(false);
+
+  // Profil kanan-atas — Phase 2A.2 §3: sekarang berupa dropdown, bukan
+  // sekadar tampilan statis nama+role.
+  const [profileOpen, setProfileOpen] = useState(false);
+  const profileRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     (async () => {
@@ -37,13 +49,51 @@ export default function DashboardShell({
       if (!profile) return;
       setTenantId(profile.tenant_id);
       setName(profile.full_name || "");
+      setEmail(profile.email);
       setRole(profile.role);
       // Bell cuma untuk Manager/Owner — kasir yang MENGAJUKAN, bukan yang
       // MENYETUJUI, jadi tidak perlu lihat lonceng ini (mereka tidak akses
       // dashboard sama sekali).
       setShowBell(isManagerOrOwner(profile.role));
+
+      if (profile.role === "super_admin") {
+        setTierLabel(TIER_LABEL.supreme);
+        return;
+      }
+      const { data: sub } = await createClient()
+        .from("subscriptions")
+        .select("status, plan")
+        .eq("tenant_id", profile.tenant_id)
+        .single();
+      setTierLabel(TIER_LABEL[getTier(sub)]);
     })();
   }, []);
+
+  // Tutup dropdown saat klik di luar area, atau saat Escape ditekan —
+  // dua-duanya diperlukan supaya dropdown "berperilaku wajar" (§3) dan
+  // aksesibel lewat keyboard (§13).
+  useEffect(() => {
+    if (!profileOpen) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
+        setProfileOpen(false);
+      }
+    }
+    function handleEscape(e: KeyboardEvent) {
+      if (e.key === "Escape") setProfileOpen(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [profileOpen]);
+
+  async function handleLogout() {
+    await createClient().auth.signOut();
+    router.push("/login");
+  }
 
   return (
     <BranchProvider>
@@ -92,16 +142,82 @@ export default function DashboardShell({
                 yang punya lebih dari 1 cabang (lihat BranchSwitcher). */}
             <BranchSwitcher />
             {showBell && tenantId && <NotificationBell tenantId={tenantId} />}
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full bg-primary-light text-primary-dark flex items-center justify-center text-xs font-bold shrink-0">
-                {(name || "?").slice(0, 2).toUpperCase()}
-              </div>
-              <div className="hidden sm:flex flex-col leading-tight">
-                <span className="text-sm font-medium text-neutral-700">{name}</span>
-                <span className="text-[10px] text-neutral-400 uppercase tracking-wide">
-                  {ROLE_LABEL[role as keyof typeof ROLE_LABEL] ?? role}
-                </span>
-              </div>
+
+            <div className="relative" ref={profileRef}>
+              <button
+                type="button"
+                onClick={() => setProfileOpen((v) => !v)}
+                aria-haspopup="menu"
+                aria-expanded={profileOpen}
+                className="flex items-center gap-2 rounded-xl px-1.5 py-1 -mx-1.5 hover:bg-neutral-100 transition-colors"
+              >
+                <div className="w-8 h-8 rounded-full bg-primary-light text-primary-dark flex items-center justify-center text-xs font-bold shrink-0">
+                  {(name || "?").slice(0, 2).toUpperCase()}
+                </div>
+                <div className="hidden sm:flex flex-col leading-tight">
+                  <span className="text-sm font-medium text-neutral-700">{name}</span>
+                  <span className="text-[10px] text-neutral-400 uppercase tracking-wide">
+                    {ROLE_LABEL[role as keyof typeof ROLE_LABEL] ?? role}
+                  </span>
+                </div>
+                <ChevronDown size={14} className="text-neutral-400 hidden sm:block" />
+              </button>
+
+              {profileOpen && (
+                <div
+                  role="menu"
+                  className="absolute right-0 top-full mt-2 w-64 max-w-[calc(100vw-2rem)] card py-2 z-50"
+                >
+                  <div className="px-4 py-2 border-b border-neutral-100">
+                    <p className="font-semibold text-neutral-900 truncate">{name || "—"}</p>
+                    <p className="text-xs text-neutral-400 uppercase tracking-wide">
+                      {ROLE_LABEL[role as keyof typeof ROLE_LABEL] ?? role}
+                    </p>
+                  </div>
+
+                  <div className="py-1">
+                    <ProfileMenuItem icon={User} label="Informasi Akun" onClick={() => setProfileOpen(false)}>
+                      {email && <span className="block text-xs text-neutral-400 truncate mt-0.5">{email}</span>}
+                    </ProfileMenuItem>
+                    <ProfileMenuLink
+                      icon={Zap}
+                      label="Paket Saat Ini"
+                      href="/dashboard/subscription"
+                      badge={tierLabel ?? undefined}
+                      onClick={() => setProfileOpen(false)}
+                    />
+                    <ProfileMenuLink
+                      icon={Building2}
+                      label="Cabang / Workspace"
+                      href="/dashboard/branches"
+                      onClick={() => setProfileOpen(false)}
+                    />
+                    <ProfileMenuLink
+                      icon={Settings}
+                      label="Pengaturan"
+                      href="/dashboard/settings"
+                      onClick={() => setProfileOpen(false)}
+                    />
+                    <ProfileMenuLink
+                      icon={CreditCard}
+                      label="Langganan"
+                      href="/dashboard/subscription"
+                      onClick={() => setProfileOpen(false)}
+                    />
+                  </div>
+
+                  <div className="pt-1 border-t border-neutral-100">
+                    <button
+                      role="menuitem"
+                      onClick={handleLogout}
+                      className="w-full flex items-center gap-2.5 px-4 py-2 text-sm font-medium text-urgent hover:bg-urgent-light transition-colors"
+                    >
+                      <LogOut size={16} />
+                      Keluar
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -113,5 +229,58 @@ export default function DashboardShell({
       </div>
     </div>
     </BranchProvider>
+  );
+}
+
+/** Baris info statis di dropdown profil (bukan navigasi) — dipakai untuk "Informasi Akun". */
+function ProfileMenuItem({
+  icon: Icon,
+  label,
+  children,
+}: {
+  icon: LucideIcon;
+  label: string;
+  children?: React.ReactNode;
+  onClick?: () => void;
+}) {
+  return (
+    <div className="px-4 py-2 text-sm text-neutral-700">
+      <span className="flex items-center gap-2.5 font-medium">
+        <Icon size={16} />
+        {label}
+      </span>
+      {children}
+    </div>
+  );
+}
+
+/** Baris navigasi di dropdown profil — link biasa (`<a>`) supaya otomatis
+    fokus/keyboard-accessible tanpa handler tambahan (§13). */
+function ProfileMenuLink({
+  icon: Icon,
+  label,
+  href,
+  badge,
+  onClick,
+}: {
+  icon: LucideIcon;
+  label: string;
+  href: string;
+  badge?: string;
+  onClick?: () => void;
+}) {
+  return (
+    <Link
+      role="menuitem"
+      href={href}
+      onClick={onClick}
+      className="flex items-center justify-between gap-2.5 px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-100 transition-colors"
+    >
+      <span className="flex items-center gap-2.5">
+        <Icon size={16} />
+        {label}
+      </span>
+      {badge && <span className="badge-active">{badge}</span>}
+    </Link>
   );
 }
