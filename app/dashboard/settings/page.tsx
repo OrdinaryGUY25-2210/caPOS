@@ -37,6 +37,11 @@ export default function SettingsPage() {
     showWifi: false,
     wifiSsid: "",
     wifiPassword: "",
+    // Bug fix — dulu lebar struk hardcode "80mm" di app/pos/page.tsx,
+    // sekarang bisa diatur per tenant (migration_16 bagian I, kolom
+    // tenants.receipt_paper_width) supaya pengguna printer 58mm (mis.
+    // POS-58) tidak lagi dapat struk yang kepotong.
+    receiptPaperWidth: "80mm" as "58mm" | "80mm",
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -85,7 +90,7 @@ export default function SettingsPage() {
       const supabase = createClient();
       const { data: tenant } = await supabase
         .from("tenants")
-        .select("name, phone, show_wifi_on_receipt, wifi_ssid, wifi_password")
+        .select("name, phone, show_wifi_on_receipt, wifi_ssid, wifi_password, receipt_paper_width")
         .eq("id", profile.tenant_id)
         .single();
 
@@ -97,6 +102,7 @@ export default function SettingsPage() {
           showWifi: !!tenant.show_wifi_on_receipt,
           wifiSsid: tenant.wifi_ssid ?? "",
           wifiPassword: tenant.wifi_password ?? "",
+          receiptPaperWidth: (tenant.receipt_paper_width as "58mm" | "80mm") ?? "80mm",
         });
       }
 
@@ -118,6 +124,7 @@ export default function SettingsPage() {
         show_wifi_on_receipt: settings.showWifi,
         wifi_ssid: settings.wifiSsid,
         wifi_password: settings.wifiPassword,
+        receipt_paper_width: settings.receiptPaperWidth,
       })
       .eq("id", tenantId);
 
@@ -290,6 +297,31 @@ export default function SettingsPage() {
         <div>
           <label className="text-sm font-medium text-neutral-700 mb-1 block">No. Telepon</label>
           <input value={settings.phone} onChange={(e) => setSettings({ ...settings, phone: e.target.value })} className="input-field" />
+        </div>
+      </div>
+
+      <div className="card p-5 space-y-3">
+        <div>
+          <h2 className="font-semibold text-neutral-900 text-sm">Lebar Kertas Printer Struk</h2>
+          <p className="text-xs text-neutral-500">
+            Sesuaikan dengan printer thermal di kasir (mis. printer &quot;POS-58&quot; = pilih 58mm). Salah
+            pilih di sini membuat struk kepotong saat dicetak.
+          </p>
+        </div>
+        <div className="flex gap-3">
+          {(["58mm", "80mm"] as const).map((w) => (
+            <button
+              key={w}
+              onClick={() => setSettings({ ...settings, receiptPaperWidth: w })}
+              className={
+                settings.receiptPaperWidth === w
+                  ? "flex-1 rounded-xl border-2 border-primary bg-primary-light text-primary-dark font-semibold text-sm py-2.5"
+                  : "flex-1 rounded-xl border border-neutral-200 text-neutral-600 text-sm py-2.5"
+              }
+            >
+              {w}
+            </button>
+          ))}
         </div>
       </div>
 

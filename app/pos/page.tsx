@@ -20,7 +20,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { db } from "@/lib/dexie";
 import { useProductAvailabilityChannel } from "@/lib/useProductAvailabilityChannel";
-import { formatRupiah, generateInvoiceNumber, formatNumberWithDots, stripNumberDots, cx } from "@/lib/utils";
+import { formatRupiah, generateInvoiceNumber, formatNumberWithDots, stripNumberDots, cx, printReceipt } from "@/lib/utils";
 import type { CartItem, KitchenStation, OrderWithItems, Product, ProductVariant, ModifierGroup, Modifier } from "@/lib/types";
 
 import { toast } from "@/components/Toast";
@@ -135,6 +135,11 @@ export default function PosPage() {
     wifiSsid: "KafeDemo-WiFi",
     wifiPassword: "kopi1234",
     logoUrl: null as string | null,
+    // Bug fix — dulu hardcode "80mm" di dua tempat pembuatan ReceiptData
+    // di bawah (lihat komentar di situ), sekarang ambil dari
+    // tenants.receipt_paper_width (migration_16 bagian I), diatur di
+    // /dashboard/settings.
+    paperWidth: "80mm" as "58mm" | "80mm",
   });
 
   // --- Shift Closing Kasir (Blind Z-Report) ---
@@ -225,10 +230,10 @@ export default function PosPage() {
       const cached = await db.products.toArray();
       if (cached.length > 0) setProducts(cached);
 
-      // Muat data kafe (nama/alamat/WiFi) untuk struk.
+      // Muat data kafe (nama/alamat/WiFi/lebar kertas) untuk struk.
       const { data: tenant } = await supabase
         .from("tenants")
-        .select("name, show_wifi_on_receipt, wifi_ssid, wifi_password")
+        .select("name, show_wifi_on_receipt, wifi_ssid, wifi_password, receipt_paper_width")
         .eq("id", profile.tenant_id)
         .single();
       if (tenant) {
@@ -238,6 +243,7 @@ export default function PosPage() {
           showWifi: tenant.show_wifi_on_receipt,
           wifiSsid: tenant.wifi_ssid ?? prev.wifiSsid,
           wifiPassword: tenant.wifi_password ?? prev.wifiPassword,
+          paperWidth: (tenant.receipt_paper_width as "58mm" | "80mm") ?? prev.paperWidth,
         }));
 
         // Logo kafi (Storage, path tetap `${tenant_id}/cafe-logo.jpg`) —
@@ -799,7 +805,7 @@ export default function PosPage() {
       showWifi: cafeSettings.showWifi,
       wifiSsid: cafeSettings.wifiSsid,
       wifiPassword: cafeSettings.wifiPassword,
-      width: "80mm",
+      width: cafeSettings.paperWidth,
       // Uang diterima/kembalian (tunai) — kosong untuk metode lain.
       cashReceived: paymentMethod === "cash" ? Number(cashReceived) : undefined,
       changeDue: paymentMethod === "cash" ? Number(cashReceived) - total : undefined,
@@ -846,7 +852,7 @@ export default function PosPage() {
       showWifi: cafeSettings.showWifi,
       wifiSsid: cafeSettings.wifiSsid,
       wifiPassword: cafeSettings.wifiPassword,
-      width: "80mm",
+      width: cafeSettings.paperWidth,
     });
   }
 
@@ -1304,7 +1310,7 @@ export default function PosPage() {
           maxWidth="sm:max-w-xs"
           footer={
             <div className="flex gap-2">
-              <button onClick={() => window.print()} className="btn-primary flex-1 flex items-center justify-center gap-2">
+              <button onClick={() => printReceipt(receipt.width)} className="btn-primary flex-1 flex items-center justify-center gap-2">
                 <Printer size={16} /> Cetak Struk
               </button>
               <button onClick={() => setReceipt(null)} className="btn-outline">Tutup</button>

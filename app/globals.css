@@ -48,7 +48,16 @@ body {
     position: absolute;
     left: 0;
     top: 0;
-    width: 80mm;
+    /* Lebar mengikuti prop `data.width` (inline style) di Receipt.tsx —
+       JANGAN di-hardcode di sini (dulu "width: 80mm" di sini bikin struk
+       58mm ikut ke-render selebar 80mm & terpotong). Ukuran kertas fisik
+       (@page) sendiri di-set dinamis lewat lib/utils.ts printReceipt(). */
+  }
+  /* Fallback kalau printReceipt() tidak sempat menyuntikkan @page
+     (mis. window.print() dipanggil manual/lewat Ctrl+P) — margin 0 saja
+     supaya browser tidak memotong sisi kanan struk kertas roll kecil. */
+  @page {
+    margin: 0;
   }
 }
 

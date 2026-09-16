@@ -1043,6 +1043,29 @@ COMMENT ON FUNCTION assign_customer_tier IS
 
 
 -- =========================================================
+-- I. FIX: LEBAR KERTAS STRUK (receipt_paper_width) — bug ikutan yang
+--    ditemukan saat audit fitur print thermal (bukan bagian dari 3 modul
+--    SaaS/Onboarding/Membership, tapi tetap masuk migration_16.sql sesuai
+--    aturan skema terkunci di atas)
+-- =========================================================
+-- Sebelum ini, app/pos/page.tsx HARDCODE `width: "80mm"` untuk semua
+-- struk, apa pun printer yang tenant pakai — jadi tenant dengan printer
+-- 58mm (seperti "POS-58" di screenshot user) selalu dapat konten selebar
+-- 80mm dan struknya kepotong di kertas kecil, terlepas dari perbaikan
+-- @page/printReceipt() sebelumnya. Kolom ini simpan preferensi lebar
+-- kertas PER TENANT supaya /dashboard/settings bisa mengaturnya sekali,
+-- lalu /pos otomatis pakai nilai itu (bukan hardcode) tiap kali cetak.
+ALTER TABLE tenants
+  ADD COLUMN IF NOT EXISTS receipt_paper_width TEXT NOT NULL DEFAULT '80mm'
+    CHECK (receipt_paper_width IN ('58mm', '80mm'));
+
+COMMENT ON COLUMN tenants.receipt_paper_width IS
+  'migration_16 (bagian I). Lebar kertas printer thermal tenant (58mm/80mm) — diatur di '
+  '/dashboard/settings, dipakai app/pos/page.tsx untuk width Receipt & printReceipt() supaya '
+  'tidak lagi hardcode 80mm untuk semua tenant.';
+
+
+-- =========================================================
 -- E. FINAL LOCK — catatan versi skema
 -- =========================================================
 CREATE TABLE IF NOT EXISTS schema_migrations_log (

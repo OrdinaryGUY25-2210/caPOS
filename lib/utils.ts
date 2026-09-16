@@ -62,3 +62,27 @@ export function formatItemConfigLine(item: {
   if (parts.length > 0) return parts.join(" · ");
   return item.variant_notes || null;
 }
+
+/**
+ * Cetak struk thermal (58mm/80mm) — FIX bug lama: window.print() polos
+ * membuat browser membuka dialog print dengan ukuran kertas default OS
+ * (biasanya A4/Letter Portrait), bukan otomatis ke ukuran roll thermal,
+ * sehingga konten struk terpotong di kanan/bawah walau printer POS-58/
+ * POS-80 sudah dipilih manual. @page tidak bisa di-scope per elemen lewat
+ * class biasa, jadi kita suntik <style> dengan ukuran yang sesuai TEPAT
+ * sebelum window.print() dipanggil, lalu bersihkan lagi setelahnya.
+ * Dipakai oleh semua tempat yang mencetak <Receipt/> (id="receipt-print"):
+ * app/pos/page.tsx, components/pos/OpenBillPanel.tsx,
+ * components/tables/TableStatusBoard.tsx.
+ */
+export function printReceipt(width: "58mm" | "80mm" = "80mm") {
+  const styleId = "dynamic-receipt-page-size";
+  let styleTag = document.getElementById(styleId) as HTMLStyleElement | null;
+  if (!styleTag) {
+    styleTag = document.createElement("style");
+    styleTag.id = styleId;
+    document.head.appendChild(styleTag);
+  }
+  styleTag.textContent = `@media print { @page { size: ${width} auto; margin: 0; } }`;
+  window.print();
+}
