@@ -81,6 +81,42 @@ export interface Membership {
   created_at: string;
 }
 
+// ---- Membership CRM (migration_16 bagian H) ----------------------------
+// Tipe untuk Kartu Member Digital, dibangun di atas customers/
+// customer_tiers/customer_points (bukan menggantikan Membership di atas).
+
+export interface CustomerTier {
+  id: string;
+  tenant_id: string;
+  tier_name: string;
+  min_spend_monthly: number;
+  min_spend_yearly: number;
+  discount_percentage: number;
+  points_multiplier: number;
+  benefits: string[];
+  is_active: boolean;
+}
+
+/** Baris dari view v_member_card (migration_16 bagian H8). */
+export interface MemberCard {
+  customer_id: string;
+  tenant_id: string;
+  member_code: string;
+  customer_name: string;
+  phone_number: string | null;
+  email: string | null;
+  is_active: boolean;
+  lifetime_spend: number;
+  visit_count: number;
+  tier_id: string | null;
+  tier_name: string;
+  tier_discount_percentage: number;
+  tier_benefits: string[];
+  points_balance: number;
+  lifetime_earned: number;
+  lifetime_redeemed: number;
+}
+
 export interface Transaction {
   id: string;
   tenant_id: string;

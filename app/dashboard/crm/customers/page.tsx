@@ -13,9 +13,12 @@
  */
 
 import { useEffect, useState } from "react";
-import { Plus, Search, Loader2, UserRound, X } from "lucide-react";
+import { Plus, Search, Loader2, UserRound, X, CreditCard } from "lucide-react";
 import { getCustomers, createCustomer, toggleCustomerActive } from "@/app/actions/purchasing-loyalty-actions";
+import { getMemberCard } from "@/app/actions/customer-membership-actions";
 import Modal from "@/components/Modal";
+import MemberCardModal from "@/components/crm/MemberCardModal";
+import type { MemberCard } from "@/lib/types";
 
 interface CustomerRow {
   id: string;
@@ -48,6 +51,20 @@ export default function CustomersPage() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Kartu Member Digital (requirement #3) — dimuat on-demand per klik.
+  const [activeCard, setActiveCard] = useState<MemberCard | null>(null);
+  const [loadingCardId, setLoadingCardId] = useState<string | null>(null);
+
+  async function openMemberCard(customerId: string) {
+    setLoadingCardId(customerId);
+    const res = await getMemberCard(customerId);
+    setLoadingCardId(null);
+    if (res.error || !res.data) {
+      alert("Gagal memuat kartu member: " + (res.error ?? "data tidak ditemukan"));
+      return;
+    }
+    setActiveCard(res.data);
+  }
 
   useEffect(() => {
     load();
@@ -136,16 +153,41 @@ export default function CustomersPage() {
                 <p className="text-sm font-semibold text-neutral-900">
                   Rp {Number(c.lifetime_spend || 0).toLocaleString("id-ID")}
                 </p>
-                <button
-                  onClick={() => toggleCustomerActive(c.id, !c.is_active).then(load)}
-                  className={`text-xs font-medium ${c.is_active ? "text-neutral-400" : "text-urgent"}`}
-                >
-                  {c.is_active ? "Aktif" : "Nonaktif — aktifkan"}
-                </button>
+                <div className="flex items-center gap-2 justify-end mt-1">
+                  <button
+                    onClick={() => openMemberCard(c.id)}
+                    disabled={loadingCardId === c.id}
+                    className="text-xs font-medium text-primary-dark flex items-center gap-1"
+                  >
+                    {loadingCardId === c.id ? (
+                      <Loader2 size={12} className="animate-spin" />
+                    ) : (
+                      <CreditCard size={12} />
+                    )}
+                    Kartu
+                  </button>
+                  <button
+                    onClick={() => toggleCustomerActive(c.id, !c.is_active).then(load)}
+                    className={`text-xs font-medium ${c.is_active ? "text-neutral-400" : "text-urgent"}`}
+                  >
+                    {c.is_active ? "Aktif" : "Nonaktif — aktifkan"}
+                  </button>
+                </div>
               </div>
             </div>
           ))}
         </div>
+      )}
+
+      {activeCard && (
+        <MemberCardModal
+          card={activeCard}
+          onClose={() => setActiveCard(null)}
+          onTierChanged={() => {
+            openMemberCard(activeCard.customer_id);
+            load();
+          }}
+        />
       )}
 
       {showForm && (

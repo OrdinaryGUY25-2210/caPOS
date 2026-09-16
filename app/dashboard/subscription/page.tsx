@@ -77,6 +77,14 @@ export default function SubscriptionPage() {
   const [payingPlan, setPayingPlan] = useState<string | null>(null);
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [availableDiscountPct, setAvailableDiscountPct] = useState(0);
+  // Kuota Cabang/Staf (requirement #1) — dari view v_subscription_quota
+  // (migration_16 bagian F1), null selama belum termuat/tidak ditemukan.
+  const [quota, setQuota] = useState<{
+    branch_count: number;
+    branch_limit: number | null;
+    staff_count: number;
+    staff_limit: number | null;
+  } | null>(null);
 
   async function loadSubscription() {
     setLoading(true);
@@ -87,10 +95,12 @@ export default function SubscriptionPage() {
     }
 
     const supabase = createClient();
-    const [{ data: sub }, { data: referral }] = await Promise.all([
+    const [{ data: sub }, { data: referral }, { data: quotaRow }] = await Promise.all([
       supabase.from("subscriptions").select("status, plan, trial_ends_at, valid_until, pending_signup_discount_pct").eq("tenant_id", profile.tenant_id).single(),
       supabase.from("referrals").select("accumulated_uses").eq("tenant_id", profile.tenant_id).single(),
+      supabase.from("v_subscription_quota").select("branch_count, branch_limit, staff_count, staff_limit").eq("tenant_id", profile.tenant_id).single(),
     ]);
+    setQuota(quotaRow ?? null);
 
     const signupPct = Number(sub?.pending_signup_discount_pct) || 0;
     const referralPct = Math.min((referral?.accumulated_uses ?? 0) * 3, 15);
@@ -242,6 +252,14 @@ export default function SubscriptionPage() {
         </div>
       )}
 
+      {/* Kuota Cabang/Staf (requirement #1) — pemakaian live vs batas paket. */}
+      {!loading && quota && (
+        <div className="grid grid-cols-2 gap-4">
+          <QuotaCard label="Cabang Terpakai" used={quota.branch_count} limit={quota.branch_limit} />
+          <QuotaCard label="Staf Tambahan Terpakai" used={quota.staff_count} limit={quota.staff_limit} />
+        </div>
+      )}
+
       {paymentError && (
         <div className="badge-urgent w-full justify-start px-3 py-2 rounded-lg">{paymentError}</div>
       )}
@@ -359,6 +377,25 @@ export default function SubscriptionPage() {
           Hubungi via WhatsApp
         </a>
       </p>
+    </div>
+  );
+}
+
+/** Kartu kuota pemakaian (Cabang/Staf) — requirement #1. */
+function QuotaCard({ label, used, limit }: { label: string; used: number; limit: number | null }) {
+  const isUnlimited = limit === null;
+  const isFull = !isUnlimited && used >= (limit as number);
+  return (
+    <div className="card p-4">
+      <p className="text-xs text-neutral-500">{label}</p>
+      <p className={"text-xl font-bold mt-1 " + (isFull ? "text-urgent" : "text-neutral-900")}>
+        {used}
+        <span className="text-sm font-normal text-neutral-400">
+          {" "}
+          / {isUnlimited ? "Unlimited" : limit}
+        </span>
+      </p>
+      {isFull && <p className="text-xs text-urgent mt-1">Kuota penuh — upgrade untuk menambah.</p>}
     </div>
   );
 }

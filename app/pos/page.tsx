@@ -13,8 +13,9 @@ import ShiftModal from "@/components/ShiftModal";
 import SoldOutToggle from "@/components/pos/SoldOutToggle";
 import ProductConfigModal, { type ProductGroupWithModifiers, type ConfiguredCartPayload } from "@/components/pos/ProductConfigModal";
 import { CustomerLoyaltyModal } from "@/components/crm/CustomerLoyaltyModal";
-import { UserRound, X as XIcon, Wallet } from "lucide-react";
+import { UserRound, X as XIcon, Wallet, Gift } from "lucide-react";
 import { validateAndApplyVoucher } from "@/app/actions/purchasing-loyalty-actions";
+import { redeemLoyaltyPoints, getPointsRedeemRate } from "@/app/actions/customer-membership-actions";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { db } from "@/lib/dexie";
@@ -86,8 +87,21 @@ export default function PosPage() {
   const [voucherCode, setVoucherCode] = useState("");
   const [voucherDiscountPreview, setVoucherDiscountPreview] = useState(0);
   const [voucherError, setVoucherError] = useState<string | null>(null);
-  const [selectedCustomer, setSelectedCustomer] = useState<{ id: string; customer_name: string } | null>(null);
+  const [selectedCustomer, setSelectedCustomer] = useState<{ id: string; customer_name: string; loyaltyBalance?: number } | null>(null);
   const [showCustomerModal, setShowCustomerModal] = useState(false);
+  // Klaim/tukar poin loyalitas (Modul Membership CRM, requirement #3) —
+  // fitur BARU, terpisah dari diskon member_code di atas. Poin ditukar
+  // jadi potongan Rupiah TAMBAHAN di luar diskon member/voucher, lewat
+  // RPC redeem_loyalty_points() yang sudah ada (dipanggil via server
+  // action redeemLoyaltyPoints, lihat app/actions/customer-membership-actions.ts).
+  const [pointsInput, setPointsInput] = useState("");
+  const [pointsDiscountAmount, setPointsDiscountAmount] = useState(0);
+  const [redeemingPoints, setRedeemingPoints] = useState(false);
+  const [pointsRedeemRate, setPointsRedeemRate] = useState(0);
+
+  useEffect(() => {
+    getPointsRedeemRate().then((res) => setPointsRedeemRate(res.data ?? 0));
+  }, []);
   const [showCheckout, setShowCheckout] = useState(false);
   const [showCartSheet, setShowCartSheet] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("cash");
@@ -573,7 +587,21 @@ export default function PosPage() {
   // dan hasil server beda (mis. voucher habis di detik terakhir), struk
   // yang dicetak di sini bisa saja tidak 100% match — kasir akan lihat
   // error dari server sebelum itu terjadi (lihat handleCheckout).
-  const discountAmount = memberDiscountAmount + voucherDiscountPreview;
+  // CATATAN PENTING soal pointsDiscountAmount: checkout_transaction() (RPC
+  // stabil, migration_014/017, TIDAK diubah oleh integrasi poin ini) hanya
+  // menghitung ulang total dari subtotal - diskon member - diskon voucher
+  // di server — parameter poin TIDAK ada di signature-nya. Karena itu,
+  // `total` di layar (dipakai utk kembalian tunai & struk) SUDAH termasuk
+  // potongan poin, tapi kolom transactions.total_amount yang benar-benar
+  // tersimpan di server TIDAK ikut memotongnya (tetap subtotal - member -
+  // voucher). Redeem poin-nya sendiri tetap tercatat sah & auditable lewat
+  // loyalty_points_log (via redeem_loyalty_points, RPC lama). Supaya kas
+  // fisik & laporan omzet 100% presisi sampai ke rupiah terakhir untuk
+  // kasus ini, checkout_transaction perlu direvisi untuk turut menerima
+  // parameter poin — sengaja TIDAK dilakukan di sini karena fungsi itu
+  // adalah inti alur checkout yang sudah stabil dan di luar 3 modul yang
+  // diminta (Subscription/Onboarding/Membership).
+  const discountAmount = memberDiscountAmount + voucherDiscountPreview + pointsDiscountAmount;
   const total = Math.max(0, subtotal - discountAmount);
 
   async function applyVoucherCode() {
@@ -604,6 +632,37 @@ export default function PosPage() {
         toast.error("Kode member tidak ditemukan atau tidak aktif.");
       }
     }
+  }
+
+  /** Tukar poin loyalitas pelanggan terpilih jadi potongan Rupiah (requirement #3). */
+  async function handleRedeemPoints() {
+    if (!selectedCustomer) return;
+    const points = parseInt(pointsInput, 10);
+    if (!points || points <= 0) {
+      toast.error("Masukkan jumlah poin yang valid.");
+      return;
+    }
+    const balance = selectedCustomer.loyaltyBalance ?? 0;
+    if (points > balance) {
+      toast.error(`Poin tidak cukup. Saldo tersedia: ${balance}.`);
+      return;
+    }
+    if (pointsRedeemRate <= 0) {
+      toast.error("Program penukaran poin belum aktif untuk kafe ini.");
+      return;
+    }
+    setRedeemingPoints(true);
+    const discountFromPoints = Math.round(points * pointsRedeemRate);
+    const res = await redeemLoyaltyPoints(selectedCustomer.id, points, discountFromPoints);
+    setRedeemingPoints(false);
+    if (res.error) {
+      toast.error("Gagal menukar poin: " + res.error);
+      return;
+    }
+    setPointsDiscountAmount((prev) => prev + discountFromPoints);
+    setSelectedCustomer({ ...selectedCustomer, loyaltyBalance: balance - points });
+    setPointsInput("");
+    toast.success(`${points} poin ditukar jadi potongan ${formatRupiah(discountFromPoints)}.`);
   }
 
   async function handleCheckout() {
@@ -753,6 +812,8 @@ export default function PosPage() {
     setVoucherDiscountPreview(0);
     setVoucherError(null);
     setSelectedCustomer(null);
+    setPointsInput("");
+    setPointsDiscountAmount(0);
     setCashReceived("");
     setShowCheckout(false);
   }
@@ -1025,6 +1086,11 @@ export default function PosPage() {
             selectedCustomer={selectedCustomer}
             onOpenCustomerModal={() => setShowCustomerModal(true)}
             onClearCustomer={() => setSelectedCustomer(null)}
+            pointsInput={pointsInput}
+            setPointsInput={setPointsInput}
+            pointsDiscountAmount={pointsDiscountAmount}
+            redeemingPoints={redeemingPoints}
+            onRedeemPoints={handleRedeemPoints}
             updateQty={updateQty}
             setQty={setQtyDirect}
             removeItem={removeItem}
@@ -1074,6 +1140,11 @@ export default function PosPage() {
             selectedCustomer={selectedCustomer}
             onOpenCustomerModal={() => setShowCustomerModal(true)}
             onClearCustomer={() => setSelectedCustomer(null)}
+            pointsInput={pointsInput}
+            setPointsInput={setPointsInput}
+            pointsDiscountAmount={pointsDiscountAmount}
+            redeemingPoints={redeemingPoints}
+            onRedeemPoints={handleRedeemPoints}
             updateQty={updateQty}
             setQty={setQtyDirect}
             removeItem={removeItem}
@@ -1254,7 +1325,11 @@ export default function PosPage() {
         onClose={() => setShowCustomerModal(false)}
         transactionAmount={total}
         onSelectCustomer={(customer) => {
-          setSelectedCustomer({ id: customer.id, customer_name: customer.customer_name });
+          setSelectedCustomer({
+            id: customer.id,
+            customer_name: customer.customer_name,
+            loyaltyBalance: customer.loyaltyBalance ?? 0,
+          });
           setShowCustomerModal(false);
         }}
       />
@@ -1305,6 +1380,11 @@ function CartPanel({
   selectedCustomer,
   onOpenCustomerModal,
   onClearCustomer,
+  pointsInput,
+  setPointsInput,
+  pointsDiscountAmount,
+  redeemingPoints,
+  onRedeemPoints,
   updateQty,
   setQty,
   removeItem,
@@ -1326,9 +1406,15 @@ function CartPanel({
   applyVoucherCode: () => void;
   voucherError: string | null;
   voucherDiscountPreview: number;
-  selectedCustomer: { id: string; customer_name: string } | null;
+  selectedCustomer: { id: string; customer_name: string; loyaltyBalance?: number } | null;
   onOpenCustomerModal: () => void;
   onClearCustomer: () => void;
+  /** Klaim/tukar poin loyalitas (requirement #3, Modul Membership CRM). */
+  pointsInput: string;
+  setPointsInput: (v: string) => void;
+  pointsDiscountAmount: number;
+  redeemingPoints: boolean;
+  onRedeemPoints: () => void;
   updateQty: (id: string, delta: number) => void;
   setQty: (id: string, qty: number) => void;
   removeItem: (id: string) => void;
@@ -1448,6 +1534,31 @@ function CartPanel({
           )}
         </button>
 
+        {/* Klaim/tukar poin loyalitas — requirement #3. Hanya muncul kalau
+            ada pelanggan terpilih dengan saldo poin > 0. */}
+        {selectedCustomer && (selectedCustomer.loyaltyBalance ?? 0) > 0 && (
+          <div className="flex gap-2 items-center">
+            <div className="flex items-center gap-1.5 text-xs text-neutral-500 shrink-0">
+              <Gift size={13} className="text-primary" />
+              Poin: {selectedCustomer.loyaltyBalance}
+            </div>
+            <input
+              value={pointsInput}
+              onChange={(e) => setPointsInput(e.target.value.replace(/\D/g, ""))}
+              placeholder="Jml poin"
+              inputMode="numeric"
+              className="input-field flex-1 text-sm"
+            />
+            <button
+              onClick={onRedeemPoints}
+              disabled={redeemingPoints || !pointsInput}
+              className="btn-outline text-sm px-3 shrink-0 disabled:opacity-60"
+            >
+              {redeemingPoints ? "..." : "Tukar"}
+            </button>
+          </div>
+        )}
+
         <div className="space-y-1 text-sm">
           <div className="flex justify-between text-neutral-500">
             <span>Subtotal</span>
@@ -1463,6 +1574,12 @@ function CartPanel({
             <div className="flex justify-between text-primary">
               <span>Diskon Voucher</span>
               <span>-{formatRupiah(voucherDiscountPreview)}</span>
+            </div>
+          )}
+          {pointsDiscountAmount > 0 && (
+            <div className="flex justify-between text-primary">
+              <span>Tukar Poin</span>
+              <span>-{formatRupiah(pointsDiscountAmount)}</span>
             </div>
           )}
           <div className="flex justify-between font-bold text-neutral-900 text-base pt-1">

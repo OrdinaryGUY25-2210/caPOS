@@ -633,6 +633,416 @@ END $$;
 
 
 -- =========================================================
+-- F. SUBSCRIPTION SAAS — KUOTA CABANG/STAF & AUTO-CUTOFF
+-- =========================================================
+-- Revisi ditambahkan ke migration_16.sql yang sama (belum di-apply ke
+-- production manapun) sesuai aturan FINAL LOCK di atas — TIDAK dibuat
+-- migration_17.sql. Semua perubahan di bagian F & H ADDITIF (view/kolom/
+-- tabel/trigger baru), tidak ada DROP atau perubahan pada fungsi
+-- checkout_transaction()/enforce_branch_limit()/enforce_cashier_limit()
+-- yang sudah stabil — bagian ini murni menambah lapisan monitoring +
+-- pembatasan baru di atasnya.
+
+-- F1. View kuota pemakaian per tenant — dipakai halaman
+--     /dashboard/subscription untuk menampilkan "Kuota Cabang/Staf"
+--     (jumlah terpakai vs batas paket) secara live, bukan cuma tabel
+--     perbandingan statis. security_invoker = true supaya RLS tabel
+--     subscriptions/branches/profiles yang mendasarinya tetap berlaku
+--     (pola yang sama dipakai daily_sales_analytics di schema.sql).
+--     Batas branch_limit/staff_limit di CASE bawah ini HARUS selalu sama
+--     persis dengan enforce_branch_limit() (migration_011) dan
+--     enforce_cashier_limit() (migration_16 bagian A2) — free: 1 cabang/
+--     2 staf tambahan, pro: 3 cabang/unlimited staf, supreme: unlimited/
+--     unlimited (NULL = unlimited di kolom *_limit).
+CREATE OR REPLACE VIEW v_subscription_quota
+WITH (security_invoker = true) AS
+SELECT
+  s.tenant_id,
+  s.status,
+  s.plan,
+  tenant_tier(s.tenant_id) AS tier,
+  s.trial_ends_at,
+  s.valid_until,
+  (SELECT COUNT(*) FROM branches b WHERE b.tenant_id = s.tenant_id) AS branch_count,
+  CASE tenant_tier(s.tenant_id)
+    WHEN 'free' THEN 1
+    WHEN 'pro' THEN 3
+    ELSE NULL
+  END AS branch_limit,
+  -- Staf tambahan = cashier + manager + kitchen (role Owner tidak
+  -- dihitung), konsisten dengan enforce_cashier_limit().
+  (SELECT COUNT(*) FROM profiles p
+     WHERE p.tenant_id = s.tenant_id AND p.role IN ('cashier', 'manager', 'kitchen')) AS staff_count,
+  CASE tenant_tier(s.tenant_id)
+    WHEN 'free' THEN 2
+    ELSE NULL
+  END AS staff_limit
+FROM subscriptions s;
+
+COMMENT ON VIEW v_subscription_quota IS
+  'migration_16 (bagian F). Sumber data kartu "Kuota Cabang/Staf" di /dashboard/subscription — '
+  'branch_limit/staff_limit NULL berarti unlimited untuk tier tsb.';
+
+-- F2. AUTO-CUTOFF — pembatasan akses fitur otomatis saat status
+--     subscription = 'expired'. Diterapkan sebagai trigger BEFORE INSERT
+--     langsung di tabel transactions (bukan mengubah checkout_transaction()
+--     yang sudah stabil) supaya berlaku APA PUN jalur insertnya — baik
+--     lewat RPC checkout_transaction, checkout_order_v2 (KDS/Open Bill),
+--     maupun sinkronisasi transaksi offline (syncPendingTransactions) —
+--     semuanya bermuara ke satu INSERT INTO transactions di akhir. Owner/
+--     Manager tetap bisa login & membuka /dashboard/subscription untuk
+--     bayar (auto-cutoff ini TIDAK memblokir SELECT, hanya transaksi
+--     penjualan baru) — proteksi UI (blocking overlay) dikerjakan di
+--     frontend (lihat components/SubscriptionCutoffGate.tsx), trigger ini
+--     adalah lapis pertahanan kedua di level database (defense-in-depth),
+--     sama seperti pola enforce_branch_limit/enforce_cashier_limit.
+--     Status 'past_due' (masih dalam grace period 3 hari, lihat bagian D)
+--     SENGAJA masih boleh transaksi supaya tenant yang telat bayar
+--     beberapa jam tidak langsung berhenti total.
+CREATE OR REPLACE FUNCTION enforce_subscription_cutoff()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_status sub_status;
+BEGIN
+  SELECT status INTO v_status FROM subscriptions WHERE tenant_id = NEW.tenant_id;
+
+  IF v_status = 'expired' THEN
+    RAISE EXCEPTION 'SUBSCRIPTION_EXPIRED: Langganan kafe ini sudah kedaluwarsa. Perpanjang paket di '
+      'Dashboard > Status Langganan untuk bisa melakukan transaksi kembali.';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_enforce_subscription_cutoff ON transactions;
+CREATE TRIGGER trg_enforce_subscription_cutoff
+  BEFORE INSERT ON transactions
+  FOR EACH ROW EXECUTE FUNCTION enforce_subscription_cutoff();
+
+COMMENT ON FUNCTION enforce_subscription_cutoff IS
+  'migration_16 (bagian F, Auto-Cutoff). Menolak transaksi penjualan baru begitu status '
+  'subscriptions tenant = expired. Dipasang di tabel transactions (bukan mengubah fungsi '
+  'checkout_transaction) supaya berlaku untuk semua jalur checkout tanpa menyentuh RPC yang sudah ada.';
+
+
+-- =========================================================
+-- G. SELF-SERVICE ONBOARDING & REGISTRATION — CATATAN (TIDAK ADA
+--    PERUBAHAN SKEMA)
+-- =========================================================
+-- Alur /register (app/api/register/route.ts) SUDAH memenuhi spesifikasi
+-- ini sejak sebelum migration_16: setiap pendaftaran baru otomatis (1)
+-- membuat baris tenants, (2) membuat baris subscriptions dengan status
+-- DEFAULT 'trial' dan trial_ends_at DEFAULT now()+28 hari (lihat kolom
+-- DEFAULT di schema.sql, tidak perlu input manual), (3) membuat kode
+-- referral permanen milik tenant baru, dan (4) membuat profile Owner —
+-- semuanya dalam satu request, tanpa campur tangan admin/manual setup.
+-- Bagian ini sengaja TIDAK menambah/mengubah skema apa pun — hanya
+-- didokumentasikan di sini supaya jelas bahwa requirement #2 sudah
+-- terpenuhi oleh kode yang sudah stabil, tidak disentuh oleh migration_16.
+
+
+-- =========================================================
+-- H. MEMBERSHIP CRM — TIER, SALDO POIN (customer_points), & KARTU
+--    MEMBER DIGITAL
+-- =========================================================
+-- Catatan desain: caPOS sudah punya DUA sistem "member" yang berjalan
+-- paralel sejak sebelum migration_16 ini:
+--   (1) memberships (schema.sql) — kartu diskon sederhana berbasis
+--       member_code, dipakai jalur scan cepat "Kode Member / Scan QR" di
+--       /pos (CartPanel) untuk potongan % instan. TIDAK disentuh di sini.
+--   (2) customers + customer_tiers + loyalty_config + loyalty_points_log
+--       (migration_014, Phase 3 CRM) — database pelanggan lengkap dengan
+--       tier & poin loyalitas, sudah tersambung ke checkout_transaction()
+--       (parameter p_customer_id) dan modal CustomerLoyaltyModal di /pos,
+--       TAPI saldo poin selama ini SELALU dihitung ulang dengan SUM() ke
+--       loyalty_points_log setiap kali dibaca (tidak ada tabel saldo),
+--       dan RPC redeem_loyalty_points() sudah ada di database tapi belum
+--       pernah dipanggil dari UI manapun.
+-- Task ini minta tabel "memberships" (sudah ada, dipertahankan apa
+-- adanya) dan "customer_points" (BARU) — customer_points dibuat di sini
+-- sebagai tabel SALDO (cache) yang mengikuti sistem (2) di atas (customers/
+-- loyalty_points_log), karena itulah mesin poin yang sesungguhnya dipakai
+-- caPOS; ia disinkronkan otomatis oleh trigger dari loyalty_points_log,
+-- BUKAN sumber kebenaran baru yang terpisah (loyalty_points_log tetap
+-- jadi audit trail utama, customer_points murni percepat pembacaan saldo
+-- untuk Kartu Member Digital & POS).
+
+-- H1. RLS untuk customer_tiers/loyalty_config/loyalty_points_log — ketiga
+--     tabel ini dibuat di migration_014 TANPA RLS sama sekali (celah
+--     kebocoran data lintas tenant, siapa pun yang authenticated bisa
+--     baca tier/poin/config tenant lain). Diperbaiki di sini sebagai
+--     bagian dari fondasi Membership CRM — murni ENABLE + POLICY baru,
+--     tidak ada perubahan pada query yang sudah ada (semua query yang
+--     sudah ada di app/actions/purchasing-loyalty-actions.ts sudah
+--     memfilter tenant_id sendiri, jadi hasilnya tidak berubah untuk
+--     pemakaian normal, hanya menutup celah aksesnya).
+ALTER TABLE customer_tiers ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "rls_customer_tiers" ON customer_tiers;
+CREATE POLICY "rls_customer_tiers" ON customer_tiers
+  FOR SELECT USING (tenant_id = current_tenant_id() OR is_super_admin());
+DROP POLICY IF EXISTS "rls_customer_tiers_write" ON customer_tiers;
+CREATE POLICY "rls_customer_tiers_write" ON customer_tiers
+  FOR INSERT WITH CHECK (tenant_id = current_tenant_id() AND is_manager_or_owner());
+DROP POLICY IF EXISTS "rls_customer_tiers_update" ON customer_tiers;
+CREATE POLICY "rls_customer_tiers_update" ON customer_tiers
+  FOR UPDATE USING (tenant_id = current_tenant_id() AND is_manager_or_owner())
+  WITH CHECK (tenant_id = current_tenant_id());
+
+ALTER TABLE loyalty_config ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "rls_loyalty_config" ON loyalty_config;
+CREATE POLICY "rls_loyalty_config" ON loyalty_config
+  FOR SELECT USING (tenant_id = current_tenant_id() OR is_super_admin());
+DROP POLICY IF EXISTS "rls_loyalty_config_write" ON loyalty_config;
+CREATE POLICY "rls_loyalty_config_write" ON loyalty_config
+  FOR ALL USING (tenant_id = current_tenant_id() AND is_manager_or_owner())
+  WITH CHECK (tenant_id = current_tenant_id());
+
+ALTER TABLE loyalty_points_log ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "rls_loyalty_points_log" ON loyalty_points_log;
+CREATE POLICY "rls_loyalty_points_log" ON loyalty_points_log
+  FOR SELECT USING (tenant_id = current_tenant_id() OR is_super_admin());
+-- Tidak ada policy INSERT langsung untuk client — loyalty_points_log
+-- HANYA ditulis lewat earn_loyalty_points()/redeem_loyalty_points()
+-- (SECURITY DEFINER, bypass RLS), persis seperti pola stock_opnames.
+
+-- H2. customer_points — tabel saldo poin per pelanggan (BARU, terikat
+--     tenant_id sesuai spesifikasi). UNIQUE (customer_id) supaya 1
+--     pelanggan = 1 baris saldo yang di-upsert oleh trigger H3.
+CREATE TABLE IF NOT EXISTS customer_points (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
+  customer_id UUID UNIQUE REFERENCES customers(id) ON DELETE CASCADE,
+  points_balance INT NOT NULL DEFAULT 0,
+  lifetime_earned INT NOT NULL DEFAULT 0,
+  lifetime_redeemed INT NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_customer_points_tenant ON customer_points (tenant_id);
+
+COMMENT ON TABLE customer_points IS
+  'migration_16 (bagian H2). Cache saldo poin per pelanggan, disinkronkan otomatis oleh trigger '
+  'trg_sync_customer_points dari loyalty_points_log — JANGAN diupdate manual dari client, saldo '
+  'sebenarnya tetap loyalty_points_log (audit trail).';
+
+ALTER TABLE customer_points ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "rls_customer_points" ON customer_points;
+CREATE POLICY "rls_customer_points" ON customer_points
+  FOR SELECT USING (tenant_id = current_tenant_id() OR is_super_admin());
+-- Tidak ada policy INSERT/UPDATE untuk client — hanya trigger H3
+-- (SECURITY DEFINER) yang menulis ke tabel ini.
+
+-- H3. Trigger sinkronisasi — setiap kali ada baris baru di
+--     loyalty_points_log (ditulis oleh earn_loyalty_points() atau
+--     redeem_loyalty_points(), keduanya fungsi lama yang TIDAK diubah),
+--     saldo cache di customer_points ikut ter-upsert otomatis.
+CREATE OR REPLACE FUNCTION sync_customer_points_from_log()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_tenant_id UUID;
+  v_delta INT;
+BEGIN
+  SELECT tenant_id INTO v_tenant_id FROM customers WHERE id = NEW.customer_id;
+  IF v_tenant_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  v_delta := CASE WHEN NEW.transaction_type IN ('EARN', 'ADJUST') THEN NEW.points_amount ELSE -NEW.points_amount END;
+
+  INSERT INTO customer_points (tenant_id, customer_id, points_balance, lifetime_earned, lifetime_redeemed)
+  VALUES (
+    v_tenant_id,
+    NEW.customer_id,
+    GREATEST(v_delta, 0) + LEAST(v_delta, 0),
+    CASE WHEN NEW.transaction_type IN ('EARN', 'ADJUST') AND NEW.points_amount > 0 THEN NEW.points_amount ELSE 0 END,
+    CASE WHEN NEW.transaction_type = 'REDEEM' THEN NEW.points_amount ELSE 0 END
+  )
+  ON CONFLICT (customer_id) DO UPDATE SET
+    points_balance = GREATEST(customer_points.points_balance + v_delta, 0),
+    lifetime_earned = customer_points.lifetime_earned +
+      (CASE WHEN NEW.transaction_type IN ('EARN', 'ADJUST') AND NEW.points_amount > 0 THEN NEW.points_amount ELSE 0 END),
+    lifetime_redeemed = customer_points.lifetime_redeemed +
+      (CASE WHEN NEW.transaction_type = 'REDEEM' THEN NEW.points_amount ELSE 0 END),
+    updated_at = now();
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_sync_customer_points ON loyalty_points_log;
+CREATE TRIGGER trg_sync_customer_points
+  AFTER INSERT ON loyalty_points_log
+  FOR EACH ROW EXECUTE FUNCTION sync_customer_points_from_log();
+
+COMMENT ON FUNCTION sync_customer_points_from_log IS
+  'migration_16 (bagian H3). Jaga customer_points tetap sinkron setiap kali earn_loyalty_points() '
+  'atau redeem_loyalty_points() menulis baris baru ke loyalty_points_log. Fungsi lama itu sendiri '
+  'TIDAK diubah — trigger ini murni observer tambahan di tabel log-nya.';
+
+-- H3b. Backfill satu kali — isi customer_points untuk data lama (kalau
+--      ada tenant yang sudah pernah pakai loyalty_points_log SEBELUM
+--      migration_16 ini di-apply), supaya saldo cache langsung akurat
+--      sejak awal, bukan menunggu transaksi poin berikutnya.
+INSERT INTO customer_points (tenant_id, customer_id, points_balance, lifetime_earned, lifetime_redeemed)
+SELECT
+  c.tenant_id,
+  l.customer_id,
+  GREATEST(SUM(CASE WHEN l.transaction_type IN ('EARN', 'ADJUST') THEN l.points_amount ELSE -l.points_amount END), 0),
+  SUM(CASE WHEN l.transaction_type IN ('EARN', 'ADJUST') AND l.points_amount > 0 THEN l.points_amount ELSE 0 END),
+  SUM(CASE WHEN l.transaction_type = 'REDEEM' THEN l.points_amount ELSE 0 END)
+FROM loyalty_points_log l
+JOIN customers c ON c.id = l.customer_id
+GROUP BY c.tenant_id, l.customer_id
+ON CONFLICT (customer_id) DO UPDATE SET
+  points_balance = EXCLUDED.points_balance,
+  lifetime_earned = EXCLUDED.lifetime_earned,
+  lifetime_redeemed = EXCLUDED.lifetime_redeemed,
+  updated_at = now();
+
+-- H4. Nilai tukar poin -> Rupiah untuk redeem_loyalty_points() (RPC lama
+--     yang sudah ada tapi butuh angka Rupiah dari CALLER — sebelumnya
+--     tidak ada kolom konfigurasi untuk itu di loyalty_config). Default
+--     Rp 100/poin, bisa diatur per tenant lewat halaman CRM Pelanggan.
+ALTER TABLE loyalty_config
+  ADD COLUMN IF NOT EXISTS redeem_rupiah_per_point NUMERIC NOT NULL DEFAULT 100;
+
+COMMENT ON COLUMN loyalty_config.redeem_rupiah_per_point IS
+  'migration_16. Nilai 1 poin saat ditukar jadi potongan Rupiah di kasir — dipakai frontend (POS) '
+  'untuk menghitung p_discount_amount sebelum memanggil redeem_loyalty_points(). Tidak divalidasi '
+  'ulang oleh redeem_loyalty_points() (fungsi lama, tidak diubah) — potongan tetap dibatasi wajar '
+  'oleh UI (lihat components/crm/MemberCardModal.tsx & app/pos/page.tsx).';
+
+-- H5. tier_id di customers SUDAH ADA sejak migration_014 (schema lama)
+--     tapi belum pernah punya UI untuk mengelola tier ATAU meng-assign
+--     pelanggan ke tier tertentu — itu dikerjakan di frontend
+--     (app/actions/customer-membership-actions.ts), tidak butuh
+--     perubahan skema tambahan di sini.
+
+-- H6. Seed tier default untuk tenant yang belum punya tier SAMA SEKALI
+--     (termasuk semua tenant lama sebelum migration_16 ini) — supaya
+--     Kartu Member Digital langsung punya sesuatu untuk ditampilkan
+--     tanpa Owner harus setup manual dulu. Dibuat idempotent lewat
+--     UNIQUE (tenant_id, tier_name) yang sudah ada di CREATE TABLE
+--     customer_tiers (migration_014).
+INSERT INTO customer_tiers (tenant_id, tier_name, min_spend_monthly, discount_percentage, points_multiplier, benefits)
+SELECT t.id, v.tier_name, v.min_spend, v.discount_pct, v.multiplier, v.benefits
+FROM tenants t
+CROSS JOIN (VALUES
+  ('Reguler', 0, 0, 1, ARRAY['Kumpulkan poin di setiap transaksi']),
+  ('Silver', 500000, 5, 1.2, ARRAY['Diskon 5%', 'Poin 1.2x']),
+  ('Gold', 2000000, 10, 1.5, ARRAY['Diskon 10%', 'Poin 1.5x', 'Prioritas info promo'])
+) AS v(tier_name, min_spend, discount_pct, multiplier, benefits)
+WHERE NOT EXISTS (SELECT 1 FROM customer_tiers ct WHERE ct.tenant_id = t.id)
+ON CONFLICT (tenant_id, tier_name) DO NOTHING;
+
+-- H7. Trigger — tenant BARU (daftar lewat /register setelah migration_16
+--     ini di-apply) langsung dapat 3 tier default yang sama, konsisten
+--     dengan semangat requirement #2 (self-service, tanpa setup manual).
+CREATE OR REPLACE FUNCTION seed_default_customer_tiers()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  INSERT INTO customer_tiers (tenant_id, tier_name, min_spend_monthly, discount_percentage, points_multiplier, benefits)
+  VALUES
+    (NEW.id, 'Reguler', 0, 0, 1, ARRAY['Kumpulkan poin di setiap transaksi']),
+    (NEW.id, 'Silver', 500000, 5, 1.2, ARRAY['Diskon 5%', 'Poin 1.2x']),
+    (NEW.id, 'Gold', 2000000, 10, 1.5, ARRAY['Diskon 10%', 'Poin 1.5x', 'Prioritas info promo'])
+  ON CONFLICT (tenant_id, tier_name) DO NOTHING;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_seed_default_customer_tiers ON tenants;
+CREATE TRIGGER trg_seed_default_customer_tiers
+  AFTER INSERT ON tenants
+  FOR EACH ROW EXECUTE FUNCTION seed_default_customer_tiers();
+
+COMMENT ON FUNCTION seed_default_customer_tiers IS
+  'migration_16 (bagian H7). Tenant baru otomatis dapat 3 tier member default (Reguler/Silver/Gold) '
+  'begitu tenants di-insert (dipicu /api/register) — melengkapi alur self-service #2 supaya Kartu '
+  'Member Digital & tier langsung siap pakai tanpa setup manual Owner.';
+
+-- H8. View kartu member digital — satu baris per pelanggan, gabungan
+--     customers + customer_tiers (status tier) + customer_points (saldo
+--     poin). member_code memakai customers.customer_code yang sudah ada
+--     (dipakai sebagai isi QR/Barcode di kartu). security_invoker = true
+--     supaya RLS customers/customer_tiers/customer_points tetap berlaku.
+CREATE OR REPLACE VIEW v_member_card
+WITH (security_invoker = true) AS
+SELECT
+  c.id AS customer_id,
+  c.tenant_id,
+  c.customer_code AS member_code,
+  c.customer_name,
+  c.phone_number,
+  c.email,
+  c.is_active,
+  c.lifetime_spend,
+  c.visit_count,
+  ct.id AS tier_id,
+  COALESCE(ct.tier_name, 'Reguler') AS tier_name,
+  COALESCE(ct.discount_percentage, 0) AS tier_discount_percentage,
+  COALESCE(ct.benefits, '{}') AS tier_benefits,
+  COALESCE(cp.points_balance, 0) AS points_balance,
+  COALESCE(cp.lifetime_earned, 0) AS lifetime_earned,
+  COALESCE(cp.lifetime_redeemed, 0) AS lifetime_redeemed
+FROM customers c
+LEFT JOIN customer_tiers ct ON ct.id = c.tier_id
+LEFT JOIN customer_points cp ON cp.customer_id = c.id;
+
+COMMENT ON VIEW v_member_card IS
+  'migration_16 (bagian H8). Sumber data Kartu Member Digital (/dashboard/crm/customers) — Nama, '
+  'Status Tier, member_code (dirender jadi QR/Barcode di frontend lewat lib qrcode), dan Saldo Poin.';
+
+-- H9. RPC — assign/ubah tier seorang pelanggan. Dipisah dari
+--     createCustomer/updateCustomer (server actions lama) supaya tidak
+--     perlu mengubah signature fungsi yang sudah dipakai di produksi;
+--     ini murni RPC baru untuk fitur baru (dropdown "Ubah Tier" di kartu
+--     member digital).
+CREATE OR REPLACE FUNCTION assign_customer_tier(p_customer_id UUID, p_tier_id UUID)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  IF NOT is_manager_or_owner() AND NOT is_super_admin() THEN
+    RAISE EXCEPTION 'Hanya Owner/Manager yang boleh mengubah tier pelanggan';
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM customers WHERE id = p_customer_id AND tenant_id = current_tenant_id()) THEN
+    RAISE EXCEPTION 'Pelanggan tidak ditemukan di tenant Anda';
+  END IF;
+
+  IF p_tier_id IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM customer_tiers WHERE id = p_tier_id AND tenant_id = current_tenant_id()
+  ) THEN
+    RAISE EXCEPTION 'Tier tidak ditemukan di tenant Anda';
+  END IF;
+
+  UPDATE customers SET tier_id = p_tier_id, updated_at = now()
+    WHERE id = p_customer_id AND tenant_id = current_tenant_id();
+END;
+$$;
+
+COMMENT ON FUNCTION assign_customer_tier IS
+  'migration_16 (bagian H9). RPC baru untuk fitur Kartu Member Digital — assign pelanggan ke tier '
+  'tertentu. Tidak menggantikan/mengubah createCustomer/updateCustomer yang sudah ada.';
+
+
+-- =========================================================
 -- E. FINAL LOCK — catatan versi skema
 -- =========================================================
 CREATE TABLE IF NOT EXISTS schema_migrations_log (
@@ -646,7 +1056,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations_log (
 INSERT INTO schema_migrations_log (version, description, is_final)
 VALUES (
   'migration_16',
-  'Final lock: ingredient-based stock opname, made-to-order stock purity, konsolidasi role Manajemen Karyawan, otomatisasi status subscription/billing.',
+  'Final lock: ingredient-based stock opname, made-to-order stock purity, konsolidasi role Manajemen Karyawan, otomatisasi status subscription/billing. Revisi tambahan (bagian F & H): kuota cabang/staf + auto-cutoff subscription expired, customer_points + kartu member digital (tier & saldo poin) untuk Membership CRM.',
   true
 )
 ON CONFLICT (version) DO UPDATE SET is_final = true, description = EXCLUDED.description;
