@@ -21,8 +21,6 @@ import { revalidatePath } from "next/cache";
 import { getServerProfile } from "@/lib/getServerProfile";
 import type { CustomerTier, MemberCard } from "@/lib/types";
 
-export { redeemLoyaltyPoints } from "@/app/actions/purchasing-loyalty-actions";
-
 export async function getCustomerTiers(): Promise<{ data?: CustomerTier[]; error?: string }> {
   try {
     const supabase = await createClient();
