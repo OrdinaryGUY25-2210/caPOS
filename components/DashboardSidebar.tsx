@@ -41,6 +41,7 @@ import {
   ChefHat,
   UploadCloud,
   Lock,
+  History,
 } from "lucide-react";
 import { cx } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
@@ -79,6 +80,7 @@ const NAV_GROUPS: { label: string; items: { href: string; label: string; icon: a
       { href: "/dashboard/laporan-pdf", label: "Laporan PDF Otomatis", icon: FileText },
       { href: "/dashboard/target", label: "Target Bulanan", icon: Target },
       { href: "/dashboard/transactions", label: "Riwayat Transaksi", icon: Receipt },
+      { href: "/dashboard/cancellations", label: "Log Pembatalan", icon: History },
     ],
   },
   {
