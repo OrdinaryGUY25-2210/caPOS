@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import { rateLimitOrNull } from "@/lib/rateLimit";
 
 function serviceClient() {
   return createSupabaseClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
@@ -16,6 +17,14 @@ function serviceClient() {
  * untuk pembayaran langganan (lihat app/api/midtrans/create-transaction).
  */
 export async function POST(request: Request) {
+  // BARU — endpoint publik tanpa login sama sekali, sebelum ini tidak ada
+  // pembatas apa pun. 10x/menit per IP: cukup longgar untuk pelanggan
+  // beneran (submit_qr_order gagal lalu retry QRIS beberapa kali wajar),
+  // tapi menahan script yang coba membanjiri Midtrans Core API (tiap
+  // panggilan yang lolos ke Midtrans berpotensi kena biaya API ke tenant).
+  const limited = rateLimitOrNull(request, "qris-charge", { limit: 10, windowMs: 60_000 });
+  if (limited) return limited;
+
   const body = await request.json().catch(() => null);
   const qrOrderId = body?.qr_order_id;
   if (!qrOrderId) {

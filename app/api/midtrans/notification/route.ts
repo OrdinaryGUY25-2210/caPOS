@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { PLANS } from "@/lib/midtransPlans";
+import { rateLimitOrNull } from "@/lib/rateLimit";
 
 function serviceClient() {
   return createSupabaseClient(
@@ -19,10 +20,19 @@ function serviceClient() {
  * membayar — signature-nya butuh MIDTRANS_SERVER_KEY yang cuma kita tahu.
  */
 export async function POST(request: Request) {
+  // BARU — limit longgar (30x/menit per IP) khusus buat menahan flood
+  // garbage request yang bahkan tidak lolos verifikasi signature di bawah
+  // (biar tidak buang compute time hash SHA-512 + query DB berulang-ulang
+  // untuk tiap request sampah). Limitnya sengaja tidak ketat supaya tidak
+  // pernah menolak notifikasi ASLI dari Midtrans saat traffic ramai.
+  const limited = rateLimitOrNull(request, "midtrans-notification", { limit: 30, windowMs: 60_000 });
+  if (limited) return limited;
+
   const body = await request.json().catch(() => null);
   if (!body) {
     return NextResponse.json({ message: "Payload tidak valid." }, { status: 400 });
   }
+
 
   const { order_id, status_code, gross_amount, signature_key, transaction_status, fraud_status } = body;
 
