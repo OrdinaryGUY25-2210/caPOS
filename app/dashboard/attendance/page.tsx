@@ -49,10 +49,17 @@ export default function AttendancePage() {
     setForm((f) => ({ ...f, employee_id: userId }));
 
     const supabase = createClient();
+    // FIX: attendance punya 2 FK ke profiles (employee_id DAN reviewed_by),
+    // jadi embed "profiles(full_name)" polos ambigu bagi PostgREST dan
+    // query gagal secara senyap (data selalu kosong, tidak ada error yang
+    // kelihatan di UI). Perbaikannya: kasih hint nama FK constraint-nya
+    // eksplisit, dan cek error-nya supaya kegagalan tidak lagi senyap.
     const queries: any[] = [
       supabase
         .from("attendance")
-        .select("id, type, date_start, date_end, reason, status, profiles(full_name)")
+        .select(
+          "id, type, date_start, date_end, reason, status, profiles!attendance_employee_id_fkey(full_name)"
+        )
         .eq("tenant_id", profile.tenant_id)
         .order("created_at", { ascending: false }),
     ];
@@ -63,7 +70,11 @@ export default function AttendancePage() {
         supabase.from("profiles").select("id, full_name").eq("tenant_id", profile.tenant_id).order("full_name")
       );
     }
-    const [{ data: attendanceData }, empResult] = await Promise.all(queries);
+    const [{ data: attendanceData, error: attendanceError }, empResult] = await Promise.all(queries);
+
+    if (attendanceError) {
+      console.error("Gagal memuat data kehadiran:", attendanceError.message);
+    }
 
     setRows(
       (attendanceData ?? []).map((r: any) => ({

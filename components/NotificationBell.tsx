@@ -21,6 +21,12 @@ interface ApprovalRow {
  * `review_approval_request()` di server, bukan update tabel `products`
  * langsung dari sini — supaya validasi "siapa boleh approve" tetap
  * ditegakkan di database, bukan cuma di UI.
+ *
+ * FIX: approval_requests punya 2 FK ke profiles (requested_by DAN
+ * reviewed_by), jadi embed "profiles(full_name)" polos ambigu bagi
+ * PostgREST ("more than one relationship was found") dan query gagal
+ * secara senyap (data selalu kosong, tidak ada error yang kelihatan
+ * di UI). Perbaikannya: kasih hint nama FK constraint-nya eksplisit.
  */
 export default function NotificationBell({ tenantId }: { tenantId: string }) {
   const [open, setOpen] = useState(false);
@@ -29,12 +35,19 @@ export default function NotificationBell({ tenantId }: { tenantId: string }) {
 
   async function loadRequests() {
     const supabase = createClient();
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("approval_requests")
-      .select("id, type, target_id, payload, created_at, profiles(full_name)")
+      .select(
+        "id, type, target_id, payload, created_at, profiles!approval_requests_requested_by_fkey(full_name)"
+      )
       .eq("tenant_id", tenantId)
       .eq("status", "pending")
       .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Gagal memuat pengajuan persetujuan:", error.message);
+      return;
+    }
 
     setRequests(
       (data ?? []).map((r: any) => ({
