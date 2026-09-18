@@ -33,6 +33,8 @@ export default function AttendancePage() {
   const [myId, setMyId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewData, setPreviewData] = useState<AttendanceRow | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ employee_id: "", type: "izin", date_start: "", date_end: "", reason: "" });
 
@@ -121,6 +123,11 @@ export default function AttendancePage() {
     loadData();
   }
 
+  function openPreview(row: AttendanceRow) {
+    setPreviewData(row);
+    setShowPreview(true);
+  }
+
   async function review(id: string, approve: boolean) {
     const supabase = createClient();
     const { error } = await supabase
@@ -131,6 +138,7 @@ export default function AttendancePage() {
       alert("Gagal memproses: " + error.message);
       return;
     }
+    setShowPreview(false);
     loadData();
   }
 
@@ -184,8 +192,7 @@ export default function AttendancePage() {
               <span className={STATUS_STYLE[r.status]}>{r.status}</span>
               {canReview && r.status === "pending" && (
                 <>
-                  <button onClick={() => review(r.id, true)} className="text-primary hover:bg-primary-light p-1.5 rounded-lg"><Check size={16} /></button>
-                  <button onClick={() => review(r.id, false)} className="text-urgent hover:bg-urgent-light p-1.5 rounded-lg"><X size={16} /></button>
+                  <button onClick={() => openPreview(r)} className="text-neutral-500 hover:text-neutral-700 hover:bg-neutral-100 p-1.5 rounded-lg" title="Lihat detail"><CalendarCheck size={16} /></button>
                 </>
               )}
             </div>
@@ -233,6 +240,56 @@ export default function AttendancePage() {
           <div>
             <label className="text-sm font-medium text-neutral-700 mb-1 block">Alasan</label>
             <textarea value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} className="input-field" rows={3} />
+          </div>
+        </Modal>
+      )}
+
+      {showPreview && previewData && (
+        <Modal
+          title="Detail Pengajuan"
+          onClose={() => setShowPreview(false)}
+          footer={
+            <div className="flex gap-2">
+              <button onClick={() => review(previewData.id, false)} className="btn-outline flex-1 flex items-center justify-center gap-2 text-urgent">
+                <X size={16} /> Tolak
+              </button>
+              <button onClick={() => review(previewData.id, true)} className="btn-primary flex-1 flex items-center justify-center gap-2">
+                <Check size={16} /> Setujui
+              </button>
+            </div>
+          }
+        >
+          <div className="space-y-4">
+            <div>
+              <p className="text-xs font-medium text-neutral-500 uppercase tracking-wider mb-1">Karyawan</p>
+              <p className="text-base font-semibold text-neutral-900">{previewData.employee_name || "—"}</p>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <p className="text-xs font-medium text-neutral-500 uppercase tracking-wider mb-1">Jenis</p>
+                <p className="text-base font-semibold text-neutral-900">{TYPE_LABEL[previewData.type] || previewData.type}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-neutral-500 uppercase tracking-wider mb-1">Status</p>
+                <span className={STATUS_STYLE[previewData.status]}>{previewData.status}</span>
+              </div>
+            </div>
+            <div>
+              <p className="text-xs font-medium text-neutral-500 uppercase tracking-wider mb-1">Tanggal</p>
+              <p className="text-base font-semibold text-neutral-900">
+                {previewData.date_start === previewData.date_end
+                  ? previewData.date_start
+                  : `${previewData.date_start} s/d ${previewData.date_end}`}
+              </p>
+            </div>
+            {previewData.reason && (
+              <div>
+                <p className="text-xs font-medium text-neutral-500 uppercase tracking-wider mb-2">Alasan</p>
+                <div className="bg-neutral-50 rounded-lg p-3 border border-neutral-100">
+                  <p className="text-sm text-neutral-700 whitespace-pre-wrap">{previewData.reason}</p>
+                </div>
+              </div>
+            )}
           </div>
         </Modal>
       )}
