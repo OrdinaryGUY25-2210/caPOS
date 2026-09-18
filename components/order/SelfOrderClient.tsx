@@ -35,6 +35,7 @@ export default function SelfOrderClient({
   tableCapacity,
   products,
   tenantId,
+  staticQrisUrl,
 }: {
   branchSlug: string;
   tableNumber: string;
@@ -44,6 +45,9 @@ export default function SelfOrderClient({
   /** Migrasi 020 — dipakai murni sebagai nama topik broadcast realtime
    * `products-<tenant_id>`, bukan untuk query apa pun ke tabel. */
   tenantId?: string;
+  /** URL publik QRIS statis milik owner (Storage bucket "menu-images",
+   * dicek di server component page.tsx). Null kalau owner belum unggah. */
+  staticQrisUrl?: string | null;
 }) {
   const [phase, setPhase] = useState<Phase>("menu");
   const [cart, setCart] = useState<QrCartItem[]>([]);
@@ -254,6 +258,7 @@ export default function SelfOrderClient({
           total={cartTotal}
           branchSlug={branchSlug}
           tableNumber={tableNumber}
+          staticQrisUrl={staticQrisUrl}
           onBack={() => setPhase("menu")}
           onSubmitted={(id) => {
             setTrackedQrOrderId(id);
@@ -440,6 +445,7 @@ function CheckoutView({
   total,
   branchSlug,
   tableNumber,
+  staticQrisUrl,
   onBack,
   onSubmitted,
 }: {
@@ -447,6 +453,7 @@ function CheckoutView({
   total: number;
   branchSlug: string;
   tableNumber: string;
+  staticQrisUrl?: string | null;
   onBack: () => void;
   onSubmitted: (qrOrderId: string) => void;
 }) {
@@ -483,7 +490,14 @@ function CheckoutView({
     const result = data[0] as { order_id: string; qr_order_id: string; order_number: string; total_amount: number };
     setQrOrderId(result.qr_order_id);
 
-    if (paymentMethod === "qris") {
+    if (paymentMethod === "qris" && staticQrisUrl) {
+      // Owner sudah unggah QRIS statis (lihat SelfOrderPage/page.tsx) —
+      // pakai itu langsung, TIDAK perlu charge Midtrans. Karena QRIS statis
+      // tidak ada webhook konfirmasi otomatis, pelanggan menekan tombol
+      // "Saya Sudah Bayar" sendiri (lihat render di bawah), lalu staf yang
+      // memverifikasi pembayaran — sama seperti alur "Bayar di Kasir".
+      setQrisImageUrl(staticQrisUrl);
+    } else if (paymentMethod === "qris") {
       // Minta QRIS dinamis dari server (Midtrans) — nominal dihitung
       // ulang di server dari total_amount hasil submit_qr_order, bukan
       // dari state lokal, supaya tidak bisa dimanipulasi dari browser.
@@ -529,11 +543,29 @@ function CheckoutView({
             </div>
           )}
           {errorMsg && <p className="text-xs text-urgent mt-3">{errorMsg}</p>}
-          <p className="text-xs text-neutral-400 mt-4">
-            Halaman ini otomatis lanjut begitu pembayaran terkonfirmasi.
-          </p>
+
+          {staticQrisUrl ? (
+            <>
+              <p className="text-xs text-neutral-400 mt-4 mb-3">
+                Scan lalu bayar sesuai nominal di atas. Setelah transfer berhasil, tekan tombol di bawah —
+                staf kami akan memverifikasi pembayaran Anda.
+              </p>
+              <button
+                onClick={() => onSubmitted(qrOrderId)}
+                className="w-full bg-primary text-white rounded-xl py-3 font-semibold text-sm"
+              >
+                Saya Sudah Bayar
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-xs text-neutral-400 mt-4">
+                Halaman ini otomatis lanjut begitu pembayaran terkonfirmasi.
+              </p>
+              <QrisPaymentWatcher qrOrderId={qrOrderId} onPaid={() => onSubmitted(qrOrderId)} />
+            </>
+          )}
         </div>
-        <QrisPaymentWatcher qrOrderId={qrOrderId} onPaid={() => onSubmitted(qrOrderId)} />
       </div>
     );
   }
