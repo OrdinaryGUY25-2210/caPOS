@@ -56,6 +56,16 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(new URL(roleHome[profile.role] ?? "/pos", request.url));
     }
 
+    // BARU — fix PWA "nyangkut" di /pos untuk role Dapur: manifest.json
+    // punya start_url tetap "/pos" untuk semua role, jadi kalau sesi login
+    // masih aktif, PWA langsung buka ke /pos tanpa pernah lewat "/"/"/login"
+    // di atas (redirect di atas jadi tidak pernah kepicu). Cek eksplisit di
+    // sini supaya kitchen-role yang mendarat di /pos tetap dilempar ke
+    // /kitchen, apa pun jalur masuknya.
+    if (profile?.role === "kitchen" && path.startsWith("/pos")) {
+      return NextResponse.redirect(new URL("/kitchen", request.url));
+    }
+
     // Guard cross-role access (super_admin bypasses all restrictions).
     // Saat memblokir, tambahkan query param `?access_denied=<path-tujuan>`
     // ke URL redirect — ini dibaca oleh komponen AccessDeniedNotice di sisi

@@ -15,6 +15,15 @@ import { Skeleton, SkeletonList } from "@/components/Skeleton";
 
 const JOB_TITLE_SUGGESTIONS = ["Kasir", "Barista", "Kasir Utama", "Asisten Manager"];
 
+/** Label singkat status order — dipakai di peringatan pesanan aktif sebelum nonaktifkan/hapus karyawan. */
+const ORDER_STATUS_LABEL: Record<string, string> = {
+  NEW: "Baru Masuk",
+  ACCEPTED: "Diterima Dapur",
+  PREPARING: "Sedang Disiapkan",
+  READY: "Siap Disajikan",
+  SERVED: "Sudah Disajikan, Belum Dibayar",
+};
+
 export default function EmployeesPage() {
   const { branches } = useBranch();
   const [employees, setEmployees] = useState<Profile[]>([]);
@@ -26,6 +35,15 @@ export default function EmployeesPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [limitReached, setLimitReached] = useState(false);
   const [reassigningId, setReassigningId] = useState<string | null>(null);
+  // BARU — peringatan pesanan aktif (KDS/belum dibayar) sebelum
+  // nonaktifkan/hapus karyawan, supaya Owner tahu dulu ada pesanan
+  // "menggantung" atas nama karyawan itu sebelum melanjutkan.
+  const [activeOrdersWarning, setActiveOrdersWarning] = useState<{
+    employee: Profile;
+    action: "deactivate" | "delete";
+    orders: { order_number: string; status: string; table_number: string | null }[];
+  } | null>(null);
+  const [checkingOrders, setCheckingOrders] = useState<string | null>(null);
   const [form, setForm] = useState({
     full_name: "", email: "", password: "", confirmPassword: "", role: "cashier", jobTitle: "", branchId: "",
   });
@@ -123,15 +141,56 @@ export default function EmployeesPage() {
     setEmployees((prev) => prev.map((e) => (e.id === empId ? { ...e, branch_id: branchId } : e)));
   }
 
-  async function toggleActive(emp: Profile) {
+  /** Cari pesanan yang belum selesai (KDS) ATAU belum dibayar (bill terbuka) atas nama karyawan ini — status apa pun selain COMPLETED/CANCELLED. */
+  async function findActiveOrders(employeeId: string) {
     const supabase = createClient();
+    const { data } = await supabase
+      .from("orders")
+      .select("order_number, status, table_number")
+      .eq("cashier_id", employeeId)
+      .not("status", "in", "(COMPLETED,CANCELLED)")
+      .order("created_at", { ascending: false });
+    return data ?? [];
+  }
+
+  async function toggleActive(emp: Profile) {
     const next = !emp.is_active;
+
+    // Cuma cek pesanan aktif kalau arahnya MENONAKTIFKAN (bukan
+    // mengaktifkan lagi) — kalau sudah nonaktif lalu diaktifkan lagi,
+    // tidak ada yang perlu diperingatkan.
+    if (!next) {
+      setCheckingOrders(emp.id);
+      const orders = await findActiveOrders(emp.id);
+      setCheckingOrders(null);
+      if (orders.length > 0) {
+        setActiveOrdersWarning({ employee: emp, action: "deactivate", orders });
+        return;
+      }
+    }
+
+    await applyToggleActive(emp, next);
+  }
+
+  async function applyToggleActive(emp: Profile, next: boolean) {
+    const supabase = createClient();
     setEmployees((prev) => prev.map((e) => (e.id === emp.id ? { ...e, is_active: next } : e)));
     const { error } = await supabase.from("profiles").update({ is_active: next }).eq("id", emp.id);
     if (error) setEmployees((prev) => prev.map((e) => (e.id === emp.id ? { ...e, is_active: !next } : e)));
   }
 
-  async function removeEmployee(id: string) {
+  async function removeEmployee(emp: Profile) {
+    setCheckingOrders(emp.id);
+    const orders = await findActiveOrders(emp.id);
+    setCheckingOrders(null);
+    if (orders.length > 0) {
+      setActiveOrdersWarning({ employee: emp, action: "delete", orders });
+      return;
+    }
+    await applyRemoveEmployee(emp.id);
+  }
+
+  async function applyRemoveEmployee(id: string) {
     if (!confirm("Hapus akun karyawan ini secara permanen?")) return;
     const res = await fetch(`/api/employees?id=${id}`, { method: "DELETE" });
     if (res.ok) {
@@ -218,11 +277,11 @@ export default function EmployeesPage() {
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <button onClick={() => toggleActive(e)} className={e.is_active ? "badge-active" : "badge-urgent"}>
-                {e.is_active ? "Active" : "Nonaktif"}
+              <button onClick={() => toggleActive(e)} disabled={checkingOrders === e.id} className={e.is_active ? "badge-active" : "badge-urgent"}>
+                {checkingOrders === e.id ? "Mengecek..." : e.is_active ? "Active" : "Nonaktif"}
               </button>
               {isOwner && (
-                <button onClick={() => removeEmployee(e.id)} className="text-neutral-300 hover:text-urgent">
+                <button onClick={() => removeEmployee(e)} disabled={checkingOrders === e.id} className="text-neutral-300 hover:text-urgent disabled:opacity-50">
                   <Trash2 size={16} />
                 </button>
               )}
@@ -231,6 +290,49 @@ export default function EmployeesPage() {
         ))}
         {employees.length === 0 && <p className="p-6 text-center text-neutral-400 text-sm">Belum ada akun karyawan.</p>}
       </div>
+
+      {/* BARU — peringatan pesanan aktif sebelum nonaktifkan/hapus karyawan */}
+      {activeOrdersWarning && (
+        <Modal
+          title="Masih Ada Pesanan Aktif"
+          onClose={() => setActiveOrdersWarning(null)}
+          footer={
+            <div className="flex gap-2 w-full">
+              <button onClick={() => setActiveOrdersWarning(null)} className="btn-outline flex-1">
+                Batal
+              </button>
+              <button
+                onClick={() => {
+                  const { employee, action } = activeOrdersWarning;
+                  setActiveOrdersWarning(null);
+                  if (action === "deactivate") applyToggleActive(employee, false);
+                  else applyRemoveEmployee(employee.id);
+                }}
+                className="btn-primary flex-1 !bg-urgent hover:!bg-red-600"
+              >
+                {activeOrdersWarning.action === "deactivate" ? "Tetap Nonaktifkan" : "Tetap Hapus"}
+              </button>
+            </div>
+          }
+        >
+          <p className="text-sm text-neutral-600 mb-3">
+            <strong>{activeOrdersWarning.employee.full_name}</strong> masih tercatat sebagai kasir di{" "}
+            {activeOrdersWarning.orders.length} pesanan yang belum selesai/belum dibayar. Pesanan ini tetap bisa
+            diselesaikan kasir lain di cabang yang sama, tapi sebaiknya dicek dulu:
+          </p>
+          <div className="space-y-2 max-h-64 overflow-y-auto">
+            {activeOrdersWarning.orders.map((o) => (
+              <div key={o.order_number} className="flex items-center justify-between bg-neutral-50 rounded-lg px-3 py-2 text-sm">
+                <div>
+                  <p className="font-medium text-neutral-900">#{o.order_number}</p>
+                  <p className="text-xs text-neutral-400">{o.table_number ? `Meja ${o.table_number}` : "Tanpa meja"}</p>
+                </div>
+                <span className="badge-active text-xs">{ORDER_STATUS_LABEL[o.status] ?? o.status}</span>
+              </div>
+            ))}
+          </div>
+        </Modal>
+      )}
 
       {showForm && (
         <Modal

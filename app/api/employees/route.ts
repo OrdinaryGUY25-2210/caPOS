@@ -154,7 +154,22 @@ export async function DELETE(request: Request) {
 
   const { error } = await supabase.auth.admin.deleteUser(employeeId);
   if (error) {
-    return NextResponse.json({ message: "Gagal menghapus akun karyawan." }, { status: 500 });
+    // BARU — pesan generik lama ("Gagal menghapus akun karyawan.") tidak
+    // menjelaskan penyebabnya sama sekali. Penyebab paling umum: profil
+    // ini sudah direferensikan puluhan tabel lain (transactions, shifts,
+    // orders, audit_log, dst — semua REFERENCES profiles(id) TANPA ON
+    // DELETE CASCADE/SET NULL, lihat schema.sql & migration_013/014/015),
+    // jadi Postgres menolak hapus baris profiles-nya demi menjaga riwayat
+    // transaksi lama tidak jadi yatim. Error asli tetap dicatat di server
+    // (bukan dikirim ke client) untuk keperluan debug.
+    console.error("Gagal hapus karyawan (auth.admin.deleteUser):", employeeId, error);
+    return NextResponse.json(
+      {
+        message:
+          'Tidak bisa dihapus permanen — karyawan ini kemungkinan besar sudah punya riwayat transaksi/shift yang harus tetap tersimpan. Gunakan tombol "Nonaktifkan" di daftar karyawan untuk mencabut aksesnya tanpa menghapus riwayat.',
+      },
+      { status: 409 }
+    );
   }
 
   return NextResponse.json({ success: true });
