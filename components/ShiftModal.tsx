@@ -151,8 +151,25 @@ export default function ShiftModal({
   // --- Tampilan setelah shift berhasil ditutup: Laporan Selisih Kas ---
   if (closedResult) {
     const isBalanced = closedResult.difference === 0;
+
+    // BUG FIX: sebelumnya tombol "Tutup"/X di layar ini langsung memanggil
+    // `onClosed` tanpa mereset state lokal `closedResult`/`summary`. Di
+    // /pos/page.tsx, kondisi render modal adalah `(showShiftModal || !shiftId)`
+    // — begitu `onClosed` men-set shiftId ke null, kondisi itu TETAP true
+    // (karena !shiftId jadi true), jadi <ShiftModal> tidak pernah unmount dan
+    // React mempertahankan state lama komponen ini. Akibatnya `closedResult`
+    // masih terisi, layar "Laporan Selisih Kas" langsung muncul lagi — kelihatan
+    // seperti tombol Tutup/X macet, padahal berjalan tapi kembali ke layar yang
+    // sama terus-menerus. Reset dulu di sini supaya tidak tergantung perilaku
+    // mount/unmount di parent.
+    function handleAcknowledge() {
+      setClosedResult(null);
+      setSummary(null);
+      onClosed();
+    }
+
     return (
-      <Modal title="Laporan Selisih Kas (Z-Report)" onClose={onClosed} footer={<button onClick={onClosed} className="btn-primary w-full">Tutup</button>}>
+      <Modal title="Laporan Selisih Kas (Z-Report)" onClose={handleAcknowledge} footer={<button onClick={handleAcknowledge} className="btn-primary w-full">Tutup</button>}>
         <div className="text-center py-2">
           {isBalanced ? (
             <CheckCircle2 className="mx-auto text-emerald-600 mb-2" size={40} />
