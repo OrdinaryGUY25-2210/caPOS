@@ -7,6 +7,7 @@ import { Save, AlertTriangle, Loader2, ImagePlus, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { compressImage } from "@/lib/compressImage";
+import { db } from "@/lib/dexie";
 import Modal from "@/components/Modal";
 import { Skeleton } from "@/components/Skeleton";
 
@@ -54,17 +55,6 @@ export default function SettingsPage() {
   const [logoError, setLogoError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // --- QRIS Statis (Storage juga, pola sama persis dengan logo di atas).
-  // Ditampilkan ke pelanggan di halaman QR Self-Order (/order/[cabang]/[meja])
-  // saat mereka memilih metode bayar "QRIS / E-Wallet" — dipakai langsung
-  // tanpa lewat Midtrans, jadi tenant yang belum/tidak pakai Midtrans tetap
-  // bisa menerima pembayaran QRIS mandiri dari pelanggan yang self-serve
-  // di meja. Path tetap `${tenant_id}/qris-code.jpg`.
-  const [qrisUrl, setQrisUrl] = useState<string | null>(null);
-  const [qrisUploading, setQrisUploading] = useState(false);
-  const [qrisError, setQrisError] = useState<string | null>(null);
-  const qrisFileInputRef = useRef<HTMLInputElement>(null);
-
   // --- Zona Berbahaya: Hapus Akun (Owner only) ---
   const [isOwner, setIsOwner] = useState(false);
   const [cafeName, setCafeName] = useState("");
@@ -85,16 +75,6 @@ export default function SettingsPage() {
       setLogoUrl(`${data.publicUrl}?v=${Date.now()}`);
     } else {
       setLogoUrl(null);
-    }
-  }
-
-  async function refreshQris(supabase: ReturnType<typeof createClient>, tid: string) {
-    const { data: files } = await supabase.storage.from("menu-images").list(tid, { search: "qris-code" });
-    if (files && files.length > 0) {
-      const { data } = supabase.storage.from("menu-images").getPublicUrl(`${tid}/qris-code.jpg`);
-      setQrisUrl(`${data.publicUrl}?v=${Date.now()}`);
-    } else {
-      setQrisUrl(null);
     }
   }
 
@@ -128,7 +108,6 @@ export default function SettingsPage() {
       }
 
       await refreshLogo(supabase, profile.tenant_id);
-      await refreshQris(supabase, profile.tenant_id);
       setLoading(false);
     })();
   }, []);
@@ -213,56 +192,6 @@ export default function SettingsPage() {
     setLogoUploading(false);
   }
 
-  async function handleQrisUpload(file: File) {
-    if (!tenantId) return;
-    setQrisError(null);
-
-    if (!file.type.startsWith("image/")) {
-      setQrisError("File harus berupa gambar (PNG/JPG/WebP).");
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      setQrisError("Ukuran file maksimal 5MB.");
-      return;
-    }
-
-    setQrisUploading(true);
-    try {
-      // Dipaksa JPEG & dimensi lebih besar dari logo (kode QR butuh detail
-      // lebih tajam supaya tetap bisa discan setelah dikompres).
-      const compressed = await compressImage(file, { format: "jpeg", maxDimension: 800, maxSizeKB: 300 });
-      const supabase = createClient();
-      const { error } = await supabase.storage
-        .from("menu-images")
-        .upload(`${tenantId}/qris-code.jpg`, compressed, { upsert: true, contentType: "image/jpeg" });
-
-      if (error) {
-        setQrisError("Upload gagal: " + error.message);
-        setQrisUploading(false);
-        return;
-      }
-
-      await refreshQris(supabase, tenantId);
-    } catch {
-      setQrisError("Gagal memproses gambar. Coba file lain.");
-    }
-    setQrisUploading(false);
-  }
-
-  async function handleQrisRemove() {
-    if (!tenantId) return;
-    setQrisUploading(true);
-    setQrisError(null);
-    const supabase = createClient();
-    const { error } = await supabase.storage.from("menu-images").remove([`${tenantId}/qris-code.jpg`]);
-    if (error) {
-      setQrisError("Gagal menghapus QRIS: " + error.message);
-    } else {
-      setQrisUrl(null);
-    }
-    setQrisUploading(false);
-  }
-
   async function handleDeleteAccount() {
     setDeleteError(null);
     setDeleting(true);
@@ -275,6 +204,15 @@ export default function SettingsPage() {
         setDeleting(false);
         return;
       }
+
+      // Bersihkan cache offline (IndexedDB) di device ini juga — ditulis
+      // ulang belaka lewat /pos next login (lihat fix di app/pos/page.tsx)
+      // seharusnya sudah cukup, tapi dibersihkan langsung di sini supaya
+      // tidak ada jeda sama sekali kalau device yang sama nanti dipakai
+      // login akun tenant lain (bukan cuma daftar ulang tenant yang sama).
+      await db.products.clear().catch(() => {});
+      await db.memberships.clear().catch(() => {});
+      await db.pendingTransactions.clear().catch(() => {});
 
       await createClient().auth.signOut().catch(() => {});
       router.push("/register");
@@ -356,62 +294,6 @@ export default function SettingsPage() {
               }}
             />
             {logoError && <p className="text-xs text-urgent">{logoError}</p>}
-          </div>
-        </div>
-      </div>
-
-      <div className="card p-5 space-y-4">
-        <h2 className="font-semibold text-neutral-900 text-sm">QRIS Pembayaran</h2>
-        <p className="text-xs text-neutral-500 -mt-2">
-          Unggah foto/screenshot kode QRIS milik kafe (dari aplikasi bank/e-wallet Anda). Kode ini akan
-          ditampilkan ke pelanggan di halaman pesan-sendiri lewat QR meja saat mereka memilih bayar
-          &quot;QRIS / E-Wallet&quot;, supaya bisa langsung scan &amp; bayar dari HP mereka. Format PNG/JPG/WebP,
-          maksimal 5MB.
-        </p>
-        <div className="flex items-center gap-4">
-          <div className="w-24 h-24 rounded-xl border border-neutral-200 bg-neutral-50 flex items-center justify-center overflow-hidden shrink-0">
-            {qrisUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={qrisUrl} alt="Kode QRIS" className="w-full h-full object-contain" />
-            ) : (
-              <ImagePlus size={22} className="text-neutral-300" />
-            )}
-          </div>
-          <div className="flex flex-col gap-2">
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => qrisFileInputRef.current?.click()}
-                disabled={qrisUploading}
-                className="btn-outline text-sm py-1.5 px-3 flex items-center gap-1.5 disabled:opacity-60"
-              >
-                {qrisUploading ? <Loader2 size={14} className="animate-spin" /> : <ImagePlus size={14} />}
-                {qrisUrl ? "Ganti QRIS" : "Unggah QRIS"}
-              </button>
-              {qrisUrl && (
-                <button
-                  type="button"
-                  onClick={handleQrisRemove}
-                  disabled={qrisUploading}
-                  className="text-sm py-1.5 px-3 rounded-xl text-urgent border border-urgent/30 hover:bg-urgent-light flex items-center gap-1.5 disabled:opacity-60"
-                >
-                  <Trash2 size={14} />
-                  Hapus
-                </button>
-              )}
-            </div>
-            <input
-              ref={qrisFileInputRef}
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) handleQrisUpload(file);
-                e.target.value = "";
-              }}
-            />
-            {qrisError && <p className="text-xs text-urgent">{qrisError}</p>}
           </div>
         </div>
       </div>

@@ -1,9 +1,11 @@
 "use client";
 
+import { useEffect } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { Lock, MessageCircle } from "lucide-react";
 import { whatsappLink } from "@/lib/utils";
+import { startBackgroundSyncListener } from "@/lib/offlineSync";
 
 /**
  * Auto-Cutoff (Modul Subscription SaaS, requirement #1) — komponen BARU
@@ -18,6 +20,12 @@ import { whatsappLink } from "@/lib/utils";
  *
  * /dashboard/subscription SENGAJA dikecualikan dari blokir supaya Owner
  * yang sudah expired tetap bisa membuka halaman itu untuk membayar.
+ *
+ * BUG FIX (sinkronisasi offline): komponen ini juga jadi tempat paling
+ * pas untuk memasang startBackgroundSyncListener() SEKALI untuk seluruh
+ * aplikasi — karena membungkus /pos MAUPUN /dashboard, sinkronisasi
+ * transaksi kasir & perubahan menu yang tertunda tetap jalan otomatis
+ * begitu koneksi kembali, di halaman mana pun pengguna berada saat itu.
  */
 export default function SubscriptionCutoffGate({
   status,
@@ -32,6 +40,8 @@ export default function SubscriptionCutoffGate({
   const pathname = usePathname();
   const isSubscriptionPage = pathname?.startsWith("/dashboard/subscription");
   const isExpired = status === "expired";
+
+  useEffect(() => startBackgroundSyncListener(), []);
 
   if (!isExpired || isSubscriptionPage) {
     return <>{children}</>;

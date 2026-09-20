@@ -227,7 +227,15 @@ export default function PosPage() {
         setKitchenStations((stationRows as KitchenStation[]) ?? []);
       }
 
-      const cached = await db.products.toArray();
+      // BUG FIX: sebelumnya `db.products.toArray()` mengambil SEMUA baris
+      // di IndexedDB tanpa filter tenant. IndexedDB hidup di browser,
+      // lepas dari sesi login — jadi kalau device ini pernah dipakai oleh
+      // tenant lain (mis. Owner hapus akun lalu daftar ulang, atau device
+      // kios dipakai gonta-ganti kafe), menu tenant LAMA ikut nongol di
+      // /pos tenant yang BARU walau di /dashboard (baca langsung dari
+      // Supabase) sudah bersih. Filter di sini supaya cache yang dibaca
+      // hanya milik tenant yang sedang login.
+      const cached = await db.products.where("tenant_id").equals(profile.tenant_id).toArray();
       if (cached.length > 0) setProducts(cached);
 
       // Muat data kafe (nama/alamat/WiFi/lebar kertas) untuk struk.
@@ -273,7 +281,16 @@ export default function PosPage() {
           .select("*")
           .eq("tenant_id", profile.tenant_id);
 
-        if (data && data.length > 0) {
+        // BUG FIX: kondisi lama `data && data.length > 0` membuat cache
+        // IndexedDB HANYA ditulis ulang kalau tenant punya >=1 produk.
+        // Begitu tenant baru (mis. hasil daftar ulang setelah hapus akun)
+        // memang wajar 0 produk, blok ini dilewati sepenuhnya, dan cache
+        // lama milik tenant SEBELUMNYA di device ini tidak pernah
+        // dibersihkan — nyangkut sampai kapan pun. `data !== null` di sini
+        // artinya "fetch ke Supabase berhasil" (baik hasilnya 0 atau
+        // banyak baris), beda dari fetch yang gagal/offline (ditangani di
+        // blok catch di bawah, cache lama sengaja TIDAK disentuh di sana).
+        if (data) {
           // Sejak migration_011, stok per menu dibaca dari branch_stock
           // (cabang tempat kasir ini bertugas) — BUKAN lagi
           // products.stock_qty (legacy, tidak lagi diperbarui). Kalau
@@ -296,8 +313,14 @@ export default function PosPage() {
             );
           }
           setProducts(merged);
-          await db.products.clear();
-          await db.products.bulkPut(merged as Product[]);
+          // Hapus cache lama milik tenant ini SAJA (bukan .clear() yang
+          // membabat cache SEMUA tenant yang pernah login di device ini —
+          // relevan untuk device kios yang gonta-ganti tenant), lalu tulis
+          // ulang dengan data terbaru. Tetap jalan walau `merged` kosong
+          // (tenant baru/menu belum diisi), supaya cache basi tidak pernah
+          // nyangkut lagi seperti kasus sebelumnya.
+          await db.products.where("tenant_id").equals(profile.tenant_id).delete();
+          if (merged.length > 0) await db.products.bulkPut(merged as Product[]);
         } else if (cached.length === 0) {
           setProducts(FALLBACK_PRODUCTS);
         }
