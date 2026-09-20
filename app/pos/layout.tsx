@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import SubscriptionCutoffGate from "@/components/SubscriptionCutoffGate";
 import { createClient } from "@/lib/supabase/server";
 
@@ -18,9 +19,18 @@ export default async function PosLayout({ children }: { children: React.ReactNod
   if (user) {
     const { data: profile } = await supabase
       .from("profiles")
-      .select("tenant_id")
+      .select("tenant_id, is_active")
       .eq("id", user.id)
       .single();
+
+    // BUG FIX — sebelumnya tombol "Nonaktifkan" di /dashboard/employees
+    // cuma mengubah kolom `profiles.is_active` tanpa pernah benar-benar
+    // dicek di mana pun, jadi karyawan yang sudah "dinonaktifkan" tetap
+    // bisa login & pakai /pos seperti biasa. Dicek di sini (server-side,
+    // di setiap load /pos) supaya tidak bisa dilewati dari client.
+    if (profile && profile.is_active === false) {
+      redirect("/login?deactivated=1");
+    }
 
     if (profile?.tenant_id) {
       const { data: subscription } = await supabase

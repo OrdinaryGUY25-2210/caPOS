@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import DashboardShell from "@/components/DashboardShell";
 import SubscriptionCutoffGate from "@/components/SubscriptionCutoffGate";
 import { createClient } from "@/lib/supabase/server";
@@ -17,9 +18,17 @@ export default async function DashboardLayout({ children }: { children: React.Re
   if (user) {
     const { data: profile } = await supabase
       .from("profiles")
-      .select("tenant_id")
+      .select("tenant_id, role, is_active")
       .eq("id", user.id)
       .single();
+
+    // BUG FIX — sama seperti app/pos/layout.tsx: "Nonaktifkan" karyawan
+    // sebelumnya tidak pernah benar-benar dicek. Owner sendiri sengaja
+    // TIDAK PERNAH is_active=false (tidak ada tombol nonaktifkan diri
+    // sendiri), jadi pengecekan ini murni menyasar manager yang dinonaktifkan.
+    if (profile && profile.is_active === false) {
+      redirect("/login?deactivated=1");
+    }
 
     if (profile?.tenant_id) {
       const { data: subscription } = await supabase
