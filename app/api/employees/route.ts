@@ -115,7 +115,7 @@ export async function POST(request: Request) {
 
     if (profileError.message.includes("FREE_TIER_CASHIER_LIMIT")) {
       return NextResponse.json(
-        { message: "Paket Free Trial maksimal 2 akun karyawan tambahan. Upgrade ke Pro untuk tambah karyawan.", reason: "FREE_TIER_CASHIER_LIMIT" },
+        { message: "Paket Free Trial maksimal 2 akun karyawan aktif. Nonaktifkan karyawan lama atau upgrade ke Pro untuk tambah karyawan.", reason: "FREE_TIER_CASHIER_LIMIT" },
         { status: 403 }
       );
     }

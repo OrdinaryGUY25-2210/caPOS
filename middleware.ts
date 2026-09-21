@@ -39,9 +39,21 @@ export async function middleware(request: NextRequest) {
   if (user) {
     const { data: profile } = await supabase
       .from("profiles")
-      .select("role")
+      .select("role, is_active")
       .eq("id", user.id)
       .single();
+
+    // BUG FIX (ERR_TOO_MANY_REDIRECTS untuk akun yang dinonaktifkan):
+    // sebelumnya blok ini cuma cek `profile?.role`, tidak pernah cek
+    // `is_active`. Akibatnya: /pos atau /dashboard layout.tsx melempar
+    // akun nonaktif ke /login?deactivated=1 (sesi Supabase masih valid
+    // sesaat sebelum sign-out client-side selesai) -> middleware ini
+    // melihat masih ada `user` + `role` lalu langsung melempar BALIK ke
+    // /pos -> /pos menolak lagi -> lempar ke /login lagi -> looping
+    // selamanya. Sekarang: akun yang is_active === false TIDAK ikut
+    // dilempar "pulang" dari /login, supaya dia bisa mendarat dengan
+    // tenang di halaman login dan lihat pesan alasannya.
+    const isDeactivated = profile?.is_active === false;
 
     const roleHome: Record<string, string> = {
       super_admin: "/admin",
@@ -52,8 +64,20 @@ export async function middleware(request: NextRequest) {
     };
 
     // Redirect logged-in users away from login/register to their home
-    if ((path === "/" || path === "/login" || path === "/register") && profile?.role) {
+    // (KECUALI akun yang sudah dinonaktifkan — lihat catatan di atas).
+    if ((path === "/" || path === "/login" || path === "/register") && profile?.role && !isDeactivated) {
       return NextResponse.redirect(new URL(roleHome[profile.role] ?? "/pos", request.url));
+    }
+
+    // Akun nonaktif mencoba buka halaman mana pun SELAIN /login (dan path
+    // publik lain): lempar ke /login?deactivated=1 di sini juga (bukan
+    // cuma di /pos & /dashboard layout.tsx) supaya /kitchen dan /admin
+    // ikut terlindungi, dan supaya pengecekan ini konsisten terjadi di
+    // SATU tempat sebelum request sampai ke layout mana pun. `isPublic`
+    // sudah mencakup "/login" (lihat definisi di atas), jadi cukup satu
+    // syarat ini saja.
+    if (isDeactivated && !isPublic) {
+      return NextResponse.redirect(new URL("/login?deactivated=1", request.url));
     }
 
     // BARU — fix PWA "nyangkut" di /pos untuk role Dapur: manifest.json

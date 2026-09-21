@@ -71,7 +71,8 @@ export default function EmployeesPage() {
     loadEmployees();
   }, []);
 
-  const atLimit = tier === "free" && employees.length >= FREE_TIER_LIMITS.maxCashiers;
+  const activeEmployeeCount = employees.filter((e) => e.is_active !== false).length;
+  const atLimit = tier === "free" && activeEmployeeCount >= FREE_TIER_LIMITS.maxCashiers;
 
   function openForm() {
     if (atLimit) {
@@ -224,7 +225,14 @@ export default function EmployeesPage() {
           <h1 className="text-xl font-bold text-neutral-900">Manajemen Karyawan</h1>
           <p className="text-sm text-neutral-500">
             Satu-satunya tempat untuk membuat & mengelola akun Admin, Supervisor, Kasir, dan Dapur
-            {tier === "free" && <> — {employees.length}/{FREE_TIER_LIMITS.maxCashiers} karyawan terpakai (paket {TIER_LABEL.free})</>}
+            {/* BUG FIX (permintaan produk): sebelumnya kuota Free Trial
+                menghitung SEMUA karyawan termasuk yang sudah dinonaktifkan
+                — jadi Owner tidak pernah bisa tambah karyawan baru lagi
+                walau staf lama sudah resign & dinonaktifkan, kecuali
+                upgrade paket. Sekarang cuma karyawan AKTIF yang dihitung,
+                karena karyawan nonaktif memang sudah tidak "memakai slot"
+                (tidak bisa login sama sekali lagi sejak fix is_active). */}
+            {tier === "free" && <> — {activeEmployeeCount}/{FREE_TIER_LIMITS.maxCashiers} karyawan aktif (paket {TIER_LABEL.free})</>}
           </p>
         </div>
         {isOwner && (
@@ -237,7 +245,7 @@ export default function EmployeesPage() {
       {limitReached && (
         <div className="card p-4 flex items-center justify-between gap-3 border-warning bg-warning-light">
           <p className="text-sm text-neutral-800">
-            Paket {TIER_LABEL.free} maksimal {FREE_TIER_LIMITS.maxCashiers} akun karyawan tambahan. Upgrade ke Pro untuk unlimited.
+            Paket {TIER_LABEL.free} maksimal {FREE_TIER_LIMITS.maxCashiers} akun karyawan aktif. Nonaktifkan karyawan lama atau upgrade ke Pro untuk tambah karyawan.
           </p>
           <Link href="/dashboard/subscription" className="btn-primary text-sm whitespace-nowrap">Lihat Paket</Link>
         </div>

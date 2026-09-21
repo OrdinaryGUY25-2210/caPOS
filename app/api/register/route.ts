@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { generateReferralCode } from "@/lib/generateReferralCode";
+import { rateLimitOrNull } from "@/lib/rateLimit";
 
 function serviceClient() {
   return createSupabaseClient(
@@ -21,21 +22,6 @@ function anonClient() {
   );
 }
 
-const RATE_LIMIT_WINDOW_MS = 60_000;
-const RATE_LIMIT_MAX_ATTEMPTS = 5;
-const attempts = new Map<string, { count: number; windowStart: number }>();
-
-function isRateLimited(ip: string) {
-  const now = Date.now();
-  const entry = attempts.get(ip);
-  if (!entry || now - entry.windowStart > RATE_LIMIT_WINDOW_MS) {
-    attempts.set(ip, { count: 1, windowStart: now });
-    return false;
-  }
-  entry.count += 1;
-  return entry.count > RATE_LIMIT_MAX_ATTEMPTS;
-}
-
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SAFE_TEXT_RE = /^[\p{L}\p{N}\s.,'&()-]{2,80}$/u;
 const REFERRAL_CODE_RE = /^[A-Z0-9]{4,12}$/;
@@ -46,14 +32,14 @@ function sanitize(input: unknown, max = 200) {
 }
 
 export async function POST(request: Request) {
-  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-
-  if (isRateLimited(ip)) {
-    return NextResponse.json(
-      { message: "Terlalu banyak percobaan. Coba lagi dalam 1 menit." },
-      { status: 429 }
-    );
-  }
+  // BUG FIX (evaluasi audit): sebelumnya endpoint ini punya rate limiter
+  // sendiri (in-memory Map lokal, tanpa pembersihan berkala) yang
+  // terpisah dari lib/rateLimit.ts yang sudah dipakai endpoint publik
+  // lain (qris-charge, notification). Disatukan ke sini — perilakunya
+  // sama (5x/menit per IP), tapi sekarang konsisten & otomatis
+  // dibersihkan (lihat sweep() di lib/rateLimit.ts).
+  const limited = rateLimitOrNull(request, "register", { limit: 5, windowMs: 60_000 });
+  if (limited) return limited;
 
   let body: Record<string, unknown>;
   try {
@@ -213,14 +199,34 @@ export async function POST(request: Request) {
     );
   }
 
-  // 6. Create owner profile
-  await supabase.from("profiles").insert({
+  // 6. Create owner profile.
+  // BUG FIX (evaluasi audit): sebelumnya insert ini tidak dicek error-nya
+  // sama sekali — kalau gagal (race condition, constraint, dsb), auth
+  // user & tenant sudah terlanjur dibuat tapi profilnya tidak ada, dan
+  // response TETAP bilang { success: true } ke pengguna. Hasilnya akun
+  // "setengah jadi": tidak pernah bisa login normal (getCurrentProfile()
+  // akan selalu null), padahal pengguna sudah diberi tahu pendaftaran
+  // berhasil. Sekarang: kalau gagal, bersihkan semua yang sudah terlanjur
+  // dibuat (auth user + tenant, sama seperti jalur gagal lain di atas)
+  // dan beri tahu pengguna dengan jujur supaya mereka coba daftar ulang,
+  // bukan menunggu email verifikasi yang tidak akan pernah berguna.
+  const { error: profileError } = await supabase.from("profiles").insert({
     id: authUser.user.id,
     tenant_id: tenant.id,
     role: "owner",
     full_name: ownerName,
     email,
   });
+
+  if (profileError) {
+    console.error("owner profile insert failed", profileError);
+    await supabase.auth.admin.deleteUser(authUser.user.id).catch(() => {});
+    await supabase.from("tenants").delete().eq("id", tenant.id);
+    return NextResponse.json(
+      { message: "Pendaftaran gagal menyimpan data akun. Silakan coba lagi." },
+      { status: 500 }
+    );
+  }
 
   return NextResponse.json({
     success: true,
