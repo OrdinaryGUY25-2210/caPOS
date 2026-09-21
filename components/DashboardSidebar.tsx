@@ -24,6 +24,7 @@ import {
   Building2,
   ClipboardList,
   QrCode,
+  ScanLine,
   CalendarClock,
   Bike,
   Percent,
@@ -111,6 +112,7 @@ const NAV_GROUPS: { label: string; items: { href: string; label: string; icon: a
     label: "Operasional & Channel",
     items: [
       { href: "/dashboard/qr-tables", label: "QR Meja & Self-Order", icon: QrCode },
+      { href: "/dashboard/qris-dinamis", label: "QRIS Dinamis (Kasir)", icon: ScanLine },
       { href: "/dashboard/reservations", label: "Reservasi Meja", icon: CalendarClock },
       { href: "/dashboard/online-orders", label: "Online Order Hub", icon: Bike },
       { href: "/dashboard/channel-pricing", label: "Harga per Kanal", icon: Percent },

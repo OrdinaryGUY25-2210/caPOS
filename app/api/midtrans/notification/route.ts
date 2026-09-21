@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { PLANS } from "@/lib/midtransPlans";
 import { rateLimitOrNull } from "@/lib/rateLimit";
+import { createMidtransCoreApi, POS_QRIS_ORDER_PREFIX, mapMidtransTransactionStatus } from "@/lib/midtransCore";
 
 function serviceClient() {
   return createSupabaseClient(
@@ -43,6 +44,15 @@ export async function POST(request: Request) {
   // di sini sebelum masuk ke logika langganan di bawah.
   if (typeof order_id === "string" && order_id.startsWith("QRORDER-")) {
     return handleQrOrderNotification(body);
+  }
+
+  // BARU — QRIS Dinamis kasir POS (Owner Settings, per-cabang). Order ID
+  // selalu diberi prefix "POS-" saat dibuat (lihat app/api/pos/qris-charge).
+  // Dicabangkan di sini SEBELUM baris `serverKey` di bawah karena transaksi
+  // ini TIDAK memakai MIDTRANS_SERVER_KEY platform sama sekali — signature-nya
+  // wajib dicocokkan pakai Server Key milik cabang yang membuat charge ini.
+  if (typeof order_id === "string" && order_id.startsWith(POS_QRIS_ORDER_PREFIX)) {
+    return handlePosQrisNotification(body);
   }
 
   const serverKey = process.env.MIDTRANS_SERVER_KEY;
@@ -205,6 +215,78 @@ async function handleQrOrderNotification(body: Record<string, unknown>) {
     console.error("mark_qr_order_paid gagal:", error);
     return NextResponse.json({ message: "Gagal memperbarui status pesanan." }, { status: 500 });
   }
+
+  return NextResponse.json({ message: "OK" });
+}
+
+/**
+ * Cabang khusus notifikasi QRIS Dinamis kasir POS (Owner Settings).
+ * TERISOLASI TOTAL dari langganan platform & QRORDER-: ditulis ke tabel
+ * `pos_qris_payments` yang baru, dan signature-nya diverifikasi memakai
+ * `branches.midtrans_server_key` milik CABANG PEMILIK transaksi ini
+ * (dilihat dari order_id -> baris pos_qris_payments -> branch_id), bukan
+ * MIDTRANS_SERVER_KEY platform — karena tiap cabang punya key sendiri.
+ */
+async function handlePosQrisNotification(body: Record<string, unknown>) {
+  const { order_id, status_code, gross_amount, signature_key, transaction_status, fraud_status } = body as {
+    order_id: string;
+    status_code: string;
+    gross_amount: string;
+    signature_key: string;
+    transaction_status: string;
+    fraud_status?: string;
+  };
+
+  const svc = serviceClient();
+
+  const { data: payment } = await svc
+    .from("pos_qris_payments")
+    .select("id, branch_id, status")
+    .eq("order_id", order_id)
+    .single();
+
+  if (!payment) {
+    // Sama seperti webhook langganan di atas — tetap balas 200 (bisa jadi
+    // tombol "Test notification URL" dashboard Midtrans, atau race
+    // condition insert baris pending yang belum selesai).
+    console.warn("Midtrans webhook (POS QRIS): order_id tidak ditemukan di pos_qris_payments:", order_id);
+    return NextResponse.json({ message: "OK (order_id tidak dikenali, notifikasi diabaikan)" });
+  }
+
+  const { data: branch } = await svc
+    .from("branches")
+    .select("midtrans_server_key, midtrans_is_production")
+    .eq("id", payment.branch_id)
+    .single();
+
+  if (!branch?.midtrans_server_key) {
+    console.error("Midtrans webhook (POS QRIS): cabang", payment.branch_id, "tidak lagi punya server key.");
+    return NextResponse.json({ message: "Server misconfigured." }, { status: 500 });
+  }
+
+  // isProduction tidak berpengaruh ke perhitungan signature (cuma dipakai
+  // untuk memilih base URL charge/status), tapi tetap diisi benar untuk
+  // konsistensi kalau nanti core.getStatus() dipanggil dari sini juga.
+  const core = createMidtransCoreApi({ serverKey: branch.midtrans_server_key, isProduction: !!branch.midtrans_is_production });
+  const validSignature = core.verifySignature({
+    orderId: order_id,
+    statusCode: status_code,
+    grossAmount: gross_amount,
+    signatureKey: signature_key,
+  });
+
+  if (!validSignature) {
+    console.error("Midtrans webhook (POS QRIS): signature tidak cocok untuk order_id", order_id);
+    return NextResponse.json({ message: "Invalid signature." }, { status: 403 });
+  }
+
+  let newStatus: "pending" | "paid" | "failed" | "expired" = payment.status;
+  newStatus = mapMidtransTransactionStatus(transaction_status, fraud_status, payment.status);
+
+  await svc
+    .from("pos_qris_payments")
+    .update({ status: newStatus, raw_response: body })
+    .eq("id", payment.id);
 
   return NextResponse.json({ message: "OK" });
 }

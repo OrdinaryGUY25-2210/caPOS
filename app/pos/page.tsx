@@ -105,6 +105,18 @@ export default function PosPage() {
   const [showCheckout, setShowCheckout] = useState(false);
   const [showCartSheet, setShowCartSheet] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("cash");
+  // --- QRIS Dinamis (Midtrans per-cabang, migration_018) — TERISOLASI
+  // dari langganan. `qrisConfigured` cuma menandai cabang ini SUDAH
+  // mengisi Client Key di Pengaturan > Cabang (lihat effectiveBranchId di
+  // bawah); tidak berarti Server Key valid — kalau ternyata belum/invalid,
+  // app/api/pos/qris-charge akan menolak dan kasir tinggal pakai QRIS
+  // manual seperti biasa (opsi ini tidak wajib dipakai).
+  const [qrisConfigured, setQrisConfigured] = useState(false);
+  const [qrisDynamicEnabled, setQrisDynamicEnabled] = useState(false);
+  const [qrisOrder, setQrisOrder] = useState<{ orderId: string; qrUrl: string } | null>(null);
+  const [qrisStatus, setQrisStatus] = useState<"idle" | "creating" | "pending" | "paid" | "failed" | "expired">("idle");
+  const [qrisPollError, setQrisPollError] = useState<string | null>(null);
+  const qrisPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Uang diterima (tunai) — dipakai modal Konfirmasi Pembayaran untuk
   // kalkulasi kembalian otomatis + tombol preset (Requirement 2).
   const [cashReceived, setCashReceived] = useState("");
@@ -180,15 +192,21 @@ export default function PosPage() {
       if (!effectiveBranchId) {
         const { data: mainBranch } = await supabase
           .from("branches")
-          .select("id, name")
+          .select("id, name, midtrans_client_key")
           .eq("tenant_id", profile.tenant_id)
           .eq("is_main", true)
           .single();
         effectiveBranchId = mainBranch?.id ?? null;
-        if (mainBranch) setBranchName(mainBranch.name);
+        if (mainBranch) {
+          setBranchName(mainBranch.name);
+          setQrisConfigured(!!mainBranch.midtrans_client_key);
+        }
       } else {
-        const { data: branch } = await supabase.from("branches").select("name").eq("id", effectiveBranchId).single();
-        if (branch) setBranchName(branch.name);
+        const { data: branch } = await supabase.from("branches").select("name, midtrans_client_key").eq("id", effectiveBranchId).single();
+        if (branch) {
+          setBranchName(branch.name);
+          setQrisConfigured(!!branch.midtrans_client_key);
+        }
       }
       setSession({ tenantId: profile.tenant_id, cashierId: userId, branchId: effectiveBranchId });
 
@@ -694,6 +712,73 @@ export default function PosPage() {
     toast.success(`${points} poin ditukar jadi potongan ${formatRupiah(discountFromPoints)}.`);
   }
 
+  // --- QRIS Dinamis (Midtrans per-cabang) ---------------------------------
+  function stopQrisPolling() {
+    if (qrisPollRef.current) {
+      clearInterval(qrisPollRef.current);
+      qrisPollRef.current = null;
+    }
+  }
+
+  function resetQrisDynamic() {
+    stopQrisPolling();
+    setQrisDynamicEnabled(false);
+    setQrisOrder(null);
+    setQrisStatus("idle");
+    setQrisPollError(null);
+  }
+
+  async function generateDynamicQris() {
+    if (!session?.branchId) {
+      toast.error("Cabang tidak diketahui.");
+      return;
+    }
+    setQrisDynamicEnabled(true);
+    setQrisStatus("creating");
+    setQrisPollError(null);
+    try {
+      const res = await fetch("/api/pos/qris-charge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ branch_id: session.branchId, gross_amount: total }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setQrisStatus("failed");
+        setQrisPollError(data.message ?? "Gagal membuat kode QRIS.");
+        return;
+      }
+      setQrisOrder({ orderId: data.order_id, qrUrl: data.qr_url });
+      setQrisStatus("pending");
+
+      // Poll status setiap 3 detik — dihentikan begitu status final
+      // (paid/failed) atau saat modal checkout ditutup (lihat cleanup di
+      // onClose Modal & useEffect unmount di bawah).
+      qrisPollRef.current = setInterval(async () => {
+        try {
+          const pollRes = await fetch(`/api/pos/qris-status/${data.order_id}`);
+          const pollData = await pollRes.json();
+          if (!pollRes.ok) return;
+          if (pollData.status === "paid" || pollData.status === "failed" || pollData.status === "expired") {
+            setQrisStatus(pollData.status);
+            stopQrisPolling();
+          }
+        } catch {
+          // Jaringan bermasalah sesaat — biarkan interval coba lagi di
+          // putaran berikutnya, jangan hentikan polling cuma karena 1x gagal.
+        }
+      }, 3000);
+    } catch {
+      setQrisStatus("failed");
+      setQrisPollError("Gagal terhubung ke server. Coba lagi.");
+    }
+  }
+
+  // Bersihkan interval polling kalau komponen unmount selagi masih jalan.
+  useEffect(() => {
+    return () => stopQrisPolling();
+  }, []);
+
   async function handleCheckout() {
     if (!session) {
       toast.error("Sesi tidak ditemukan. Silakan login ulang.");
@@ -845,6 +930,7 @@ export default function PosPage() {
     setPointsDiscountAmount(0);
     setCashReceived("");
     setShowCheckout(false);
+    resetQrisDynamic();
   }
 
   // Dipanggil begitu OpenBillPanel berhasil membayar sebuah order KDS
@@ -1200,13 +1286,21 @@ export default function PosPage() {
         const received = Number(cashReceived) || 0;
         const change = received - total;
         const cashInsufficient = paymentMethod === "cash" && (!cashReceived || received < total);
+        const qrisDynamicNotPaid = paymentMethod === "qris" && qrisDynamicEnabled && qrisStatus !== "paid";
         return (
           <Modal
             title="Konfirmasi Pembayaran"
-            onClose={() => setShowCheckout(false)}
+            onClose={() => {
+              resetQrisDynamic();
+              setShowCheckout(false);
+            }}
             footer={
-              <button disabled={cashInsufficient} onClick={handleCheckout} className="btn-primary w-full disabled:opacity-50">
-                Selesaikan Transaksi
+              <button
+                disabled={cashInsufficient || qrisDynamicNotPaid}
+                onClick={handleCheckout}
+                className="btn-primary w-full disabled:opacity-50"
+              >
+                {qrisStatus === "paid" ? "Pembayaran Diterima — Selesaikan Transaksi" : "Selesaikan Transaksi"}
               </button>
             }
           >
@@ -1221,6 +1315,7 @@ export default function PosPage() {
                     onClick={() => {
                       setPaymentMethod(m);
                       if (m !== "cash") setCashReceived("");
+                      if (m !== "qris") resetQrisDynamic();
                     }}
                     className={
                       m === paymentMethod
@@ -1233,6 +1328,55 @@ export default function PosPage() {
                 ))}
               </div>
             </div>
+
+            {/* QRIS Dinamis (Midtrans per-cabang) — cuma muncul kalau owner
+                sudah mengisi Client Key cabang ini di Pengaturan > Cabang.
+                Sepenuhnya opsional: kasir tetap bisa langsung "Selesaikan
+                Transaksi" dengan QRIS manual kalau tidak menyalakan ini. */}
+            {paymentMethod === "qris" && qrisConfigured && (
+              <div className="space-y-2 pt-1">
+                {!qrisDynamicEnabled && (
+                  <button
+                    onClick={generateDynamicQris}
+                    className="w-full py-2.5 rounded-xl border border-primary text-primary text-sm font-medium hover:bg-primary-light transition-colors"
+                  >
+                    Buat Kode QRIS Dinamis
+                  </button>
+                )}
+
+                {qrisDynamicEnabled && qrisStatus === "creating" && (
+                  <div className="py-4 flex flex-col items-center gap-2 text-sm text-neutral-500">
+                    <span className="animate-pulse">Membuat kode QRIS...</span>
+                  </div>
+                )}
+
+                {qrisDynamicEnabled && qrisOrder && (qrisStatus === "pending" || qrisStatus === "paid") && (
+                  <div className="flex flex-col items-center gap-2 py-2">
+                    <img src={qrisOrder.qrUrl} alt="Kode QRIS" className="w-48 h-48 rounded-xl border border-neutral-200" />
+                    {qrisStatus === "pending" && (
+                      <p className="text-sm text-neutral-500 animate-pulse">Menunggu pelanggan scan &amp; bayar...</p>
+                    )}
+                    {qrisStatus === "paid" && <p className="text-sm font-semibold text-emerald-600">Pembayaran diterima ✓</p>}
+                  </div>
+                )}
+
+                {qrisDynamicEnabled && (qrisStatus === "failed" || qrisStatus === "expired") && (
+                  <div className="space-y-2">
+                    <p className="text-sm text-urgent">
+                      {qrisStatus === "expired"
+                        ? "Kode QRIS sudah kedaluwarsa (5 menit terlewati tanpa pembayaran)."
+                        : qrisPollError ?? "Gagal membuat/menerima pembayaran QRIS."}
+                    </p>
+                    <button
+                      onClick={generateDynamicQris}
+                      className="w-full py-2 rounded-xl border border-neutral-200 text-sm font-medium text-neutral-600 hover:bg-neutral-100"
+                    >
+                      Buat Kode Baru
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Quick Cash Buttons — kalkulasi kembalian otomatis (Requirement 2) */}
             {paymentMethod === "cash" && (
