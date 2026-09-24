@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Loader2, ArrowLeft, ArrowRightLeft, X, Ban, Pencil, Percent, Printer, Combine, SplitSquareHorizontal } from "lucide-react";
 import Modal from "@/components/Modal";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import TablePicker from "@/components/pos/TablePicker";
 import MultiPaymentModal from "@/components/MultiPaymentModal";
 import SupervisorPinModal from "@/components/SupervisorPinModal";
@@ -48,6 +49,7 @@ export default function OpenBillPanel({
   const [showMergeTable, setShowMergeTable] = useState(false);
   const [moving, setMoving] = useState(false);
   const [merging, setMerging] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<{ mode: "MOVE" | "MERGE"; target: TableLiveStatus } | null>(null);
   const [printingBill, setPrintingBill] = useState(false);
   const [overridingItemId, setOverridingItemId] = useState<string | null>(null);
   const [showDiscountForm, setShowDiscountForm] = useState(false);
@@ -99,7 +101,14 @@ export default function OpenBillPanel({
 
   // Poin 17 (Move Table) — lewat /api/tables/move (Migrasi 019) supaya
   // ada 1 jalur HTTP terstandar untuk Move, dipakai juga TableStatusBoard.
-  async function moveToTable(t: TableLiveStatus) {
+  function moveToTable(t: TableLiveStatus) {
+    if (!selectedOrder) return;
+    // Item #28 — dulu langsung eksekusi begitu meja tujuan ditekan, tanpa
+    // konfirmasi. Sekarang lewat dialog Confirmation dulu.
+    setConfirmAction({ mode: "MOVE", target: t });
+  }
+
+  async function applyMoveToTable(t: TableLiveStatus) {
     if (!selectedOrder) return;
     setMoving(true);
     const res = await fetch("/api/tables/move", {
@@ -109,10 +118,7 @@ export default function OpenBillPanel({
     });
     const body = await res.json().catch(() => ({}));
     setMoving(false);
-    if (!res.ok) {
-      alert("Gagal memindah meja: " + (body.message ?? "unknown error"));
-      return;
-    }
+    if (!res.ok) throw new Error(body.message ?? "unknown error");
     setSelectedOrder({ ...selectedOrder, table_id: t.table_id, table_number: t.table_number });
     setShowMoveTable(false);
   }
@@ -121,13 +127,17 @@ export default function OpenBillPanel({
   // digabung KE order milik meja lain yang dipilih (target). Setelah
   // berhasil, bill source ini hilang (sudah dibatalkan & dipindah ke
   // target) — panel ditutup kembali ke peta meja.
-  async function mergeIntoTable(t: TableLiveStatus) {
+  function mergeIntoTable(t: TableLiveStatus) {
     if (!selectedOrder || !t.active_order_id) return;
     if (t.table_id === selectedOrder.table_id) {
       alert("Pilih meja lain untuk digabung.");
       return;
     }
-    if (!window.confirm(`Gabungkan pesanan meja ${selectedOrder.table_number} ke meja ${t.table_number}?`)) return;
+    setConfirmAction({ mode: "MERGE", target: t });
+  }
+
+  async function applyMergeIntoTable(t: TableLiveStatus) {
+    if (!selectedOrder || !t.active_order_id) return;
     setMerging(true);
     const res = await fetch("/api/tables/merge", {
       method: "POST",
@@ -136,10 +146,7 @@ export default function OpenBillPanel({
     });
     const body = await res.json().catch(() => ({}));
     setMerging(false);
-    if (!res.ok) {
-      alert("Gagal menggabungkan meja: " + (body.message ?? "unknown error"));
-      return;
-    }
+    if (!res.ok) throw new Error(body.message ?? "unknown error");
     setShowMergeTable(false);
     setSelectedOrder(null);
   }
@@ -485,6 +492,23 @@ export default function OpenBillPanel({
             if (!result?.error) setPinGate(null);
             return result;
           }}
+        />
+      )}
+
+      {confirmAction && (
+        <ConfirmDialog
+          title={confirmAction.mode === "MOVE" ? "Pindahkan Pesanan?" : "Gabungkan Pesanan?"}
+          description={
+            confirmAction.mode === "MOVE"
+              ? `Pindahkan pesanan meja ${selectedOrder?.table_number} ke meja ${confirmAction.target.table_number}?`
+              : `Gabungkan pesanan meja ${selectedOrder?.table_number} ke meja ${confirmAction.target.table_number}? Bill meja ${selectedOrder?.table_number} akan hilang dan digabung ke meja ${confirmAction.target.table_number}.`
+          }
+          confirmLabel={confirmAction.mode === "MOVE" ? "Ya, Pindahkan" : "Ya, Gabungkan"}
+          successMessage={confirmAction.mode === "MOVE" ? "Meja dipindahkan." : "Pesanan digabung."}
+          onClose={() => setConfirmAction(null)}
+          onConfirm={() =>
+            confirmAction.mode === "MOVE" ? applyMoveToTable(confirmAction.target) : applyMergeIntoTable(confirmAction.target)
+          }
         />
       )}
     </Modal>
