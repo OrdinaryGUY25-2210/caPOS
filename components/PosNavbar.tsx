@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { LogOut, Wifi, WifiOff, Clock, LayoutDashboard } from "lucide-react";
+import { LogOut, Clock, LayoutDashboard } from "lucide-react";
 import Modal from "./Modal";
+import ConfirmDialog from "./ConfirmDialog";
 import QrOrderAlert from "./pos/QrOrderAlert";
+import SyncStatusBadge from "./SyncStatusBadge";
 
 export default function PosNavbar({
   cashierName,
@@ -42,6 +44,7 @@ export default function PosNavbar({
   // Modal info akun — dibuka dengan tap ikon profil di navbar kasir, supaya
   // kasir bisa cek cepat "ini akun/shift siapa" tanpa perlu buka Dashboard.
   const [showProfile, setShowProfile] = useState(false);
+  const [confirmLogout, setConfirmLogout] = useState(false);
 
   useEffect(() => {
     setIsOnline(navigator.onLine);
@@ -63,15 +66,7 @@ export default function PosNavbar({
       <div className="flex items-center gap-3">
         <img src="/logo.png" alt="caPOS" className="w-9 h-9 rounded-xl" />
         <span className="font-bold text-neutral-900 hidden sm:inline">caPOS</span>
-        {isOnline ? (
-          <span className="badge-active">
-            <Wifi size={12} /> Online
-          </span>
-        ) : (
-          <span className="badge-urgent">
-            <WifiOff size={12} /> Offline
-          </span>
-        )}
+        <SyncStatusBadge />
       </div>
 
       <div className="flex items-center gap-4">
@@ -113,7 +108,7 @@ export default function PosNavbar({
             {roleLabel && <span className="text-[10px] text-neutral-400 uppercase tracking-wide">{roleLabel}</span>}
           </div>
         </button>
-        <button onClick={onLogout} aria-label="Logout" className="text-neutral-400 hover:text-urgent transition-colors" title="Logout">
+        <button onClick={() => setConfirmLogout(true)} aria-label="Logout" className="text-neutral-400 hover:text-urgent transition-colors" title="Logout">
           <LogOut size={18} />
         </button>
       </div>
@@ -169,6 +164,17 @@ export default function PosNavbar({
 
       {/* Phase 4 — notifikasi pesanan baru dari QR Self-Order / Online Order Hub */}
       <QrOrderAlert branchId={branchId ?? null} />
+
+      {confirmLogout && (
+        <ConfirmDialog
+          title="Keluar dari Akun?"
+          description="Anda akan keluar dari sesi kasir ini di perangkat ini. Pastikan shift dan transaksi yang sedang berjalan sudah aman."
+          danger={false}
+          confirmLabel="Ya, Keluar"
+          onClose={() => setConfirmLogout(false)}
+          onConfirm={onLogout}
+        />
+      )}
     </header>
   );
 }

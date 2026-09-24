@@ -49,6 +49,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { getTier, type Tier } from "@/lib/tier";
 import { UserCog } from "lucide-react";
+import ConfirmDialog from "@/components/ConfirmDialog";
 
 /**
  * Phase 2A.2 — Information Architecture audit.
@@ -233,12 +234,16 @@ export default function DashboardSidebar({ onNavigate }: { onNavigate?: () => vo
     });
   }
 
-  async function handleLogout() {
-    await createClient().auth.signOut();
+  const [confirmLogout, setConfirmLogout] = useState(false);
+
+  async function applyLogout() {
+    const { error } = await createClient().auth.signOut();
+    if (error) throw new Error(error.message);
     router.push("/login");
   }
 
   return (
+    <>
     <aside className="w-72 sm:w-64 bg-sidebar flex flex-col h-full shrink-0">
       <div className="h-16 flex items-center gap-2 px-5 border-b border-sidebar-border shrink-0">
         <img src="/logo.png" alt="caPOS" className="w-8 h-8 rounded-lg" />
@@ -310,7 +315,7 @@ export default function DashboardSidebar({ onNavigate }: { onNavigate?: () => vo
 
       <div className="p-3 border-t border-sidebar-border shrink-0">
         <button
-          onClick={handleLogout}
+          onClick={() => setConfirmLogout(true)}
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-sidebar-text hover:bg-sidebar-hover hover:text-sidebar-text-active"
         >
           <LogOut size={18} />
@@ -318,5 +323,17 @@ export default function DashboardSidebar({ onNavigate }: { onNavigate?: () => vo
         </button>
       </div>
     </aside>
+
+    {confirmLogout && (
+      <ConfirmDialog
+        title="Keluar dari Akun?"
+        description="Anda akan keluar dari sesi ini di perangkat ini."
+        danger={false}
+        confirmLabel="Ya, Keluar"
+        onClose={() => setConfirmLogout(false)}
+        onConfirm={applyLogout}
+      />
+    )}
+    </>
   );
 }

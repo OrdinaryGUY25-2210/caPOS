@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Loader2, Printer, ArrowRightLeft, Combine, Clock, Users, ArrowLeft } from "lucide-react";
 import Modal from "@/components/Modal";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import { createClient } from "@/lib/supabase/client";
 import { cx, formatRupiah } from "@/lib/utils";
 import type { TableLiveStatus } from "@/lib/types";
@@ -46,6 +47,7 @@ export default function TableStatusBoard({ branchId }: { branchId: string }) {
   const [activeTable, setActiveTable] = useState<TableLiveStatus | null>(null);
   const [subView, setSubView] = useState<"MENU" | "MOVE" | "MERGE">("MENU");
   const [busy, setBusy] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<{ mode: "MOVE" | "MERGE"; target: TableLiveStatus } | null>(null);
 
   useEffect(() => {
     if (!branchId) return;
@@ -101,28 +103,34 @@ export default function TableStatusBoard({ branchId }: { branchId: string }) {
     setActiveTable(null);
   }
 
-  async function moveTo(target: TableLiveStatus) {
+  function moveTo(target: TableLiveStatus) {
     if (!activeTable?.active_order_id) return;
-    setBusy(true);
+    // Item #28 — sebelumnya "Pindah Meja" langsung eksekusi begitu meja
+    // tujuan ditekan, tanpa konfirmasi sama sekali. Sekarang lewat dialog
+    // Confirmation dulu.
+    setConfirmAction({ mode: "MOVE", target });
+  }
+
+  async function applyMoveTo(target: TableLiveStatus) {
+    if (!activeTable?.active_order_id) return;
     const res = await fetch("/api/tables/move", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ order_id: activeTable.active_order_id, new_table_id: target.table_id }),
     });
     const body = await res.json().catch(() => ({}));
-    setBusy(false);
-    if (!res.ok) {
-      alert("Gagal memindah meja: " + (body.message ?? "unknown error"));
-      return;
-    }
+    if (!res.ok) throw new Error(body.message ?? "unknown error");
     await load();
     setActiveTable(null);
   }
 
-  async function mergeInto(target: TableLiveStatus) {
+  function mergeInto(target: TableLiveStatus) {
     if (!activeTable?.active_order_id || !target.active_order_id) return;
-    if (!window.confirm(`Gabungkan pesanan meja ${activeTable.table_number} ke meja ${target.table_number}?`)) return;
-    setBusy(true);
+    setConfirmAction({ mode: "MERGE", target });
+  }
+
+  async function applyMergeInto(target: TableLiveStatus) {
+    if (!activeTable?.active_order_id || !target.active_order_id) return;
     const res = await fetch("/api/tables/merge", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -133,11 +141,7 @@ export default function TableStatusBoard({ branchId }: { branchId: string }) {
       }),
     });
     const body = await res.json().catch(() => ({}));
-    setBusy(false);
-    if (!res.ok) {
-      alert("Gagal menggabungkan meja: " + (body.message ?? "unknown error"));
-      return;
-    }
+    if (!res.ok) throw new Error(body.message ?? "unknown error");
     await load();
     setActiveTable(null);
   }
@@ -253,6 +257,23 @@ export default function TableStatusBoard({ branchId }: { branchId: string }) {
             </div>
           )}
         </Modal>
+      )}
+
+      {confirmAction && (
+        <ConfirmDialog
+          title={confirmAction.mode === "MOVE" ? "Pindahkan Pesanan?" : "Gabungkan Pesanan?"}
+          description={
+            confirmAction.mode === "MOVE"
+              ? `Pindahkan pesanan meja ${activeTable?.table_number} ke meja ${confirmAction.target.table_number}?`
+              : `Gabungkan pesanan meja ${activeTable?.table_number} ke meja ${confirmAction.target.table_number}? Bill meja ${activeTable?.table_number} akan hilang dan digabung ke meja ${confirmAction.target.table_number}.`
+          }
+          confirmLabel={confirmAction.mode === "MOVE" ? "Ya, Pindahkan" : "Ya, Gabungkan"}
+          successMessage={confirmAction.mode === "MOVE" ? "Meja dipindahkan." : "Pesanan digabung."}
+          onClose={() => setConfirmAction(null)}
+          onConfirm={() =>
+            confirmAction.mode === "MOVE" ? applyMoveTo(confirmAction.target) : applyMergeInto(confirmAction.target)
+          }
+        />
       )}
     </div>
   );

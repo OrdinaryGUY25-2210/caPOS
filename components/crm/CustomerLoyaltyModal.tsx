@@ -227,7 +227,7 @@ export function CustomerLoyaltyModal({
                   </div>
 
                   {/* Info Grid */}
-                  <div className="grid grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div className="bg-blue-50 p-4 rounded-lg">
                       <div className="text-xs text-gray-600 mb-1">Poin Loyalitas</div>
                       <div className="text-2xl font-bold text-blue-600">

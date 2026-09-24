@@ -268,7 +268,7 @@ export function PurchaseOrderDashboard() {
       )}
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-white rounded-lg p-6 shadow">
           <div className="text-sm text-gray-600">PO Pending</div>
           <div className="text-3xl font-bold mt-2">-</div>
@@ -333,7 +333,7 @@ export function PurchaseOrderDashboard() {
 
               {/* Item Input */}
               <div className="bg-gray-50 p-4 rounded-lg mb-4 space-y-3">
-                <div className="grid grid-cols-4 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                   <div>
                     <label className="text-xs font-medium">Nama Produk</label>
                     <input
@@ -396,7 +396,7 @@ export function PurchaseOrderDashboard() {
               </div>
 
               {/* Items List */}
-              <div className="border rounded-lg overflow-hidden">
+              <div className="border rounded-lg overflow-x-auto">
                 {poFormData.items.length === 0 ? (
                   <div className="p-4 text-center text-gray-500">Belum ada item</div>
                 ) : (
@@ -515,7 +515,7 @@ export function PurchaseOrderDashboard() {
 
               {/* Item Input */}
               <div className="bg-gray-50 p-4 rounded-lg mb-4 space-y-3">
-                <div className="grid grid-cols-5 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
                   <div>
                     <label className="text-xs font-medium">Produk</label>
                     <input
@@ -594,7 +594,7 @@ export function PurchaseOrderDashboard() {
               </div>
 
               {/* Items List */}
-              <div className="border rounded-lg overflow-hidden">
+              <div className="border rounded-lg overflow-x-auto">
                 {grnFormData.items.length === 0 ? (
                   <div className="p-4 text-center text-gray-500">Belum ada item</div>
                 ) : (

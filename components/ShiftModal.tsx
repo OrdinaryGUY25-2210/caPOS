@@ -51,6 +51,8 @@ export default function ShiftModal({
   const [actualCash, setActualCash] = useState("");
   const [closingNotes, setClosingNotes] = useState("");
   const [closing, setClosing] = useState(false);
+  const [confirmingClose, setConfirmingClose] = useState(false);
+  const [closeError, setCloseError] = useState<string | null>(null);
   const [closedResult, setClosedResult] = useState<{ expected: number; actual: number; difference: number } | null>(null);
 
   // CATATAN PENTING (Blind Cashier Shift Closing — Requirement 3):
@@ -114,14 +116,21 @@ export default function ShiftModal({
     setTimeout(() => setMovementSent(null), 3000);
   }
 
-  async function handleCloseShift() {
+  function handleCloseShift() {
     if (!shiftId) return;
     if (!actualCash) {
       alert("Isi hasil hitung fisik uang tunai di laci (Actual Cash) terlebih dahulu.");
       return;
     }
-    if (!confirm("Tutup shift sekarang? Setelah ditutup, transaksi baru tidak bisa dikaitkan ke shift ini lagi dan Actual Cash tidak bisa diubah.")) return;
+    // Item #28 — tahap Confirmation dulu (inline banner di bawah, bukan
+    // window.confirm) sebelum benar-benar menutup shift secara permanen.
+    setCloseError(null);
+    setConfirmingClose(true);
+  }
 
+  async function applyCloseShift() {
+    if (!shiftId) return;
+    setCloseError(null);
     setClosing(true);
     // Blind close: kasir mengirim Actual Cash TANPA pernah melihat
     // Expected Cash sistem — server (`close_shift`) yang menghitung &
@@ -133,7 +142,8 @@ export default function ShiftModal({
     });
     if (error) {
       setClosing(false);
-      alert("Gagal menutup shift: " + error.message);
+      setConfirmingClose(false);
+      setCloseError("Gagal menutup shift: " + error.message);
       return;
     }
     const row = data[0];
@@ -146,6 +156,7 @@ export default function ShiftModal({
     const { data: summaryRows } = await supabase.rpc("shift_cash_summary", { p_shift_id: shiftId });
     if (summaryRows && summaryRows.length > 0) setSummary(summaryRows[0] as ShiftCashSummary);
     setClosing(false);
+    setConfirmingClose(false);
   }
 
   // --- Tampilan setelah shift berhasil ditutup: Laporan Selisih Kas ---
@@ -318,9 +329,36 @@ export default function ShiftModal({
             />
           </div>
 
-          <button disabled={closing || !actualCash} onClick={handleCloseShift} className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-50">
-            {closing && <Loader2 className="animate-spin" size={16} />} Kunci &amp; Tutup Shift Sekarang
-          </button>
+          {confirmingClose ? (
+            <div className="rounded-xl border border-urgent/30 bg-urgent-light/60 p-3 space-y-2.5">
+              <p className="text-xs text-urgent flex items-start gap-1.5">
+                <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                Tutup shift sekarang? Setelah ditutup, transaksi baru tidak bisa dikaitkan ke shift ini lagi dan
+                Actual Cash tidak bisa diubah.
+              </p>
+              {closeError && <p className="text-xs text-urgent font-medium">{closeError}</p>}
+              <div className="flex gap-2">
+                <button
+                  disabled={closing}
+                  onClick={() => setConfirmingClose(false)}
+                  className="btn-outline flex-1 text-sm py-2 disabled:opacity-60"
+                >
+                  Batal
+                </button>
+                <button
+                  disabled={closing}
+                  onClick={applyCloseShift}
+                  className="flex-1 text-sm py-2 rounded-xl bg-urgent hover:bg-red-600 text-white font-semibold flex items-center justify-center gap-2 disabled:opacity-60"
+                >
+                  {closing && <Loader2 className="animate-spin" size={16} />} Ya, Tutup Shift
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button disabled={closing || !actualCash} onClick={handleCloseShift} className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-50">
+              <Wallet size={16} /> Kunci &amp; Tutup Shift Sekarang
+            </button>
+          )}
         </div>
       )}
     </Modal>

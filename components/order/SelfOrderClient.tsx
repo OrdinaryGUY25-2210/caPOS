@@ -185,7 +185,7 @@ export default function SelfOrderClient({
           </div>
 
           {/* Grid menu */}
-          <div className="grid grid-cols-2 gap-3 px-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 px-4">
             {visibleProducts.map((p) => (
               <button
                 key={p.id}

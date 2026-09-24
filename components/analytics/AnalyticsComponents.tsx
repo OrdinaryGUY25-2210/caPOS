@@ -70,7 +70,7 @@ export function ProductProfitabilityAnalytics() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div className="bg-white rounded-lg p-6 shadow">
           <div className="text-sm text-gray-600">Total Revenue</div>
           <div className="text-2xl font-bold mt-2">
@@ -236,7 +236,7 @@ export function PeakHoursAnalytics() {
       </div>
 
       {/* Peak Hours Summary */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {(() => {
           const sortedByTx = [...peakData].sort((a, b) => b.transaction_count - a.transaction_count);
           const sortedByRevenue = [...peakData].sort((a, b) => b.total_revenue - a.total_revenue);
@@ -379,7 +379,7 @@ export function WasteLossReport() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div className="bg-red-50 rounded-lg p-6 border border-red-200">
           <div className="text-sm text-red-600 font-medium">Total Kerugian (30 hari)</div>
           <div className="text-3xl font-bold text-red-700 mt-2">

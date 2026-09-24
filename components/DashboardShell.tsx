@@ -9,6 +9,8 @@ import TrialBanner from "./TrialBanner";
 import LandscapeNotice from "./LandscapeNotice";
 import AccessDeniedNotice from "./AccessDeniedNotice";
 import NotificationBell from "./NotificationBell";
+import SyncStatusBadge from "./SyncStatusBadge";
+import ConfirmDialog from "./ConfirmDialog";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { isManagerOrOwner, ROLE_LABEL } from "@/lib/role";
 import { getTier, TIER_LABEL } from "@/lib/tier";
@@ -90,8 +92,11 @@ export default function DashboardShell({
     };
   }, [profileOpen]);
 
-  async function handleLogout() {
-    await createClient().auth.signOut();
+  const [confirmLogout, setConfirmLogout] = useState(false);
+
+  async function applyLogout() {
+    const { error } = await createClient().auth.signOut();
+    if (error) throw new Error(error.message);
     router.push("/login");
   }
 
@@ -134,10 +139,18 @@ export default function DashboardShell({
             <div className="md:hidden flex items-center gap-2">
               <img src="/logo.png" alt="caPOS" className="w-6 h-6 rounded-md" />
               <span className="font-bold text-neutral-900 text-sm">caPOS</span>
+              <SyncStatusBadge compact />
             </div>
           </div>
 
           <div className="flex items-center gap-3">
+            {/* Item #26 — offline/queue indication juga perlu terlihat di
+                Dashboard, bukan cuma POS (owner/manager bisa saja sedang
+                mengedit menu offline). Disembunyikan di mobile karena versi
+                compact-nya sudah tampil di header kiri. */}
+            <div className="hidden md:block">
+              <SyncStatusBadge />
+            </div>
             {/* Filter/pilihan cabang — hanya render sesuatu untuk Owner
                 yang punya lebih dari 1 cabang (lihat BranchSwitcher). */}
             <BranchSwitcher />
@@ -209,7 +222,10 @@ export default function DashboardShell({
                   <div className="pt-1 border-t border-neutral-100">
                     <button
                       role="menuitem"
-                      onClick={handleLogout}
+                      onClick={() => {
+                        setProfileOpen(false);
+                        setConfirmLogout(true);
+                      }}
                       className="w-full flex items-center gap-2.5 px-4 py-2 text-sm font-medium text-urgent hover:bg-urgent-light transition-colors"
                     >
                       <LogOut size={16} />
@@ -228,6 +244,17 @@ export default function DashboardShell({
         <main className="flex-1 overflow-y-auto p-4 sm:p-6">{children}</main>
       </div>
     </div>
+
+    {confirmLogout && (
+      <ConfirmDialog
+        title="Keluar dari Akun?"
+        description="Anda akan keluar dari sesi ini di perangkat ini."
+        danger={false}
+        confirmLabel="Ya, Keluar"
+        onClose={() => setConfirmLogout(false)}
+        onConfirm={applyLogout}
+      />
+    )}
     </BranchProvider>
   );
 }
