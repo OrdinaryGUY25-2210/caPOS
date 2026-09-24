@@ -10,6 +10,7 @@ import { Eye, EyeOff } from "lucide-react";
  * menampilkan password sebelum submit.
  */
 export default function PasswordInput({
+  id,
   value,
   onChange,
   placeholder,
@@ -18,6 +19,7 @@ export default function PasswordInput({
   autoComplete,
   className = "input-field",
 }: {
+  id?: string;
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
@@ -31,6 +33,7 @@ export default function PasswordInput({
   return (
     <div className="relative">
       <input
+        id={id}
         type={visible ? "text" : "password"}
         required={required}
         minLength={minLength}
