@@ -2,13 +2,13 @@
 
 import React from "react";
 
-// Tipe data fleksibel untuk menangani properti 'notes' maupun 'note'
 export interface OrderItem {
-  id: string;
-  name: string;
-  quantity: number;
+  id?: string;
+  name?: string;
+  quantity?: number;
   notes?: string;
   note?: string;
+  station_id?: string;
   modifiers?: Array<{ name: string; value?: string }>;
   variant?: { name: string };
   [key: string]: any;
@@ -16,11 +16,13 @@ export interface OrderItem {
 
 interface KitchenItemProps {
   item: OrderItem;
+  stationName?: string;
 }
 
-export default function KitchenItem({ item }: KitchenItemProps) {
-  // Mengambil catatan dari item.notes atau item.note sebagai fallback
+export default function KitchenItem({ item, stationName }: KitchenItemProps) {
   const itemNote = item.notes || item.note;
+  const itemName = item.name || "Menu Item";
+  const itemQty = item.quantity ?? 1;
 
   const configParts: string[] = [];
   if (item.variant?.name) {
@@ -35,8 +37,13 @@ export default function KitchenItem({ item }: KitchenItemProps) {
       <div className="flex items-start justify-between gap-2">
         <div>
           <span className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">
-            {item.quantity}x {item.name}
+            {itemQty}x {itemName}
           </span>
+          {stationName && (
+            <span className="ml-2 text-[10px] font-medium px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
+              {stationName}
+            </span>
+          )}
           {configParts.length > 0 && (
             <p className="text-xs text-zinc-500 mt-0.5 leading-tight">
               {configParts.join(" · ")}
