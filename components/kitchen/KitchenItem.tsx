@@ -3,20 +3,20 @@
 import React from "react";
 
 export interface OrderItem {
-  id?: string;
-  name?: string;
-  quantity?: number;
-  notes?: string;
-  note?: string;
-  station_id?: string;
-  modifiers?: Array<{ name: string; value?: string }>;
-  variant?: { name: string };
+  id?: string | null;
+  name?: string | null;
+  quantity?: number | null;
+  notes?: string | null;
+  note?: string | null;
+  station_id?: string | null;
+  modifiers?: Array<{ name: string; value?: string }> | null;
+  variant?: { name: string } | null;
   [key: string]: any;
 }
 
 interface KitchenItemProps {
   item: OrderItem;
-  stationName?: string;
+  stationName?: string | null;
 }
 
 export default function KitchenItem({ item, stationName }: KitchenItemProps) {
@@ -29,7 +29,9 @@ export default function KitchenItem({ item, stationName }: KitchenItemProps) {
     configParts.push(item.variant.name);
   }
   if (item.modifiers && item.modifiers.length > 0) {
-    item.modifiers.forEach((m) => configParts.push(m.name));
+    item.modifiers.forEach((m) => {
+      if (m?.name) configParts.push(m.name);
+    });
   }
 
   return (
