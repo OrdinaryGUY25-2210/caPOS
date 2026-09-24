@@ -14,6 +14,64 @@ export const SYNC_COMPLETE_EVENT = "capos:sync-complete";
 
 let syncInFlight = false;
 
+// ---------------------------------------------------------------------------
+// Sync status store (item #26 — UI status sinkronisasi)
+// ---------------------------------------------------------------------------
+// State kecil di memori supaya badge status (navbar kasir & dashboard) bisa
+// menampilkan 5 kondisi yang diminta: Online, Syncing, Offline, Synced,
+// Sync Failed — plus jumlah antrian (queue) dan pesan error terakhir untuk
+// recovery UI (tombol "Coba Lagi"). TIDAK menambah tabel Dexie baru — hanya
+// menghitung baris `synced = 0` yang sudah ada di lib/dexie.ts.
+
+export type SyncState = "idle" | "syncing" | "success" | "error";
+
+export interface SyncStatus {
+  state: SyncState;
+  /** Jumlah transaksi + perubahan menu yang masih menunggu disinkron. */
+  pendingCount: number;
+  /** Pesan error ringkas dari percobaan sinkron terakhir (untuk recovery UI). */
+  lastError: string | null;
+  /** Kapan sinkron terakhir SUKSES (ISO string), untuk badge "✓ Synced". */
+  lastSyncedAt: string | null;
+}
+
+let syncStatus: SyncStatus = {
+  state: "idle",
+  pendingCount: 0,
+  lastError: null,
+  lastSyncedAt: null,
+};
+
+const syncStatusListeners = new Set<(status: SyncStatus) => void>();
+
+function setSyncStatus(patch: Partial<SyncStatus>) {
+  syncStatus = { ...syncStatus, ...patch };
+  syncStatusListeners.forEach((cb) => cb(syncStatus));
+}
+
+export function getSyncStatus(): SyncStatus {
+  return syncStatus;
+}
+
+/** Dipakai komponen UI (mis. SyncStatusBadge) untuk dengar perubahan status. */
+export function subscribeSyncStatus(cb: (status: SyncStatus) => void): () => void {
+  syncStatusListeners.add(cb);
+  cb(syncStatus);
+  return () => {
+    syncStatusListeners.delete(cb);
+  };
+}
+
+/** Hitung ulang jumlah antrian (queue) dari Dexie — dipanggil sebelum & sesudah tiap sinkron. */
+async function refreshPendingCount() {
+  const [pendingTx, pendingOps] = await Promise.all([
+    db.pendingTransactions.where("synced").equals(0).count(),
+    db.pendingProductOps.where("synced").equals(0).count(),
+  ]);
+  setSyncStatus({ pendingCount: pendingTx + pendingOps });
+  return pendingTx + pendingOps;
+}
+
 /**
  * BUG FIX — sebelumnya syncPendingTransactions() (di lib/dexie.ts) sudah
  * ada tapi TIDAK PERNAH dipanggil di mana pun: transaksi yang dibuat kasir
@@ -26,8 +84,18 @@ let syncInFlight = false;
  * (POS atau dashboard).
  */
 export async function runBackgroundSync() {
-  if (syncInFlight || !navigator.onLine) return;
+  if (syncInFlight) return;
+  await refreshPendingCount();
+  if (!navigator.onLine) {
+    // Offline murni bukan "gagal sinkron" — biarkan badge tetap di state
+    // Offline, jangan tandai error. Antrian tetap dihitung supaya queue
+    // indication tetap muncul walau device sedang offline.
+    return;
+  }
   syncInFlight = true;
+  let hadFailure = false;
+  let lastErrorMessage: string | null = null;
+  setSyncStatus({ state: "syncing" });
   try {
     const supabase = createClient();
 
@@ -49,10 +117,16 @@ export async function runBackgroundSync() {
       });
       if (error) {
         console.error("Sync transaksi offline gagal (akan dicoba lagi nanti):", tx.invoice_number, error.message);
+        hadFailure = true;
+        lastErrorMessage = `Transaksi ${tx.invoice_number}: ${error.message}`;
         return false;
       }
       return true;
-    }).catch((e) => console.error("syncPendingTransactions error:", e));
+    }).catch((e) => {
+      console.error("syncPendingTransactions error:", e);
+      hadFailure = true;
+      lastErrorMessage = e instanceof Error ? e.message : "Gagal menyinkron transaksi tertunda.";
+    });
 
     // 2. Perubahan menu (tambah/edit/toggle) yang tertunda dari /dashboard/menu.
     const { idMap } = await syncPendingProductOps({
@@ -64,6 +138,8 @@ export async function runBackgroundSync() {
           .upload(path, blob, { upsert: true, contentType: blob.type });
         if (error) {
           console.error("Sync upload foto menu gagal (akan dicoba lagi nanti):", error.message);
+          hadFailure = true;
+          lastErrorMessage = `Upload foto menu: ${error.message}`;
           return null;
         }
         const { data } = supabase.storage.from("menu-images").getPublicUrl(path);
@@ -84,6 +160,8 @@ export async function runBackgroundSync() {
           .single();
         if (error) {
           console.error("Sync tambah menu offline gagal (akan dicoba lagi nanti):", error.message);
+          hadFailure = true;
+          lastErrorMessage = `Tambah menu: ${error.message}`;
           return null;
         }
         return data.id as string;
@@ -92,12 +170,16 @@ export async function runBackgroundSync() {
         const { error } = await supabase.from("products").update(payload).eq("id", productId);
         if (error) {
           console.error("Sync edit menu offline gagal (akan dicoba lagi nanti):", productId, error.message);
+          hadFailure = true;
+          lastErrorMessage = `Edit menu: ${error.message}`;
           return false;
         }
         return true;
       },
     }).catch((e) => {
       console.error("syncPendingProductOps error:", e);
+      hadFailure = true;
+      lastErrorMessage = e instanceof Error ? e.message : "Gagal menyinkron perubahan menu tertunda.";
       return { idMap: new Map<string, string>() };
     });
 
@@ -114,11 +196,29 @@ export async function runBackgroundSync() {
       }
     }
 
+    const remaining = await refreshPendingCount();
+    if (hadFailure) {
+      setSyncStatus({ state: "error", lastError: lastErrorMessage });
+    } else {
+      setSyncStatus({ state: "success", lastError: null, lastSyncedAt: new Date().toISOString() });
+    }
+    // remaining dipakai sekadar untuk memastikan hitungan antrian ter-refresh
+    // sebelum event ini dilempar — UI yang dengar SYNC_COMPLETE_EVENT (mis.
+    // /dashboard/menu) boleh langsung baca getSyncStatus().pendingCount.
+    void remaining;
+
     window.dispatchEvent(new CustomEvent(SYNC_COMPLETE_EVENT));
   } finally {
     syncInFlight = false;
   }
 }
+
+/**
+ * Alias publik untuk pemicu sinkron manual — dipakai tombol "Coba Lagi"
+ * (recovery UI) di SyncStatusBadge saat state = "error". Perilakunya sama
+ * persis dengan sinkron otomatis (idempotent — aman dipanggil berkali-kali).
+ */
+export const triggerSync = runBackgroundSync;
 
 /**
  * Panggil sekali di komponen client tingkat atas yang membungkus /pos DAN
@@ -129,7 +229,15 @@ export async function runBackgroundSync() {
  * lagi tapi event 'online' tidak sempat ter-trigger ulang").
  */
 export function startBackgroundSyncListener() {
+  refreshPendingCount();
   runBackgroundSync();
   window.addEventListener("online", runBackgroundSync);
-  return () => window.removeEventListener("online", runBackgroundSync);
+  // Saat baru putus koneksi, refresh jumlah antrian saja (jangan tandai
+  // error) supaya badge langsung pindah ke "🔵 Offline" dengan angka queue
+  // yang akurat, bukan menunggu percobaan sync berikutnya.
+  window.addEventListener("offline", refreshPendingCount);
+  return () => {
+    window.removeEventListener("online", runBackgroundSync);
+    window.removeEventListener("offline", refreshPendingCount);
+  };
 }
