@@ -19,10 +19,9 @@ export default function HardwareWizardModal({ isOpen, onClose }: HardwareWizardM
     setIsScanning(true);
     try {
       if (typeof window !== "undefined" && "bluetooth" in navigator) {
-        // @ts-ignore
-        const device = await navigator.bluetooth.requestDevice({
-          acceptAllDevices: true,
-          optionalServices: ["000018f0-0000-1000-8000-00805f9b34fb"]
+        // Menggunakan acceptAllDevices tanpa optionalServices untuk menghindari konflik type Web Bluetooth
+        const device = await (navigator as any).bluetooth.requestDevice({
+          acceptAllDevices: true
         });
         if (device) {
           setConnectedDevice(device.name || "Printer Bluetooth");
