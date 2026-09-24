@@ -11,6 +11,7 @@ import type { KitchenStation, OrderWithItems, OrderStatus, Product } from "@/lib
 import { printStationTicket } from "@/lib/kitchenPrinter";
 import QrOrderAlert from "@/components/pos/QrOrderAlert";
 import { useProductAvailabilityChannel } from "@/lib/useProductAvailabilityChannel";
+import ConfirmDialog from "@/components/ConfirmDialog";
 
 // Order dianggap "aktif" di KDS selama belum SERVED/COMPLETED/CANCELLED.
 // SERVED tetap ditampilkan sebentar (kolom terakhir) supaya dapur tahu
@@ -199,11 +200,13 @@ export default function KitchenDisplayPage() {
     }
   }
 
-  async function cancelOrder(orderId: string) {
-    if (!confirm("Batalkan pesanan ini? Tindakan ini tidak bisa diurungkan.")) return;
-    const { error } = await supabase.rpc("update_order_status", { p_order_id: orderId, p_new_status: "CANCELLED" });
-    if (error) alert("Gagal membatalkan: " + error.message);
-    else if (tenantId) loadOrders(tenantId, branchId);
+  const [cancelTargetId, setCancelTargetId] = useState<string | null>(null);
+
+  function cancelOrder(orderId: string) {
+    // Item #28 — tahap Confirmation (dialog, bukan window.confirm) dulu;
+    // RPC pembatalan baru jalan di ConfirmDialog.onConfirm di bawah, yang
+    // otomatis menangani tahap Processing & Success/Error.
+    setCancelTargetId(orderId);
   }
 
   async function reprintOrder(order: OrderWithItems) {
@@ -339,6 +342,24 @@ export default function KitchenDisplayPage() {
           savingIds={savingProductIds}
           onToggle={toggleSoldOut}
           onClose={() => setShowAvailabilityPanel(false)}
+        />
+      )}
+
+      {cancelTargetId && (
+        <ConfirmDialog
+          title="Batalkan Pesanan?"
+          description="Tindakan ini tidak bisa diurungkan. Pesanan akan ditandai batal dan hilang dari papan dapur."
+          confirmLabel="Ya, Batalkan"
+          successMessage="Pesanan dibatalkan."
+          onClose={() => setCancelTargetId(null)}
+          onConfirm={async () => {
+            const { error } = await supabase.rpc("update_order_status", {
+              p_order_id: cancelTargetId,
+              p_new_status: "CANCELLED",
+            });
+            if (error) throw new Error(error.message);
+            if (tenantId) loadOrders(tenantId, branchId);
+          }}
         />
       )}
     </div>

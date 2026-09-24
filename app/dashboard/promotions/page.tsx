@@ -1,20 +1,54 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus, Loader2, Tag, Ticket } from "lucide-react";
+import { Plus, Loader2, Tag, Ticket, ListChecks } from "lucide-react";
 import { PromotionBuilder } from "@/components/crm/CustomerLoyaltyModal";
 import { getPromotions, togglePromotionActive } from "@/app/actions/purchasing-loyalty-actions";
+
+interface VoucherRow {
+  id: string;
+  voucher_code: string;
+  discount_type: "PERCENTAGE" | "NOMINAL";
+  discount_value: number;
+  usage_limit: number | null;
+  usage_count: number | null;
+  is_redeemed?: boolean;
+}
+
+interface RuleRow {
+  id: string;
+  rule_type: string;
+  rule_value: string;
+}
 
 interface PromoRow {
   id: string;
   promo_name: string;
   promo_type: "PERCENTAGE" | "NOMINAL" | "BOGO" | "BUNDLE";
-  discount_value?: number;
   promo_code: string | null;
   start_date: string;
   end_date: string | null;
   is_active: boolean;
-  vouchers?: { id: string; voucher_code: string; is_redeemed: boolean }[];
+  vouchers?: VoucherRow[];
+  promotion_rules?: RuleRow[];
+}
+
+const RULE_TYPE_LABEL: Record<string, string> = {
+  MIN_PURCHASE: "Minimal belanja",
+  MEMBER_ONLY: "Khusus member",
+  TIME_RANGE: "Jam tertentu",
+  DAY_OF_WEEK: "Hari tertentu",
+  BRANCH: "Cabang tertentu",
+  PRODUCT: "Produk tertentu",
+  CATEGORY: "Kategori tertentu",
+};
+
+function ruleLabel(r: RuleRow) {
+  return `${RULE_TYPE_LABEL[r.rule_type] ?? r.rule_type}: ${r.rule_value}`;
+}
+
+function voucherDiscountLabel(v: VoucherRow) {
+  return v.discount_type === "PERCENTAGE" ? `${v.discount_value}%` : `Rp ${v.discount_value.toLocaleString("id-ID")}`;
 }
 
 const typeLabel: Record<string, string> = {
@@ -92,10 +126,35 @@ export default function PromotionsPage() {
                 {p.start_date}
                 {p.end_date ? ` s/d ${p.end_date}` : " (tanpa batas akhir)"}
               </p>
+
+              {!!p.promotion_rules?.length && (
+                <div className="mt-2">
+                  <p className="text-xs font-medium text-neutral-600 flex items-center gap-1">
+                    <ListChecks size={12} /> Syarat &amp; Ketentuan
+                  </p>
+                  <ul className="text-xs text-neutral-500 list-disc list-inside mt-1 space-y-0.5">
+                    {p.promotion_rules.map((r) => (
+                      <li key={r.id}>{ruleLabel(r)}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               {!!p.vouchers?.length && (
-                <p className="text-xs text-neutral-500 mt-2 flex items-center gap-1">
-                  <Ticket size={12} /> {p.vouchers.length} voucher terkait
-                </p>
+                <div className="mt-3 space-y-1.5">
+                  <p className="text-xs font-medium text-neutral-600 flex items-center gap-1">
+                    <Ticket size={12} /> {p.vouchers.length} voucher terkait
+                  </p>
+                  {p.vouchers.map((v) => (
+                    <div key={v.id} className="flex items-center justify-between text-xs bg-neutral-50 rounded-lg px-2.5 py-1.5">
+                      <span className="font-mono text-neutral-700">{v.voucher_code}</span>
+                      <span className="text-neutral-500">
+                        Diskon {voucherDiscountLabel(v)} · Terpakai {v.usage_count ?? 0}
+                        {v.usage_limit ? `/${v.usage_limit}` : ""}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           ))}

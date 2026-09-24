@@ -21,6 +21,14 @@ const DAY_LABELS = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
 interface OmzetPoint { day: string; date: string; omzet: number; orders: number }
 interface PeakPoint { hour: string; orders: number }
 interface BestSellerPoint { name: string; value: number }
+interface RecentTx {
+  id: string;
+  invoice_number: string;
+  total_amount: number;
+  payment_method: string;
+  created_at: string;
+  branch_name: string | null;
+}
 
 export default function ReportsPage() {
   const { selectedBranchId, selectedBranch, canSwitchBranch } = useBranch();
@@ -41,6 +49,9 @@ export default function ReportsPage() {
   // the definition of "low stock" never disagrees between the two pages.
   const [activeOrdersCount, setActiveOrdersCount] = useState<number | null>(null);
   const [lowStockCount, setLowStockCount] = useState<number | null>(null);
+  // PRIORITY 10 — Recent Activity: last 5 transactions, same table/columns
+  // as app/dashboard/transactions/page.tsx so the two pages never disagree.
+  const [recentTx, setRecentTx] = useState<RecentTx[]>([]);
 
   const isPremium = tier === "supreme";
   // Sesuai keputusan: Excel Lengkap + PDF sekarang juga untuk Pro (bukan
@@ -193,6 +204,26 @@ export default function ReportsPage() {
       }
       setLowStockCount(lowCount);
 
+      // Recent Activity — last 5 transactions, newest first.
+      let recentQuery = supabase
+        .from("transactions")
+        .select("id, invoice_number, total_amount, payment_method, created_at, branches(name)")
+        .eq("tenant_id", profile.tenant_id)
+        .order("created_at", { ascending: false })
+        .limit(5);
+      if (selectedBranchId !== ALL_BRANCHES) recentQuery = recentQuery.eq("branch_id", selectedBranchId);
+      const { data: recentRows } = await recentQuery;
+      setRecentTx(
+        ((recentRows as any[]) ?? []).map((t) => ({
+          id: t.id,
+          invoice_number: t.invoice_number,
+          total_amount: t.total_amount,
+          payment_method: t.payment_method,
+          created_at: t.created_at,
+          branch_name: t.branches?.name ?? null,
+        }))
+      );
+
       setLoading(false);
     })();
   }, [selectedBranchId]);
@@ -311,6 +342,7 @@ export default function ReportsPage() {
         </div>
       )}
 
+      {/* ── KPI ─────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="card p-5">
           <p className="text-sm text-neutral-500">Total Omzet (7 hari)</p>
@@ -328,31 +360,7 @@ export default function ReportsPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <Link href="/kitchen" className="card p-5 flex items-center justify-between hover:border-primary/40 transition-colors">
-          <div>
-            <p className="text-sm text-neutral-500">Order Aktif Sekarang</p>
-            <p className="text-2xl font-bold text-neutral-900 mt-1">{activeOrdersCount ?? "–"}</p>
-            <p className="text-xs text-neutral-500 mt-0.5">Belum served/selesai · lihat KDS</p>
-          </div>
-          <div className="w-11 h-11 rounded-2xl bg-primary-light flex items-center justify-center shrink-0">
-            <Sparkles className="text-primary-dark" size={20} />
-          </div>
-        </Link>
-        <Link href="/dashboard/ingredients" className="card p-5 flex items-center justify-between hover:border-primary/40 transition-colors">
-          <div>
-            <p className="text-sm text-neutral-500">Bahan Baku Stok Menipis</p>
-            <p className={"text-2xl font-bold mt-1 " + ((lowStockCount ?? 0) > 0 ? "text-urgent" : "text-neutral-900")}>
-              {lowStockCount ?? "–"}
-            </p>
-            <p className="text-xs text-neutral-500 mt-0.5">Di bawah batas minimum · lihat Bahan Baku</p>
-          </div>
-          <div className={"w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 " + ((lowStockCount ?? 0) > 0 ? "bg-urgent-light" : "bg-neutral-100")}>
-            <Wheat className={(lowStockCount ?? 0) > 0 ? "text-urgent" : "text-neutral-400"} size={20} />
-          </div>
-        </Link>
-      </div>
-
+      {/* ── Sales Trend ─────────────────────────────────────────────── */}
       {showHealth && (
         <div className="card p-5 flex items-center gap-4">
           <div className={
@@ -424,39 +432,52 @@ export default function ReportsPage() {
         </ResponsiveContainer>
       </div>
 
-      {isPremium ? (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="card p-5">
-            <h2 className="font-semibold text-neutral-900 mb-4">Jam Ramai (Peak Hours)</h2>
-            <ResponsiveContainer width="100%" height={240}>
-              <LineChart data={peakHours}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
-                <XAxis dataKey="hour" stroke="#64748B" fontSize={11} />
-                <YAxis stroke="#64748B" fontSize={12} />
-                <Tooltip />
-                <Line type="monotone" dataKey="orders" stroke="#F59E0B" strokeWidth={2.5} dot={{ r: 3 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+      {isPremium && (
+        <div className="card p-5">
+          <h2 className="font-semibold text-neutral-900 mb-4">Jam Ramai (Peak Hours)</h2>
+          <ResponsiveContainer width="100%" height={240}>
+            <LineChart data={peakHours}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+              <XAxis dataKey="hour" stroke="#64748B" fontSize={11} />
+              <YAxis stroke="#64748B" fontSize={12} />
+              <Tooltip />
+              <Line type="monotone" dataKey="orders" stroke="#F59E0B" strokeWidth={2.5} dot={{ r: 3 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
 
-          <div className="card p-5">
-            <h2 className="font-semibold text-neutral-900 mb-4">Menu Terlaris</h2>
-            {bestSellers.length > 0 ? (
-              <ResponsiveContainer width="100%" height={240}>
-                <PieChart>
-                  <Pie data={bestSellers} dataKey="value" nameKey="name" innerRadius={55} outerRadius={85} paddingAngle={2}>
-                    {bestSellers.map((_, i) => (
-                      <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                  <Legend wrapperStyle={{ fontSize: 12 }} />
-                </PieChart>
-              </ResponsiveContainer>
-            ) : (
-              <p className="text-center text-neutral-400 text-sm py-16">Belum ada data penjualan menu.</p>
-            )}
-          </div>
+      {/* ── Operations ──────────────────────────────────────────────── */}
+      <Link href="/kitchen" className="card p-5 flex items-center justify-between hover:border-primary/40 transition-colors">
+        <div>
+          <p className="text-sm text-neutral-500">Order Aktif Sekarang</p>
+          <p className="text-2xl font-bold text-neutral-900 mt-1">{activeOrdersCount ?? "–"}</p>
+          <p className="text-xs text-neutral-500 mt-0.5">Belum served/selesai · lihat KDS</p>
+        </div>
+        <div className="w-11 h-11 rounded-2xl bg-primary-light flex items-center justify-center shrink-0">
+          <Sparkles className="text-primary-dark" size={20} />
+        </div>
+      </Link>
+
+      {/* ── Products ────────────────────────────────────────────────── */}
+      {isPremium ? (
+        <div className="card p-5">
+          <h2 className="font-semibold text-neutral-900 mb-4">Menu Terlaris</h2>
+          {bestSellers.length > 0 ? (
+            <ResponsiveContainer width="100%" height={240}>
+              <PieChart>
+                <Pie data={bestSellers} dataKey="value" nameKey="name" innerRadius={55} outerRadius={85} paddingAngle={2}>
+                  {bestSellers.map((_, i) => (
+                    <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          ) : (
+            <p className="text-center text-neutral-400 text-sm py-16">Belum ada data penjualan menu.</p>
+          )}
         </div>
       ) : (
         <div className="card p-8 text-center space-y-3">
@@ -475,6 +496,49 @@ export default function ReportsPage() {
           </Link>
         </div>
       )}
+
+      {/* ── Inventory ───────────────────────────────────────────────── */}
+      <Link href="/dashboard/ingredients" className="card p-5 flex items-center justify-between hover:border-primary/40 transition-colors">
+        <div>
+          <p className="text-sm text-neutral-500">Bahan Baku Stok Menipis</p>
+          <p className={"text-2xl font-bold mt-1 " + ((lowStockCount ?? 0) > 0 ? "text-urgent" : "text-neutral-900")}>
+            {lowStockCount ?? "–"}
+          </p>
+          <p className="text-xs text-neutral-500 mt-0.5">Di bawah batas minimum · lihat Bahan Baku</p>
+        </div>
+        <div className={"w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 " + ((lowStockCount ?? 0) > 0 ? "bg-urgent-light" : "bg-neutral-100")}>
+          <Wheat className={(lowStockCount ?? 0) > 0 ? "text-urgent" : "text-neutral-400"} size={20} />
+        </div>
+      </Link>
+
+      {/* ── Recent Activity ─────────────────────────────────────────── */}
+      <div className="card p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-semibold text-neutral-900">Aktivitas Terbaru</h2>
+          <Link href="/dashboard/transactions" className="text-xs text-primary hover:underline">
+            Lihat semua
+          </Link>
+        </div>
+        {recentTx.length > 0 ? (
+          <ul className="divide-y divide-neutral-100">
+            {recentTx.map((t) => (
+              <li key={t.id} className="py-3 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-neutral-900 truncate">{t.invoice_number}</p>
+                  <p className="text-xs text-neutral-500 mt-0.5">
+                    {new Date(t.created_at).toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                    {t.branch_name ? ` · ${t.branch_name}` : ""}
+                    {" · "}{t.payment_method}
+                  </p>
+                </div>
+                <p className="text-sm font-semibold text-neutral-900 shrink-0">{formatRupiah(t.total_amount)}</p>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-center text-neutral-400 text-sm py-8">Belum ada transaksi.</p>
+        )}
+      </div>
     </div>
   );
 }

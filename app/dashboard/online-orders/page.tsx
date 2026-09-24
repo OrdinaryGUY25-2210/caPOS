@@ -110,7 +110,7 @@ export default function OnlineOrdersPage() {
         </button>
       </div>
 
-      <div className="grid grid-cols-3 gap-3 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
         <StatCard label="Omzet Kotor (30 transaksi terakhir)" value={formatRupiah(totalGross)} />
         <StatCard label="Total Komisi Platform" value={formatRupiah(totalCommission)} tone="urgent" />
         <StatCard label="Pendapatan Bersih" value={formatRupiah(totalNet)} tone="primary" />

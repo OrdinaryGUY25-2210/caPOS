@@ -132,37 +132,43 @@ function MenuEngineeringContent() {
       </div>
 
       <div className="card overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-neutral-50 text-neutral-500 text-xs">
-            <tr>
-              <th className="text-left px-4 py-3 font-medium">Menu</th>
-              <th className="text-right px-4 py-3 font-medium">Terjual</th>
-              <th className="text-right px-4 py-3 font-medium">Margin</th>
-              <th className="text-left px-4 py-3 font-medium">Klasifikasi</th>
-              <th className="text-left px-4 py-3 font-medium">Rekomendasi</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-neutral-100">
-            {rows.map((r) => (
-              <tr key={r.product_id}>
-                <td className="px-4 py-3 font-medium text-neutral-900">{r.product_name}</td>
-                <td className="px-4 py-3 text-right text-neutral-600">{r.qty_sold}</td>
-                <td className="px-4 py-3 text-right text-neutral-600">
-                  {formatRupiah(r.margin_amount)} <span className="text-neutral-400">({r.margin_pct}%)</span>
-                </td>
-                <td className="px-4 py-3">
-                  <span
-                    className="text-[11px] font-semibold px-2.5 py-1 rounded-full"
-                    style={{ backgroundColor: CLASS_COLOR[r.classification] + "20", color: CLASS_COLOR[r.classification] }}
-                  >
-                    {CLASS_LABEL[r.classification]}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-xs text-neutral-500 max-w-xs">{r.recommendation}</td>
+        {rows.length === 0 ? (
+          <p className="p-8 text-center text-sm text-neutral-400">
+            Belum cukup data penjualan untuk menghitung matriks menu engineering.
+          </p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-neutral-50 text-neutral-500 text-xs">
+              <tr>
+                <th className="text-left px-4 py-3 font-medium">Menu</th>
+                <th className="text-right px-4 py-3 font-medium">Terjual</th>
+                <th className="text-right px-4 py-3 font-medium">Margin</th>
+                <th className="text-left px-4 py-3 font-medium">Klasifikasi</th>
+                <th className="text-left px-4 py-3 font-medium">Rekomendasi</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-neutral-100">
+              {rows.map((r) => (
+                <tr key={r.product_id}>
+                  <td className="px-4 py-3 font-medium text-neutral-900">{r.product_name}</td>
+                  <td className="px-4 py-3 text-right text-neutral-600">{r.qty_sold}</td>
+                  <td className="px-4 py-3 text-right text-neutral-600">
+                    {formatRupiah(r.margin_amount)} <span className="text-neutral-400">({r.margin_pct}%)</span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span
+                      className="text-[11px] font-semibold px-2.5 py-1 rounded-full"
+                      style={{ backgroundColor: CLASS_COLOR[r.classification] + "20", color: CLASS_COLOR[r.classification] }}
+                    >
+                      {CLASS_LABEL[r.classification]}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-xs text-neutral-500 max-w-xs">{r.recommendation}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );

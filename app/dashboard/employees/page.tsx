@@ -9,9 +9,11 @@ import { getTier, FREE_TIER_LIMITS, TIER_LABEL, type Tier } from "@/lib/tier";
 import { ROLE_LABEL } from "@/lib/role";
 import { useBranch } from "@/lib/branchContext";
 import Modal from "@/components/Modal";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import PasswordInput from "@/components/PasswordInput";
 import type { Profile } from "@/lib/types";
 import { Skeleton, SkeletonList } from "@/components/Skeleton";
+import { toast } from "@/components/Toast";
 
 const JOB_TITLE_SUGGESTIONS = ["Kasir", "Barista", "Kasir Utama", "Asisten Manager"];
 
@@ -44,6 +46,9 @@ export default function EmployeesPage() {
     orders: { order_number: string; status: string; table_number: string | null }[];
   } | null>(null);
   const [checkingOrders, setCheckingOrders] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Profile | null>(null);
+  const [warningBusy, setWarningBusy] = useState(false);
+  const [warningError, setWarningError] = useState<string | null>(null);
   const [form, setForm] = useState({
     full_name: "", email: "", password: "", confirmPassword: "", role: "cashier", jobTitle: "", branchId: "",
   });
@@ -170,14 +175,21 @@ export default function EmployeesPage() {
       }
     }
 
-    await applyToggleActive(emp, next);
+    try {
+      await applyToggleActive(emp, next);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Gagal mengubah status karyawan.");
+    }
   }
 
   async function applyToggleActive(emp: Profile, next: boolean) {
     const supabase = createClient();
     setEmployees((prev) => prev.map((e) => (e.id === emp.id ? { ...e, is_active: next } : e)));
     const { error } = await supabase.from("profiles").update({ is_active: next }).eq("id", emp.id);
-    if (error) setEmployees((prev) => prev.map((e) => (e.id === emp.id ? { ...e, is_active: !next } : e)));
+    if (error) {
+      setEmployees((prev) => prev.map((e) => (e.id === emp.id ? { ...e, is_active: !next } : e)));
+      throw new Error(error.message);
+    }
   }
 
   async function removeEmployee(emp: Profile) {
@@ -188,18 +200,19 @@ export default function EmployeesPage() {
       setActiveOrdersWarning({ employee: emp, action: "delete", orders });
       return;
     }
-    await applyRemoveEmployee(emp.id);
+    // Item #28 — buka dialog Confirmation dulu; eksekusi sesungguhnya
+    // (Processing/Success/Error) ditangani ConfirmDialog di bawah.
+    setDeleteTarget(emp);
   }
 
   async function applyRemoveEmployee(id: string) {
-    if (!confirm("Hapus akun karyawan ini secara permanen?")) return;
     const res = await fetch(`/api/employees?id=${id}`, { method: "DELETE" });
     if (res.ok) {
       setEmployees((prev) => prev.filter((e) => e.id !== id));
       setLimitReached(false);
     } else {
-      const result = await res.json();
-      alert(result.message || "Gagal menghapus karyawan.");
+      const result = await res.json().catch(() => ({}));
+      throw new Error(result.message || "Gagal menghapus karyawan.");
     }
   }
 
@@ -303,21 +316,38 @@ export default function EmployeesPage() {
       {activeOrdersWarning && (
         <Modal
           title="Masih Ada Pesanan Aktif"
-          onClose={() => setActiveOrdersWarning(null)}
+          onClose={() => !warningBusy && (setActiveOrdersWarning(null), setWarningError(null))}
           footer={
             <div className="flex gap-2 w-full">
-              <button onClick={() => setActiveOrdersWarning(null)} className="btn-outline flex-1">
+              <button
+                onClick={() => {
+                  setActiveOrdersWarning(null);
+                  setWarningError(null);
+                }}
+                disabled={warningBusy}
+                className="btn-outline flex-1 disabled:opacity-60"
+              >
                 Batal
               </button>
               <button
-                onClick={() => {
+                onClick={async () => {
                   const { employee, action } = activeOrdersWarning;
-                  setActiveOrdersWarning(null);
-                  if (action === "deactivate") applyToggleActive(employee, false);
-                  else applyRemoveEmployee(employee.id);
+                  setWarningError(null);
+                  setWarningBusy(true);
+                  try {
+                    if (action === "deactivate") await applyToggleActive(employee, false);
+                    else await applyRemoveEmployee(employee.id);
+                    setWarningBusy(false);
+                    setActiveOrdersWarning(null);
+                  } catch (e) {
+                    setWarningBusy(false);
+                    setWarningError(e instanceof Error ? e.message : "Gagal memproses. Silakan coba lagi.");
+                  }
                 }}
-                className="btn-primary flex-1 !bg-urgent hover:!bg-red-600"
+                disabled={warningBusy}
+                className="btn-primary flex-1 !bg-urgent hover:!bg-red-600 flex items-center justify-center gap-2 disabled:opacity-60"
               >
+                {warningBusy && <Loader2 className="animate-spin" size={16} />}
                 {activeOrdersWarning.action === "deactivate" ? "Tetap Nonaktifkan" : "Tetap Hapus"}
               </button>
             </div>
@@ -339,7 +369,27 @@ export default function EmployeesPage() {
               </div>
             ))}
           </div>
+          {warningError && (
+            <div className="mt-3 rounded-xl bg-urgent-light/60 border border-urgent/20 p-2.5 text-xs text-urgent">
+              {warningError}
+            </div>
+          )}
         </Modal>
+      )}
+
+      {deleteTarget && (
+        <ConfirmDialog
+          title="Hapus Akun Karyawan?"
+          description={
+            <>
+              Akun <strong>{deleteTarget.full_name}</strong> akan dihapus secara permanen dan tidak bisa dibatalkan.
+            </>
+          }
+          confirmLabel="Ya, Hapus"
+          successMessage="Karyawan dihapus."
+          onClose={() => setDeleteTarget(null)}
+          onConfirm={() => applyRemoveEmployee(deleteTarget.id)}
+        />
       )}
 
       {showForm && (

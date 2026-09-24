@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, Suspense } from "react";
-import { Search, Plus, Minus, Trash2, Printer, ScanLine } from "lucide-react";
+import { Search, Plus, Minus, Trash2, Printer, ScanLine, Loader2 } from "lucide-react";
 import PosNavbar from "@/components/PosNavbar";
 import Receipt, { type ReceiptData } from "@/components/Receipt";
 import Modal from "@/components/Modal";
@@ -103,6 +103,7 @@ export default function PosPage() {
     getPointsRedeemRate().then((res) => setPointsRedeemRate(res.data ?? 0));
   }, []);
   const [showCheckout, setShowCheckout] = useState(false);
+  const [checkingOut, setCheckingOut] = useState(false);
   const [showCartSheet, setShowCartSheet] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("cash");
   // --- QRIS Dinamis (Midtrans per-cabang, migration_018) — TERISOLASI
@@ -780,6 +781,23 @@ export default function PosPage() {
   }, []);
 
   async function handleCheckout() {
+    // Item #29 — Duplicate request protection. Tombol "Selesaikan
+    // Transaksi" sebelumnya TIDAK di-disable selama request berjalan,
+    // jadi tap ganda (jaringan lambat/gugup) bisa memicu 2x
+    // checkout_transaction() dengan 2 invoice_number berbeda (dibuat
+    // ulang setiap panggilan) → 2 transaksi nyata, 2x potong stok, 2
+    // struk. Guard di sini + `disabled={checkingOut}` di tombolnya
+    // memastikan hanya 1 checkout yang berjalan dalam satu waktu.
+    if (checkingOut) return;
+    setCheckingOut(true);
+    try {
+      await handleCheckoutInner();
+    } finally {
+      setCheckingOut(false);
+    }
+  }
+
+  async function handleCheckoutInner() {
     if (!session) {
       toast.error("Sesi tidak ditemukan. Silakan login ulang.");
       return;
@@ -1296,10 +1314,11 @@ export default function PosPage() {
             }}
             footer={
               <button
-                disabled={cashInsufficient || qrisDynamicNotPaid}
+                disabled={cashInsufficient || qrisDynamicNotPaid || checkingOut}
                 onClick={handleCheckout}
-                className="btn-primary w-full disabled:opacity-50"
+                className="btn-primary w-full disabled:opacity-50 flex items-center justify-center gap-2"
               >
+                {checkingOut && <Loader2 className="animate-spin" size={16} />}
                 {qrisStatus === "paid" ? "Pembayaran Diterima — Selesaikan Transaksi" : "Selesaikan Transaksi"}
               </button>
             }

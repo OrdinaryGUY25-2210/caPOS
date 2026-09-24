@@ -1,11 +1,37 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Users, Repeat, Wallet, AlertTriangle } from "lucide-react";
+import { Loader2, Users, Repeat, Wallet, AlertTriangle, Download } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { formatRupiah } from "@/lib/utils";
 import type { GrowthSummary, CustomerVisitStats } from "@/lib/types";
+
+function exportCustomersToCsv(filename: string, rows: CustomerVisitStats[]) {
+  if (rows.length === 0) return;
+  const header = ["nama", "telepon", "kunjungan", "lifetime_value", "hari_sejak_kunjungan_terakhir"];
+  const escape = (v: string | number) => {
+    const s = String(v ?? "");
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const lines = [
+    header.join(","),
+    ...rows.map((r) =>
+      [r.customer_name, r.customer_phone, r.visit_count, r.lifetime_value, r.days_since_last_visit ?? ""]
+        .map(escape)
+        .join(",")
+    ),
+  ];
+  const blob = new Blob(["\uFEFF" + lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
 
 /**
  * Proyeksi Tren & Retensi Pelanggan — Repeat Visit Rate, Customer Lifetime
@@ -74,7 +100,17 @@ export default function GrowthAnalyticsPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div>
-          <h2 className="font-bold text-neutral-900 mb-3 text-sm">Pelanggan Bernilai Tertinggi (LTV)</h2>
+          <h2 className="font-bold text-neutral-900 mb-3 text-sm flex items-center justify-between">
+            Pelanggan Bernilai Tertinggi (LTV)
+            {topCustomers.length > 0 && (
+              <button
+                onClick={() => exportCustomersToCsv("pelanggan-bernilai-tertinggi.csv", topCustomers)}
+                className="text-xs font-medium text-neutral-500 border border-neutral-200 rounded-lg px-2 py-1 flex items-center gap-1"
+              >
+                <Download size={11} /> CSV
+              </button>
+            )}
+          </h2>
           <div className="bg-white rounded-2xl border border-neutral-200 divide-y divide-neutral-100">
             {topCustomers.length === 0 && <p className="p-4 text-xs text-neutral-400 text-center">Belum ada data.</p>}
             {topCustomers.map((c) => (
@@ -90,8 +126,18 @@ export default function GrowthAnalyticsPage() {
         </div>
 
         <div>
-          <h2 className="font-bold text-neutral-900 mb-3 text-sm">
-            Pelanggan Tidak Aktif <span className="text-neutral-400 font-normal">— kandidat voucher comeback</span>
+          <h2 className="font-bold text-neutral-900 mb-3 text-sm flex items-center justify-between">
+            <span>
+              Pelanggan Tidak Aktif <span className="text-neutral-400 font-normal">— kandidat voucher comeback</span>
+            </span>
+            {inactive.length > 0 && (
+              <button
+                onClick={() => exportCustomersToCsv("pelanggan-tidak-aktif.csv", inactive)}
+                className="text-xs font-medium text-neutral-500 border border-neutral-200 rounded-lg px-2 py-1 flex items-center gap-1 shrink-0"
+              >
+                <Download size={11} /> CSV
+              </button>
+            )}
           </h2>
           <div className="bg-white rounded-2xl border border-neutral-200 divide-y divide-neutral-100">
             {inactive.length === 0 && <p className="p-4 text-xs text-neutral-400 text-center">Semua pelanggan aktif. 🎉</p>}

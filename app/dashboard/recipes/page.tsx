@@ -8,6 +8,7 @@ import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { isManagerOrOwner } from "@/lib/role";
 import type { Product, ProductVariant, Recipe, RecipeItem, Ingredient } from "@/lib/types";
 import { Skeleton, SkeletonList } from "@/components/Skeleton";
+import ConfirmDialog from "@/components/ConfirmDialog";
 
 /**
  * Recipe Builder — Phase 2A F&B Master Data.
@@ -35,6 +36,7 @@ export default function RecipesPage() {
   const [saving, setSaving] = useState(false);
   const [costPreview, setCostPreview] = useState<number | null>(null);
   const [calculating, setCalculating] = useState(false);
+  const [confirmDeactivate, setConfirmDeactivate] = useState(false);
 
   const canWrite = isManagerOrOwner(role);
 
@@ -199,15 +201,16 @@ export default function RecipesPage() {
     if (selectedProductId) loadForProduct(selectedProductId);
   }
 
-  async function toggleActive() {
+  function toggleActive() {
     if (!activeRecipe) return;
-    if (!confirm(`Nonaktifkan resep ini? Menu/varian ini tidak akan mengurangi stok bahan otomatis sampai resep baru dibuat/diaktifkan.`)) return;
+    setConfirmDeactivate(true);
+  }
+
+  async function applyDeactivate() {
+    if (!activeRecipe) return;
     const supabase = createClient();
     const { error } = await supabase.from("recipes").update({ is_active: false }).eq("id", activeRecipe.id);
-    if (error) {
-      alert("Gagal: " + error.message);
-      return;
-    }
+    if (error) throw new Error(error.message);
     if (selectedProductId) loadForProduct(selectedProductId);
   }
 
@@ -408,6 +411,17 @@ export default function RecipesPage() {
 
       {!selectedProductId && (
         <div className={cx("card p-10 text-center text-neutral-400")}>Pilih menu di atas untuk melihat atau membuat resepnya.</div>
+      )}
+
+      {confirmDeactivate && (
+        <ConfirmDialog
+          title="Nonaktifkan Resep?"
+          description="Menu/varian ini tidak akan mengurangi stok bahan otomatis sampai resep baru dibuat/diaktifkan."
+          confirmLabel="Ya, Nonaktifkan"
+          successMessage="Resep dinonaktifkan."
+          onClose={() => setConfirmDeactivate(false)}
+          onConfirm={applyDeactivate}
+        />
       )}
     </div>
   );

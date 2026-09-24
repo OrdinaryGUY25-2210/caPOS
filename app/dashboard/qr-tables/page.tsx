@@ -7,6 +7,7 @@ import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { useBranch, ALL_BRANCHES } from "@/lib/branchContext";
 import type { BranchTable } from "@/lib/types";
 import QrTableCard from "@/components/tables/QrTableCard";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import { downloadTablesPdf } from "@/components/tables/qrPdfExport";
 
 /**
@@ -23,6 +24,7 @@ export default function QrTablesPage() {
   const [newCapacity, setNewCapacity] = useState("4");
   const [saving, setSaving] = useState(false);
   const [siteOrigin, setSiteOrigin] = useState("https://capos.id");
+  const [deactivateTarget, setDeactivateTarget] = useState<BranchTable | null>(null);
 
   const effectiveBranchId = selectedBranchId === ALL_BRANCHES ? branches[0]?.id : selectedBranchId;
 
@@ -73,10 +75,14 @@ export default function QrTablesPage() {
     load();
   }
 
-  async function removeTable(id: string) {
-    if (!confirm("Nonaktifkan meja ini? QR yang sudah dicetak tidak akan bisa dipakai lagi.")) return;
+  function removeTable(table: BranchTable) {
+    setDeactivateTarget(table);
+  }
+
+  async function applyRemoveTable(id: string) {
     const supabase = createClient();
-    await supabase.from("branch_tables").update({ is_active: false }).eq("id", id);
+    const { error } = await supabase.from("branch_tables").update({ is_active: false }).eq("id", id);
+    if (error) throw new Error(error.message);
     load();
   }
 
@@ -148,10 +154,21 @@ export default function QrTablesPage() {
                 key={table.id}
                 table={table}
                 orderUrl={orderUrlFor(table.table_number)}
-                onDeactivate={() => removeTable(table.id)}
+                onDeactivate={() => removeTable(table)}
               />
             ))}
         </div>
+      )}
+
+      {deactivateTarget && (
+        <ConfirmDialog
+          title="Nonaktifkan Meja?"
+          description={`QR meja "${deactivateTarget.table_number}" yang sudah dicetak tidak akan bisa dipakai lagi setelah dinonaktifkan.`}
+          confirmLabel="Ya, Nonaktifkan"
+          successMessage="Meja dinonaktifkan."
+          onClose={() => setDeactivateTarget(null)}
+          onConfirm={() => applyRemoveTable(deactivateTarget.id)}
+        />
       )}
     </div>
   );

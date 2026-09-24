@@ -8,6 +8,7 @@ import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { useBranch, ALL_BRANCHES } from "@/lib/branchContext";
 import { isManagerOrOwner } from "@/lib/role";
 import Modal from "@/components/Modal";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import type { Ingredient, Unit } from "@/lib/types";
 import { Skeleton, SkeletonStatGrid, SkeletonTableRows } from "@/components/Skeleton";
 
@@ -42,6 +43,7 @@ export default function IngredientsPage() {
   const [editing, setEditing] = useState<Ingredient | "new" | null>(null);
   const [restocking, setRestocking] = useState<Ingredient | null>(null);
   const [saving, setSaving] = useState(false);
+  const [archiveTarget, setArchiveTarget] = useState<Ingredient | null>(null);
 
   const isConsolidated = selectedBranchId === ALL_BRANCHES;
   const canWrite = isManagerOrOwner(role);
@@ -179,17 +181,17 @@ export default function IngredientsPage() {
     loadAll();
   }
 
-  async function toggleArchive(ing: Ingredient) {
-    if (!confirm(`${ing.status === "active" ? "Arsipkan" : "Aktifkan kembali"} bahan "${ing.name}"?`)) return;
+  function toggleArchive(ing: Ingredient) {
+    setArchiveTarget(ing);
+  }
+
+  async function applyToggleArchive(ing: Ingredient) {
     const supabase = createClient();
     const { error } = await supabase
       .from("ingredients")
       .update({ status: ing.status === "active" ? "inactive" : "active" })
       .eq("id", ing.id);
-    if (error) {
-      alert("Gagal: " + error.message);
-      return;
-    }
+    if (error) throw new Error(error.message);
     loadAll();
   }
 
@@ -419,6 +421,18 @@ export default function IngredientsPage() {
 
       {restocking && (
         <AdjustStockModal ingredient={restocking} saving={saving} onClose={() => setRestocking(null)} onSubmit={doAdjustStock} />
+      )}
+
+      {archiveTarget && (
+        <ConfirmDialog
+          title={archiveTarget.status === "active" ? "Arsipkan Bahan?" : "Aktifkan Kembali Bahan?"}
+          description={`${archiveTarget.status === "active" ? "Arsipkan" : "Aktifkan kembali"} bahan "${archiveTarget.name}"?`}
+          danger={archiveTarget.status === "active"}
+          confirmLabel={archiveTarget.status === "active" ? "Ya, Arsipkan" : "Ya, Aktifkan"}
+          successMessage={archiveTarget.status === "active" ? "Bahan diarsipkan." : "Bahan diaktifkan kembali."}
+          onClose={() => setArchiveTarget(null)}
+          onConfirm={() => applyToggleArchive(archiveTarget)}
+        />
       )}
     </div>
   );

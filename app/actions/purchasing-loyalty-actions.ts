@@ -842,7 +842,7 @@ export async function getPromotions() {
 
     const { data, error } = await supabase
       .from('promotions')
-      .select('*, vouchers(*)')
+      .select('*, vouchers(*), promotion_rules(*)')
       .eq('tenant_id', profile.tenant_id)
       .order('created_at', { ascending: false });
 

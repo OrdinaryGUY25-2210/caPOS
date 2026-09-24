@@ -7,7 +7,7 @@ import { Zap, CheckCircle2, XCircle, Loader2 } from "lucide-react";
 import { whatsappLink, daysRemaining, formatRupiah } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
-import { getTier, type Tier } from "@/lib/tier";
+import { getTier, TIER_LABEL, type Tier } from "@/lib/tier";
 import { Skeleton } from "@/components/Skeleton";
 
 import { toast } from "@/components/Toast";
@@ -45,6 +45,19 @@ const PLANS = [
   },
 ] as const;
 
+const PLAN_KEY_TO_TIER: Record<string, Tier> = { free: "free", monthly: "pro", yearly: "supreme" };
+const TIER_RANK: Record<Tier, number> = { free: 0, pro: 1, supreme: 2 };
+
+const BILLING_CYCLE_LABEL: Record<string, string> = {
+  monthly: "Bulanan",
+  yearly: "Tahunan",
+};
+
+function formatDateID(iso: string | null) {
+  if (!iso) return "-";
+  return new Date(iso).toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" });
+}
+
 const COMPARISON_ROWS: { label: string; free: string | boolean; pro: string | boolean; supreme: string | boolean }[] = [
   { label: "Akun Kasir Tambahan", free: "Maks 2", pro: "Unlimited", supreme: "Unlimited" },
   { label: "Jumlah Menu", free: "Maks 10", pro: "Unlimited", supreme: "Unlimited" },
@@ -73,6 +86,8 @@ export default function SubscriptionPage() {
   const [snapReady, setSnapReady] = useState(false);
   const [status, setStatus] = useState<string>("trial");
   const [currentTier, setCurrentTier] = useState<Tier>("free");
+  const [planCycle, setPlanCycle] = useState<string | null>(null);
+  const [periodEndDate, setPeriodEndDate] = useState<string | null>(null);
   const [daysLeft, setDaysLeft] = useState<number>(0);
   const [payingPlan, setPayingPlan] = useState<string | null>(null);
   const [paymentError, setPaymentError] = useState<string | null>(null);
@@ -109,7 +124,9 @@ export default function SubscriptionPage() {
     if (sub) {
       setStatus(sub.status);
       setCurrentTier(getTier(sub));
+      setPlanCycle(sub.plan ?? null);
       const relevantDate = sub.status === "trial" ? sub.trial_ends_at : sub.valid_until;
+      setPeriodEndDate(relevantDate ?? null);
       setDaysLeft(relevantDate ? daysRemaining(relevantDate) : 0);
     }
     setLoading(false);
@@ -229,30 +246,56 @@ export default function SubscriptionPage() {
           <Skeleton className="h-5 w-20 rounded-full" />
         </div>
       ) : (
-        <div className="card p-5 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl bg-warning-light flex items-center justify-center">
-              <Zap className="text-warning" size={20} />
+        <div className="card p-5 space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-xl bg-warning-light flex items-center justify-center shrink-0">
+                <Zap className="text-warning" size={20} />
+              </div>
+              <div>
+                <p className="font-semibold text-neutral-900 text-sm">
+                  Paket saat ini: {TIER_LABEL[currentTier]}
+                </p>
+                <p className="text-xs text-neutral-500">
+                  {status === "active"
+                    ? `Berakhir dalam ${daysLeft} hari`
+                    : status === "trial"
+                    ? `Trial berakhir dalam ${daysLeft > 0 ? `${daysLeft} hari` : "hari ini"}`
+                    : "Perpanjang untuk mengaktifkan kembali"}
+                </p>
+              </div>
+            </div>
+            {status === "active" && <span className="badge-active">Active</span>}
+            {status === "trial" && daysLeft <= 3 && <span className="badge-urgent">Trial Hampir Habis</span>}
+            {status === "trial" && daysLeft > 3 && <span className="badge-warning">Trial</span>}
+            {(status === "expired" || status === "past_due") && <span className="badge-urgent">{status === "past_due" ? "Tertunggak" : "Kedaluwarsa"}</span>}
+          </div>
+
+          {/* Ringkasan Current Plan / Billing Period / Status secara eksplisit,
+              supaya owner tidak perlu menebak-nebak dari 1 kalimat saja. */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3 border-t border-neutral-100 text-sm">
+            <div>
+              <p className="text-xs text-neutral-400">Paket (Current Plan)</p>
+              <p className="font-medium text-neutral-900 mt-0.5">{TIER_LABEL[currentTier]}</p>
             </div>
             <div>
-              <p className="font-semibold text-neutral-900 text-sm">
-                Paket saat ini: {currentTier === "free" ? "Free Trial" : currentTier === "pro" ? "Pro" : "Supreme"}
+              <p className="text-xs text-neutral-400">Periode Tagihan (Billing Period)</p>
+              <p className="font-medium text-neutral-900 mt-0.5">
+                {status === "trial" ? "Trial 28 Hari" : planCycle ? BILLING_CYCLE_LABEL[planCycle] ?? planCycle : "-"}
+                {periodEndDate && <span className="text-neutral-500 font-normal"> · s/d {formatDateID(periodEndDate)}</span>}
               </p>
-              <p className="text-xs text-neutral-500">
-                {status === "active"
-                  ? `Berakhir dalam ${daysLeft} hari`
-                  : status === "trial"
-                  ? `Trial berakhir dalam ${daysLeft > 0 ? `${daysLeft} hari` : "hari ini"}`
-                  : "Perpanjang untuk mengaktifkan kembali"}
+            </div>
+            <div>
+              <p className="text-xs text-neutral-400">Status</p>
+              <p className="font-medium text-neutral-900 mt-0.5 capitalize">
+                {status === "active" ? "Aktif" : status === "trial" ? "Trial" : status === "past_due" ? "Tertunggak" : "Kedaluwarsa"}
               </p>
             </div>
           </div>
-          {status !== "active" && daysLeft <= 3 && <span className="badge-urgent">Trial Hampir Habis</span>}
-          {status === "active" && <span className="badge-active">Active</span>}
         </div>
       )}
 
-      {/* Kuota Cabang/Staf (requirement #1) — pemakaian live vs batas paket. */}
+      {/* Kuota Cabang/Staf (requirement #1) — pemakaian live vs batas paket (Usage/Limit). */}
       {!loading && quota && (
         <div className="grid grid-cols-2 gap-4">
           <QuotaCard label="Cabang Terpakai" used={quota.branch_count} limit={quota.branch_limit} />
@@ -287,11 +330,29 @@ export default function SubscriptionPage() {
           const discountedPrice = plan.payable && availableDiscountPct > 0
             ? Math.round(plan.rawAmount * (1 - availableDiscountPct / 100))
             : null;
+          const planTier = PLAN_KEY_TO_TIER[plan.key];
+          const isCurrent = planTier === currentTier;
+          const buttonLabel = isCurrent
+            ? "Perpanjang Paket Ini"
+            : TIER_RANK[planTier] > TIER_RANK[currentTier]
+            ? `Upgrade ke ${plan.name}`
+            : `Ganti ke ${plan.name}`;
           return (
-          <div key={plan.key} className={plan.highlight ? "card p-5 border-2 border-primary relative" : "card p-5"}>
+          <div
+            key={plan.key}
+            className={
+              (plan.highlight ? "card p-5 border-2 border-primary relative" : "card p-5 relative") +
+              (isCurrent ? " ring-2 ring-offset-2 ring-emerald-500" : "")
+            }
+          >
             {plan.highlight && (
               <span className="absolute -top-3 left-5 bg-primary text-white text-xs font-semibold px-2.5 py-1 rounded-full">
                 Paling Populer
+              </span>
+            )}
+            {isCurrent && (
+              <span className="absolute -top-3 right-5 bg-emerald-600 text-white text-xs font-semibold px-2.5 py-1 rounded-full">
+                Paket Anda Saat Ini
               </span>
             )}
             <p className="font-semibold text-neutral-900">{plan.name}</p>
@@ -324,11 +385,11 @@ export default function SubscriptionPage() {
                 }
               >
                 {payingPlan === plan.key && <Loader2 className="animate-spin" size={16} />}
-                {!snapReady && payingPlan !== plan.key ? "Memuat Midtrans..." : "Perpanjang Sekarang"}
+                {!snapReady && payingPlan !== plan.key ? "Memuat Midtrans..." : buttonLabel}
               </button>
             ) : (
               <div className="w-full mt-5 text-center text-xs text-neutral-400 py-2.5">
-                {currentTier === "free" ? "Paket Anda saat ini" : "Paket awal (sudah dilewati)"}
+                {isCurrent ? "Paket Anda saat ini" : "Paket awal (sudah dilewati)"}
               </div>
             )}
           </div>
@@ -347,18 +408,24 @@ export default function SubscriptionPage() {
             <thead>
               <tr className="border-b border-neutral-100 text-neutral-500">
                 <th className="text-left font-medium py-2.5 px-4">Fitur</th>
-                <th className="text-center font-medium py-2.5 px-3">Free Trial</th>
-                <th className="text-center font-medium py-2.5 px-3 text-primary-dark">Pro</th>
-                <th className="text-center font-medium py-2.5 px-3">Supreme</th>
+                <th className={"text-center font-medium py-2.5 px-3" + (currentTier === "free" ? " text-primary-dark bg-primary-light/30 rounded-t-lg" : "")}>
+                  Free Trial{currentTier === "free" && <span className="block text-[10px] font-normal">Paket Anda</span>}
+                </th>
+                <th className={"text-center font-medium py-2.5 px-3" + (currentTier === "pro" ? " text-primary-dark bg-primary-light/30 rounded-t-lg" : "")}>
+                  Pro{currentTier === "pro" && <span className="block text-[10px] font-normal">Paket Anda</span>}
+                </th>
+                <th className={"text-center font-medium py-2.5 px-3" + (currentTier === "supreme" ? " text-primary-dark bg-primary-light/30 rounded-t-lg" : "")}>
+                  Supreme{currentTier === "supreme" && <span className="block text-[10px] font-normal">Paket Anda</span>}
+                </th>
               </tr>
             </thead>
             <tbody>
               {COMPARISON_ROWS.map((row) => (
                 <tr key={row.label} className="border-b border-neutral-50 last:border-0">
                   <td className="py-2.5 px-4 text-neutral-700">{row.label}</td>
-                  <ComparisonCell value={row.free} />
-                  <ComparisonCell value={row.pro} highlight />
-                  <ComparisonCell value={row.supreme} />
+                  <ComparisonCell value={row.free} highlight={currentTier === "free"} />
+                  <ComparisonCell value={row.pro} highlight={currentTier === "pro"} />
+                  <ComparisonCell value={row.supreme} highlight={currentTier === "supreme"} />
                 </tr>
               ))}
             </tbody>

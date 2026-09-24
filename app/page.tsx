@@ -1,13 +1,11 @@
-import { Suspense } from "react";
-import LoginForm from "./LoginForm";
+import { redirect } from "next/navigation";
 
-// Dibungkus Suspense karena LoginForm (client component) memakai
-// useSearchParams() (dipakai buat baca ?deactivated=1 — lihat LoginForm.tsx)
-// yang mewajibkan boundary Suspense di Next.js App Router.
-export default function LoginPage() {
-  return (
-    <Suspense fallback={null}>
-      <LoginForm />
-    </Suspense>
-  );
+// Middleware (lihat middleware.ts) sudah menangani redirect "/" -> home
+// sesuai role UNTUK USER YANG SUDAH LOGIN (super_admin -> /admin,
+// owner/manager -> /dashboard, cashier -> /pos, kitchen -> /kitchen).
+// "/" sengaja dikecualikan dari guard auth di middleware supaya request
+// ke root tidak nyangkut sebelum sempat dicek. Kalau kode sampai di
+// sini artinya user BELUM login — lempar ke /login.
+export default function RootPage() {
+  redirect("/login");
 }

@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { generateReferralCode } from "@/lib/generateReferralCode";
 import Modal from "@/components/Modal";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import { Skeleton, SkeletonStatGrid, SkeletonList } from "@/components/Skeleton";
 
 interface TenantRow {
@@ -52,6 +53,7 @@ export default function AdminPanel() {
   const [showSpecialForm, setShowSpecialForm] = useState(false);
   const [savingSpecial, setSavingSpecial] = useState(false);
   const [togglingCodeId, setTogglingCodeId] = useState<string | null>(null);
+  const [confirmLogout, setConfirmLogout] = useState(false);
 
   async function loadData() {
     setLoading(true);
@@ -220,9 +222,10 @@ export default function AdminPanel() {
     loadData();
   }
 
-  async function handleLogout() {
+  async function applyLogout() {
     const supabase = createClient();
-    await supabase.auth.signOut();
+    const { error } = await supabase.auth.signOut();
+    if (error) throw new Error(error.message);
     router.push("/login");
   }
 
@@ -256,7 +259,7 @@ export default function AdminPanel() {
           <span className="font-bold">caPOS — Super Admin</span>
           <span className="text-xs bg-white/10 px-2 py-0.5 rounded-full ml-2">Studio D13</span>
         </div>
-        <button onClick={handleLogout} className="text-neutral-400 hover:text-white flex items-center gap-1.5 text-sm">
+        <button onClick={() => setConfirmLogout(true)} className="text-neutral-400 hover:text-white flex items-center gap-1.5 text-sm">
           <LogOut size={16} /> Keluar
         </button>
       </header>
@@ -414,6 +417,17 @@ export default function AdminPanel() {
           saving={savingSpecial}
           onClose={() => setShowSpecialForm(false)}
           onSave={createSpecialCode}
+        />
+      )}
+
+      {confirmLogout && (
+        <ConfirmDialog
+          title="Keluar dari Akun?"
+          description="Anda akan keluar dari sesi Super Admin ini di perangkat ini."
+          danger={false}
+          confirmLabel="Ya, Keluar"
+          onClose={() => setConfirmLogout(false)}
+          onConfirm={applyLogout}
         />
       )}
     </div>
