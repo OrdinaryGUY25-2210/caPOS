@@ -1,39 +1,51 @@
 "use client";
 
-import type { OrderItem } from "@/lib/types";
+import React from "react";
 
-export default function KitchenItem({
-  item,
-  stationName,
-}: {
+// Tipe data fleksibel untuk menangani properti 'notes' maupun 'note'
+export interface OrderItem {
+  id: string;
+  name: string;
+  quantity: number;
+  notes?: string;
+  note?: string;
+  modifiers?: Array<{ name: string; value?: string }>;
+  variant?: { name: string };
+  [key: string]: any;
+}
+
+interface KitchenItemProps {
   item: OrderItem;
-  stationName?: string;
-}) {
-  const configParts = [
-    item.variant_name,
-    ...(item.modifier_selections ?? []).map((m) => m.name),
-  ].filter(Boolean);
+}
+
+export default function KitchenItem({ item }: KitchenItemProps) {
+  // Mengambil catatan dari item.notes atau item.note sebagai fallback
+  const itemNote = item.notes || item.note;
+
+  const configParts: string[] = [];
+  if (item.variant?.name) {
+    configParts.push(item.variant.name);
+  }
+  if (item.modifiers && item.modifiers.length > 0) {
+    item.modifiers.forEach((m) => configParts.push(m.name));
+  }
 
   return (
-    <div className="py-1.5 border-b border-dashed border-neutral-200 last:border-0">
-      <div className="flex items-start gap-2">
-        <span className="text-sm font-bold text-neutral-900 tabular-nums w-7 shrink-0 pt-px">
-          {item.qty}×
-        </span>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-neutral-900 leading-tight break-words">
-            {item.product_name}
-          </p>
+    <div className="py-2 border-b border-zinc-100 dark:border-zinc-800 last:border-0">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <span className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">
+            {item.quantity}x {item.name}
+          </span>
           {configParts.length > 0 && (
-            <p className="text-xs text-primary-dark mt-0.5 leading-tight">{configParts.join(" · ")}</p>
-          )}
-          {item.notes && (
-            <p className="text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 mt-1 inline-block">
-              📝 {item.notes}
+            <p className="text-xs text-zinc-500 mt-0.5 leading-tight">
+              {configParts.join(" · ")}
             </p>
           )}
-          {stationName && (
-            <p className="text-[10px] uppercase tracking-wide text-neutral-400 mt-0.5">{stationName}</p>
+          {itemNote && (
+            <p className="text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 mt-1 inline-block">
+              📝 {itemNote}
+            </p>
           )}
         </div>
       </div>
