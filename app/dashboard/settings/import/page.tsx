@@ -266,7 +266,7 @@ export default function ImportPage() {
 
   return (
     <div className="space-y-6">
-      <SettingsHeader title="Import Data" description="Impor data dari file CSV atau Excel" />
+      <SettingsHeader backHref="/dashboard/settings" title="Import Data" description="Impor data dari file CSV atau Excel" />
 
       <Card className="p-6 space-y-4">
         {step === 'type' && (

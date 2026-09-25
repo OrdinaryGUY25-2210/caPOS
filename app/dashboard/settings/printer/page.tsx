@@ -14,7 +14,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 export default function PrinterSettingsPage() {
   return (
     <div className="space-y-6">
-      <SettingsHeader title="Pengaturan Printer" description="Kelola printer yang tersedia" />
+      <SettingsHeader backHref="/dashboard/settings" title="Pengaturan Printer" description="Kelola printer yang tersedia" />
 
       <Alert
         variant="info"

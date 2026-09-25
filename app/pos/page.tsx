@@ -153,6 +153,11 @@ export default function PosPage() {
     // tenants.receipt_paper_width (migration_16 bagian I), diatur di
     // /dashboard/settings.
     paperWidth: "80mm" as "58mm" | "80mm",
+    // Header/footer kustom kwitansi — tenants.receipt_header_text /
+    // receipt_footer_text (migration_018), diatur di
+    // /dashboard/settings/receipt.
+    headerText: null as string | null,
+    footerText: null as string | null,
   });
 
   // --- Shift Closing Kasir (Blind Z-Report) ---
@@ -260,7 +265,9 @@ export default function PosPage() {
       // Muat data kafe (nama/alamat/WiFi/lebar kertas) untuk struk.
       const { data: tenant } = await supabase
         .from("tenants")
-        .select("name, show_wifi_on_receipt, wifi_ssid, wifi_password, receipt_paper_width")
+        .select(
+          "name, show_wifi_on_receipt, wifi_ssid, wifi_password, receipt_paper_width, receipt_header_text, receipt_footer_text"
+        )
         .eq("id", profile.tenant_id)
         .single();
       if (tenant) {
@@ -271,6 +278,8 @@ export default function PosPage() {
           wifiSsid: tenant.wifi_ssid ?? prev.wifiSsid,
           wifiPassword: tenant.wifi_password ?? prev.wifiPassword,
           paperWidth: (tenant.receipt_paper_width as "58mm" | "80mm") ?? prev.paperWidth,
+          headerText: tenant.receipt_header_text ?? null,
+          footerText: tenant.receipt_footer_text ?? null,
         }));
 
         // Logo kafi (Storage, path tetap `${tenant_id}/cafe-logo.jpg`) —
@@ -931,6 +940,8 @@ export default function PosPage() {
       showWifi: cafeSettings.showWifi,
       wifiSsid: cafeSettings.wifiSsid,
       wifiPassword: cafeSettings.wifiPassword,
+      headerText: cafeSettings.headerText,
+      footerText: cafeSettings.footerText,
       width: cafeSettings.paperWidth,
       // Uang diterima/kembalian (tunai) — kosong untuk metode lain.
       cashReceived: paymentMethod === "cash" ? Number(cashReceived) : undefined,
@@ -979,6 +990,8 @@ export default function PosPage() {
       showWifi: cafeSettings.showWifi,
       wifiSsid: cafeSettings.wifiSsid,
       wifiPassword: cafeSettings.wifiPassword,
+      headerText: cafeSettings.headerText,
+      footerText: cafeSettings.footerText,
       width: cafeSettings.paperWidth,
     });
   }

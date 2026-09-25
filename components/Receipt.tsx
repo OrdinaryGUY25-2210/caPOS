@@ -18,6 +18,10 @@ export interface ReceiptData {
   showWifi: boolean;
   wifiSsid?: string;
   wifiPassword?: string;
+  /** Teks custom di atas nama kafe — diatur di /dashboard/settings/receipt (migration_018). */
+  headerText?: string | null;
+  /** Teks custom di footer, sebelum baris "powered by caPOS" — diatur di /dashboard/settings/receipt. */
+  footerText?: string | null;
   width: "58mm" | "80mm";
   /** Uang diterima & kembalian (khusus metode "cash") — Requirement 2. */
   cashReceived?: number;
@@ -33,6 +37,7 @@ export default function Receipt({ data }: { data: ReceiptData }) {
       className="bg-white font-mono text-[11px] leading-tight p-3 mx-auto"
       style={{ width: data.width === "58mm" ? "58mm" : "80mm" }}
     >
+      {data.headerText && <p className="text-center text-[10px] mb-1 whitespace-pre-wrap">{data.headerText}</p>}
       <div className="text-center mb-2">
         {data.cafeLogoUrl && (
           // eslint-disable-next-line @next/next/no-img-element
@@ -93,6 +98,7 @@ export default function Receipt({ data }: { data: ReceiptData }) {
 
       <div className="border-t border-dashed border-black my-1" />
       <p className="text-center">Terima kasih atas kunjungan Anda!</p>
+      {data.footerText && <p className="text-center whitespace-pre-wrap mt-1">{data.footerText}</p>}
 
       {data.showWifi && data.wifiSsid && (
         <>

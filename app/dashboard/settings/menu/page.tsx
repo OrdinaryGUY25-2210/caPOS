@@ -13,7 +13,7 @@ import { Alert } from '@/components/ui/Alert';
 export default function MenuSettingsPage() {
   return (
     <div className="space-y-6">
-      <SettingsHeader title="Pengaturan Menu" description="Atur tampilan dan struktur menu" />
+      <SettingsHeader backHref="/dashboard/settings" title="Pengaturan Menu" description="Atur tampilan dan struktur menu" />
 
       <Alert
         variant="info"

@@ -13,7 +13,7 @@ import { Alert } from '@/components/ui/Alert';
 export default function QRSettingsPage() {
   return (
     <div className="space-y-6">
-      <SettingsHeader title="Pengaturan QR Code" description="Atur QR code untuk online ordering" />
+      <SettingsHeader backHref="/dashboard/settings" title="Pengaturan QR Code" description="Atur QR code untuk online ordering" />
 
       <Alert
         variant="info"

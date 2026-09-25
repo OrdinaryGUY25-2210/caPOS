@@ -19,7 +19,7 @@ import { Button } from '@/components/ui/Button';
 export default function SubscriptionSettingsPage() {
   return (
     <div className="space-y-6">
-      <SettingsHeader title="Pengaturan Langganan" description="Kelola paket langganan Anda" />
+      <SettingsHeader backHref="/dashboard/settings" title="Pengaturan Langganan" description="Kelola paket langganan Anda" />
 
       <Card className="p-6 text-center space-y-3">
         <p className="text-gray-700">

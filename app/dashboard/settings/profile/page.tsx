@@ -66,7 +66,7 @@ export default function ProfileSettingsPage() {
 
   return (
     <div className="space-y-6">
-      <SettingsHeader title="Pengaturan Profil" description="Kelola informasi profil Anda" />
+      <SettingsHeader backHref="/dashboard/settings" title="Pengaturan Profil" description="Kelola informasi profil Anda" />
 
       <Alert
         variant="info"
