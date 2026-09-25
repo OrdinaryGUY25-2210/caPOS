@@ -208,7 +208,7 @@ export default function SubscriptionPage() {
   }, [loading, midtransClientKeyMissing, paymentError]);
 
   return (
-    <div className="max-w-3xl space-y-6">
+    <div className="w-full space-y-6">
       <Script
         src={isProduction ? "https://app.midtrans.com/snap/snap.js" : "https://app.sandbox.midtrans.com/snap/snap.js"}
         data-client-key={process.env.NEXT_PUBLIC_MIDTRANS_CLIENT_KEY}
@@ -325,7 +325,7 @@ export default function SubscriptionPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-stretch">
         {PLANS.map((plan) => {
           const discountedPrice = plan.payable && availableDiscountPct > 0
             ? Math.round(plan.rawAmount * (1 - availableDiscountPct / 100))
@@ -341,7 +341,7 @@ export default function SubscriptionPage() {
           <div
             key={plan.key}
             className={
-              (plan.highlight ? "card p-5 border-2 border-primary relative" : "card p-5 relative") +
+              (plan.highlight ? "card p-5 border-2 border-primary relative flex flex-col" : "card p-5 relative flex flex-col") +
               (isCurrent ? " ring-2 ring-offset-2 ring-emerald-500" : "")
             }
           >
@@ -368,7 +368,7 @@ export default function SubscriptionPage() {
                 {plan.price}<span className="text-sm font-normal text-neutral-400">{plan.period}</span>
               </p>
             )}
-            <ul className="mt-4 space-y-2">
+            <ul className="mt-4 mb-5 space-y-2">
               {plan.features.map((f) => (
                 <li key={f} className="flex items-center gap-2 text-sm text-neutral-600">
                   <CheckCircle2 size={15} className="text-primary shrink-0" /> {f}
@@ -381,14 +381,14 @@ export default function SubscriptionPage() {
                 disabled={payingPlan !== null || !snapReady}
                 className={
                   (plan.highlight ? "btn-primary" : "btn-outline") +
-                  " w-full mt-5 flex items-center justify-center gap-2 disabled:opacity-60"
+                  " w-full mt-auto flex items-center justify-center gap-2 disabled:opacity-60"
                 }
               >
                 {payingPlan === plan.key && <Loader2 className="animate-spin" size={16} />}
                 {!snapReady && payingPlan !== plan.key ? "Memuat Midtrans..." : buttonLabel}
               </button>
             ) : (
-              <div className="w-full mt-5 text-center text-xs text-neutral-400 py-2.5">
+              <div className="w-full mt-auto text-center text-xs text-neutral-400 py-2.5">
                 {isCurrent ? "Paket Anda saat ini" : "Paket awal (sudah dilewati)"}
               </div>
             )}
