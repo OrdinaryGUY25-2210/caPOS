@@ -100,3 +100,25 @@
     scrollbar-width: none;
   }
 }
+
+/* Cetak struk (window.print(), dipicu lib/utils.ts printReceipt()) —
+   tanpa blok ini window.print() mencetak SELURUH halaman (sidebar, topbar,
+   dst.), bukan cuma struknya. Sempat hilang dari file ini (masih ada di
+   capos/app/globals.css, salinan lama) sehingga cetak struk di kasir
+   (app/pos/page.tsx, OpenBillPanel, TableStatusBoard) dan fitur "Cetak
+   Struk Percobaan" di /dashboard/settings/hardware sama-sama rusak tanpa
+   ini — dikembalikan di sini. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #receipt-print, #receipt-print * {
+    visibility: visible;
+  }
+  #receipt-print {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 80mm;
+  }
+}

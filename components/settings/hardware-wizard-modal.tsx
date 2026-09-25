@@ -1,6 +1,9 @@
 "use client";
 
 import React, { useState } from "react";
+import Receipt from "@/components/Receipt";
+import { buildSampleReceiptData } from "@/lib/sampleReceipt";
+import { printReceipt } from "@/lib/utils";
 
 interface HardwareWizardModalProps {
   isOpen: boolean;
@@ -39,6 +42,11 @@ export default function HardwareWizardModal({ isOpen, onClose }: HardwareWizardM
 
   const handleTestPrint = async () => {
     setIsTesting(true);
+    // Sebelumnya cuma setTimeout tanpa mencetak apa pun. Sekarang beneran
+    // memanggil window.print() (lewat printReceipt() di lib/utils.ts) atas
+    // <Receipt/> contoh yang dirender off-screen di bawah — lihat komentar
+    // di dekat elemennya.
+    printReceipt("80mm");
     setTimeout(() => {
       setIsTesting(false);
       setStep(3);
@@ -128,6 +136,14 @@ export default function HardwareWizardModal({ isOpen, onClose }: HardwareWizardM
             </div>
           )}
         </div>
+      </div>
+
+      {/* Off-screen (bukan display:none — lihat penjelasan yang sama di
+          app/dashboard/settings/hardware/page.tsx) supaya tombol "Cetak
+          Struk Percobaan" di step 2 punya #receipt-print sungguhan untuk
+          dicetak window.print(). */}
+      <div style={{ position: "fixed", top: 0, left: "-9999px" }} aria-hidden="true">
+        <Receipt data={buildSampleReceiptData({ width: "80mm" })} />
       </div>
     </div>
   );

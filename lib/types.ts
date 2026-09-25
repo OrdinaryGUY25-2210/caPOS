@@ -33,6 +33,8 @@ export interface Profile {
   created_at: string;
   /** Cabang penugasan (migration_011). NULL untuk owner/super_admin — mereka akses semua cabang. */
   branch_id: string | null;
+  /** migration_019 — kapan user menyelesaikan tur onboarding. NULL = belum pernah. */
+  onboarding_tour_completed_at: string | null;
 }
 
 /** Cabang/outlet milik 1 tenant (migration_011 — Multi-Cabang). */

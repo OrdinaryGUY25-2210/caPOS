@@ -17,6 +17,7 @@ import { getTier, TIER_LABEL } from "@/lib/tier";
 import { createClient } from "@/lib/supabase/client";
 import { BranchProvider } from "@/lib/branchContext";
 import BranchSwitcher from "./BranchSwitcher";
+import AppTour from "./onboarding/app-tour";
 
 /**
  * Layout dashboard yang responsif di semua ukuran layar:
@@ -106,6 +107,8 @@ export default function DashboardShell({
       <Suspense fallback={null}>
         <AccessDeniedNotice />
       </Suspense>
+
+      <AppTour onRequestDrawerOpen={() => setDrawerOpen(true)} onRequestDrawerClose={() => setDrawerOpen(false)} />
 
       <div className="hidden md:block border-r border-neutral-200">
         <DashboardSidebar />
