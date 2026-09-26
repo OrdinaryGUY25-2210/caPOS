@@ -2,19 +2,14 @@
 
 import React from "react";
 import Link from "next/link";
-import { 
-  Building2, 
-  Store, 
-  CreditCard, 
-  Printer, 
-  Receipt, 
-  ShieldCheck, 
-  Crown, 
-  Users, 
-  Globe, 
-  HardDrive, 
-  Bell, 
-  HelpCircle 
+import {
+  Building2,
+  Store,
+  CreditCard,
+  Printer,
+  Receipt,
+  ShieldCheck,
+  Crown,
 } from "lucide-react";
 
 // Array definisi kategori pengaturan
@@ -77,6 +72,17 @@ const SETTINGS_CATEGORIES = [
   },
 ] as const;
 
+// Tiap section dapat warna ikon sendiri (semua dari palet Tailwind bawaan,
+// bukan token custom) supaya kartu mudah dipindai sekilas, bukan cuma
+// satu warna primary rata di semua kotak. Sebelumnya SEMUA kartu memakai
+// bg-zinc-100 + text-zinc-700 — kotak abu dengan ikon nyaris hitam yang
+// terlihat "datar"/aneh dan tidak match warna brand caPOS sama sekali.
+const SECTION_STYLE: Record<string, { bg: string; text: string; hoverBorder: string; hoverText: string }> = {
+  "Informasi Bisnis": { bg: "bg-primary-light", text: "text-primary-dark", hoverBorder: "hover:border-primary", hoverText: "group-hover:text-primary-dark" },
+  "Transaksi & Hardware": { bg: "bg-sky-50", text: "text-sky-600", hoverBorder: "hover:border-sky-400", hoverText: "group-hover:text-sky-600" },
+  "Sistem & Akses": { bg: "bg-amber-50", text: "text-amber-600", hoverBorder: "hover:border-amber-400", hoverText: "group-hover:text-amber-600" },
+};
+
 export default function SettingsPage() {
   // FIX TYPESCRIPT BUILD ERROR:
   // Tentukan type eksplisit untuk Map agar TypeScript tidak menganggap [] sebagai empty tuple readonly []
@@ -91,48 +97,47 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-8">
+    <div className="max-w-6xl mx-auto space-y-8">
       <div>
-        <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
-          Pengaturan Sistem
-        </h1>
-        <p className="text-sm text-zinc-500 mt-1">
-          Kelola konfigurasi toko, periferal kasir, dan akun caPOS kamu.
-        </p>
+        <h1 className="text-2xl font-bold text-neutral-900">Pengaturan Sistem</h1>
+        <p className="text-sm text-neutral-500 mt-1">Kelola konfigurasi toko, periferal kasir, dan akun caPOS kamu.</p>
       </div>
 
       <div className="space-y-6">
-        {Array.from(grouped.entries()).map(([sectionName, items]) => (
-          <div key={sectionName} className="space-y-3">
-            <h2 className="text-sm font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
-              {sectionName}
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {items.map((item) => {
-                const Icon = item.icon;
-                return (
-                  <Link
-                    key={item.id}
-                    href={item.href}
-                    className="p-4 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 hover:border-blue-500 dark:hover:border-blue-500 transition-all shadow-sm hover:shadow-md flex items-start gap-4 group"
-                  >
-                    <div className="p-2.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 group-hover:bg-blue-50 group-hover:text-blue-600 dark:group-hover:bg-blue-950/50 dark:group-hover:text-blue-400 transition-colors">
-                      <Icon className="w-5 h-5" />
-                    </div>
-                    <div className="space-y-1">
-                      <h3 className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-                        {item.label}
-                      </h3>
-                      <p className="text-xs text-zinc-500 line-clamp-2">
-                        {item.description}
-                      </p>
-                    </div>
-                  </Link>
-                );
-              })}
+        {Array.from(grouped.entries()).map(([sectionName, items]) => {
+          const style = SECTION_STYLE[sectionName] ?? SECTION_STYLE["Informasi Bisnis"];
+          return (
+            <div key={sectionName} className="space-y-3">
+              {/* Sebelumnya text-zinc-500: abu muda di atas latar abu muda
+                  dashboard, nyaris tak kebaca. Sekarang pakai warna section
+                  itu sendiri (bukan abu polos) supaya kontras jelas dan
+                  jadi penanda visual yang nyambung ke kartu-kartu di bawahnya. */}
+              <h2 className={`text-xs font-bold uppercase tracking-wider ${style.text}`}>{sectionName}</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {items.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <Link
+                      key={item.id}
+                      href={item.href}
+                      className={`card p-4 ${style.hoverBorder} hover:shadow-md transition-all flex items-start gap-4 group`}
+                    >
+                      <div className={`p-2.5 rounded-lg ${style.bg} ${style.text} shrink-0 transition-colors`}>
+                        <Icon className="w-5 h-5" strokeWidth={2} />
+                      </div>
+                      <div className="space-y-1 min-w-0">
+                        <h3 className={`font-semibold text-sm text-neutral-900 ${style.hoverText} transition-colors`}>
+                          {item.label}
+                        </h3>
+                        <p className="text-xs text-neutral-500 line-clamp-2">{item.description}</p>
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

@@ -1,0 +1,42 @@
+-- =========================================================
+-- MIGRATION 020 — tutup celah privilege-escalation di tabel `profiles`.
+--
+-- Ditemukan sambil mengerjakan migration_019 (tur onboarding menulis
+-- profiles.onboarding_tour_completed_at untuk baris sendiri), bukan
+-- diminta user — tapi cukup serius untuk langsung ditutup sekalian:
+--
+-- Policy RLS "Profiles: own row, own tenant, or super_admin" (schema.sql)
+-- adalah FOR ALL dengan `id = auth.uid() OR tenant_id = current_tenant_id()`.
+-- RLS itu row-level, bukan column-level — jadi begitu satu baris "boleh
+-- disentuh", SEMUA kolomnya boleh ditulis, termasuk `role`. Digabung
+-- dengan default privilege `GRANT ALL ON TABLES TO authenticated`
+-- (supabase/reset_all.sql), ini berarti SIAPA PUN yang login — termasuk
+-- kasir — sebenarnya bisa langsung panggil REST API Supabase:
+--
+--   PATCH /rest/v1/profiles?id=eq.<id-sendiri>
+--   { "role": "owner" }
+--
+-- dan menaikkan diri sendiri jadi owner. Klausa `tenant_id =
+-- current_tenant_id()` bahkan lebih luas lagi: mengizinkan mengubah/
+-- menghapus baris KARYAWAN LAIN di tenant yang sama, misalnya
+-- menyalakan lagi `is_active` akun sendiri persis setelah di-nonaktifkan
+-- owner. Ini bukan teori — dicoba di sandbox pengembangan, dua-duanya
+-- berhasil sebelum migrasi ini.
+--
+-- Tidak ada kode aplikasi yang mengandalkan keleluasaan ini (dicek: satu
+-- per satu tempat yang menulis ke `profiles` dari client — hanya toggle
+-- is_active di app/dashboard/employees/page.tsx dan
+-- onboarding_tour_completed_at dari tur — sisanya INSERT/role selalu
+-- lewat app/api/employees & app/api/register yang pakai service-role key,
+-- otomatis tidak terpengaruh REVOKE di bawah karena service_role selalu
+-- bypass RLS & privilege check).
+-- =========================================================
+
+REVOKE INSERT, UPDATE, DELETE ON profiles FROM authenticated, anon;
+
+-- Hanya kolom yang benar-benar ditulis langsung dari client yang dibuka
+-- lagi. Sengaja TIDAK termasuk: role, tenant_id, branch_id, email, id,
+-- created_at, job_title — perubahan pada kolom-kolom itu harus lewat API
+-- server (service-role) supaya bisa divalidasi (mis. batas kuota kasir
+-- per tier, siapa yang boleh mengubah siapa).
+GRANT UPDATE (is_active, full_name, onboarding_tour_completed_at) ON profiles TO authenticated;

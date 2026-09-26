@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { RefreshCw, Wifi, WifiOff, Ban } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { RefreshCw, Wifi, WifiOff, Ban, LogOut, ChevronDown } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { cx } from "@/lib/utils";
+import { ROLE_LABEL } from "@/lib/role";
 import OrderCard from "@/components/kitchen/OrderCard";
 import MenuAvailabilityPanel from "@/components/kitchen/MenuAvailabilityPanel";
 import type { KitchenStation, OrderWithItems, OrderStatus, Product } from "@/lib/types";
@@ -19,9 +21,15 @@ import ConfirmDialog from "@/components/ConfirmDialog";
 const ACTIVE_STATUSES: OrderStatus[] = ["NEW", "ACCEPTED", "PREPARING", "READY", "SERVED"];
 
 export default function KitchenDisplayPage() {
+  const router = useRouter();
   const [tenantId, setTenantId] = useState<string | null>(null);
   const [branchId, setBranchId] = useState<string | null>(null);
   const [role, setRole] = useState<string>("cashier");
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState<string | null>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [confirmLogout, setConfirmLogout] = useState(false);
+  const profileRef = useRef<HTMLDivElement>(null);
   const [stations, setStations] = useState<KitchenStation[]>([]);
   const [activeStationCode, setActiveStationCode] = useState<string>("all");
   const [orders, setOrders] = useState<OrderWithItems[]>([]);
@@ -73,6 +81,8 @@ export default function KitchenDisplayPage() {
       if (!profile) return;
       setTenantId(profile.tenant_id);
       setRole(profile.role);
+      setFullName(profile.full_name || "");
+      setEmail(profile.email);
 
       // Owner/super_admin melihat SEMUA cabang (tidak difilter); manager/
       // cashier terkunci ke cabang penugasannya — sama seperti pola
@@ -189,6 +199,36 @@ export default function KitchenDisplayPage() {
     };
   }, []);
 
+  // Dropdown "Informasi Akun" — pola sama seperti profil di
+  // components/DashboardShell.tsx (dashboard/pos utama), supaya kasir yang
+  // ditugaskan ke KDS punya cara keluar dari sesinya tanpa harus tahu URL
+  // /login secara manual. Kitchen Display sengaja tidak dibungkus
+  // DashboardShell (layar ini dipakai fullscreen di tablet dapur), jadi
+  // dropdown-nya dibuat sendiri di sini.
+  useEffect(() => {
+    if (!profileOpen) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
+        setProfileOpen(false);
+      }
+    }
+    function handleEscape(e: KeyboardEvent) {
+      if (e.key === "Escape") setProfileOpen(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [profileOpen]);
+
+  async function applyLogout() {
+    const { error } = await createClient().auth.signOut();
+    if (error) throw new Error(error.message);
+    router.push("/login");
+  }
+
   async function advanceStatus(orderId: string, nextStatus: OrderStatus) {
     // Optimistic update supaya tombol terasa responsif; realtime listener
     // di atas akan mengoreksi kalau ternyata RPC ditolak server.
@@ -270,6 +310,55 @@ export default function KitchenDisplayPage() {
           >
             <RefreshCw size={14} /> Muat Ulang
           </button>
+
+          {/* Informasi Akun + Keluar — sebelumnya tidak ada di KDS sama
+              sekali, jadi kasir/karyawan yang ditugaskan ke layar dapur
+              tidak punya cara logout selain menutup tab/browser. */}
+          <div className="relative pl-2 ml-1 border-l border-neutral-200" ref={profileRef}>
+            <button
+              type="button"
+              onClick={() => setProfileOpen((v) => !v)}
+              aria-haspopup="menu"
+              aria-expanded={profileOpen}
+              className="flex items-center gap-2 rounded-xl px-1.5 py-1 -mx-1.5 hover:bg-neutral-100 transition-colors"
+            >
+              <div className="w-8 h-8 rounded-full bg-primary-light text-primary-dark flex items-center justify-center text-xs font-bold shrink-0">
+                {(fullName || "?").slice(0, 2).toUpperCase()}
+              </div>
+              <div className="hidden sm:flex flex-col leading-tight text-left">
+                <span className="text-sm font-medium text-neutral-700">{fullName || "—"}</span>
+                <span className="text-[10px] text-neutral-400 uppercase tracking-wide">
+                  {ROLE_LABEL[role as keyof typeof ROLE_LABEL] ?? role}
+                </span>
+              </div>
+              <ChevronDown size={14} className="text-neutral-400 hidden sm:block" />
+            </button>
+
+            {profileOpen && (
+              <div role="menu" className="absolute right-0 top-full mt-2 w-60 max-w-[calc(100vw-2rem)] card py-2 z-50">
+                <div className="px-4 py-2 border-b border-neutral-100">
+                  <p className="font-semibold text-neutral-900 truncate">{fullName || "—"}</p>
+                  <p className="text-xs text-neutral-400 uppercase tracking-wide">
+                    {ROLE_LABEL[role as keyof typeof ROLE_LABEL] ?? role}
+                  </p>
+                  {email && <p className="text-xs text-neutral-400 truncate mt-0.5">{email}</p>}
+                </div>
+                <div className="pt-1">
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setProfileOpen(false);
+                      setConfirmLogout(true);
+                    }}
+                    className="w-full flex items-center gap-2.5 px-4 py-2 text-sm font-medium text-urgent hover:bg-urgent-light transition-colors"
+                  >
+                    <LogOut size={16} />
+                    Keluar
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
@@ -360,6 +449,17 @@ export default function KitchenDisplayPage() {
             if (error) throw new Error(error.message);
             if (tenantId) loadOrders(tenantId, branchId);
           }}
+        />
+      )}
+
+      {confirmLogout && (
+        <ConfirmDialog
+          title="Keluar dari Akun?"
+          description="Anda akan keluar dari sesi ini di perangkat ini."
+          danger={false}
+          confirmLabel="Ya, Keluar"
+          onClose={() => setConfirmLogout(false)}
+          onConfirm={applyLogout}
         />
       )}
     </div>
