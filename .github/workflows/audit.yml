@@ -57,6 +57,11 @@ jobs:
       # dan job gagal dengan "Resource not accessible by integration" -
       # SEKALIPUN scan-nya sendiri sukses.
       issues: write
+      # Wajib: upload artifact laporan ZAP lewat Artifacts API. Tanpa
+      # `actions: write` GitHub membalas HTTP 400 dengan pesan misleading
+      # "The artifact name ... is not valid" - padahal nama sudah lolos
+      # validasi client ("Artifact name is valid!"). bukan masalah nama.
+      actions: write
     runs-on: ubuntu-latest
     needs: code-quality
     steps:
@@ -65,7 +70,4 @@ jobs:
         with:
           target: "https://ca-pos-sooty.vercel.app/" # ganti dengan URL Vercel-mu
           fail_action: false # set true kalau mau job gagal saat ada temuan
-          # Workaround bug action-baseline: default-nya "zap_scan"
-          # ditolak GitHub ("artifact name ... is not valid", HTTP 400)
-          # karena mengandung underscore. Paksa nama tanpa underscore.
           artifact_name: zap-baseline-report
