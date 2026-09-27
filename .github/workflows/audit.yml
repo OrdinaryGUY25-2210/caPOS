@@ -66,8 +66,13 @@ jobs:
     needs: code-quality
     steps:
       - name: ZAP Baseline Scan
-        uses: zaproxy/action-baseline@v0.12.0
+        # v0.12.0 masih pakai client Artifacts API v3 (api-version=6.0-preview)
+        # yang sudah dinonaktifkan GitHub, sehingga upload laporan selalu
+        # HTTP 400 "artifact name ... is not valid" apa pun nama yang dipakai.
+        # v0.15.0 memakai client artifact v4 dan runtime node24.
+        uses: zaproxy/action-baseline@v0.15.0
         with:
           target: "https://ca-pos-sooty.vercel.app/" # ganti dengan URL Vercel-mu
           fail_action: false # set true kalau mau job gagal saat ada temuan
+          allow_issue_writing: true # perlu permissions: issues: write di atas
           artifact_name: zap-baseline-report
