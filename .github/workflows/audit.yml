@@ -65,4 +65,7 @@ jobs:
         with:
           target: "https://ca-pos-sooty.vercel.app/" # ganti dengan URL Vercel-mu
           fail_action: false # set true kalau mau job gagal saat ada temuan
-          GHSA_FILED: true # buat issue dengan hasil scan (butuh issues: write)
+          # Workaround bug action-baseline: default-nya "zap_scan"
+          # ditolak GitHub ("artifact name ... is not valid", HTTP 400)
+          # karena mengandung underscore. Paksa nama tanpa underscore.
+          artifact_name: zap-baseline-report
