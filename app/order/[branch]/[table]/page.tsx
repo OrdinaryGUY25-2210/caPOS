@@ -19,7 +19,7 @@ export const dynamic = "force-dynamic";
 export default async function SelfOrderPage({
   params,
 }: {
-  params: { branch: string; table: string };
+  params: Promise<{ branch: string; table: string }>;
 }) {
   // Anon key publik — sama seperti createClient() di lib/supabase/client.ts,
   // tapi dipanggil dari server (tanpa cookie sesi) karena pelanggan tidak login.
@@ -28,9 +28,11 @@ export default async function SelfOrderPage({
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
+  const { branch, table } = await params;
+
   const { data, error } = await supabase.rpc("get_qr_order_page", {
-    p_branch_slug: params.branch,
-    p_table_number: decodeURIComponent(params.table),
+    p_branch_slug: branch,
+    p_table_number: decodeURIComponent(table),
   });
 
   const pageData = (data as QrOrderPageData) ?? { error: "branch_not_found" };
@@ -51,7 +53,7 @@ export default async function SelfOrderPage({
 
   return (
     <SelfOrderClient
-      branchSlug={params.branch}
+      branchSlug={branch}
       tableNumber={pageData.table.table_number}
       branchName={pageData.branch.name}
       tableCapacity={pageData.table.capacity}
