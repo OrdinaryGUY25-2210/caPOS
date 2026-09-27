@@ -35,8 +35,10 @@ jobs:
         run: npx madge --circular --extensions ts,tsx app lib components
 
       # 3. Lint + deteksi kompleksitas tinggi
+      #    Next.js 16 menghapus `next lint`, jadi panggil ESLint langsung
+      #    dengan flat config (eslint.config.mjs).
       - name: Lint
-        run: npx next lint
+        run: npx eslint .
 
       # 4. Dead code / unused export
       - name: Check unused exports
