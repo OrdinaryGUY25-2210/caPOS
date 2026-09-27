@@ -417,7 +417,7 @@ export default function ReportsPage() {
               <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
               <XAxis dataKey="day" stroke="#64748B" fontSize={12} />
               <YAxis stroke="#64748B" fontSize={12} tickFormatter={(v) => `${v / 1000}k`} />
-              <Tooltip formatter={(v: number) => formatRupiah(v)} />
+              <Tooltip formatter={(v) => formatRupiah(Number(v))} />
               <Bar dataKey="omzet" fill="#10B981" radius={[6, 6, 0, 0]} />
             </BarChart>
           ) : (
@@ -425,7 +425,7 @@ export default function ReportsPage() {
               <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
               <XAxis dataKey="day" stroke="#64748B" fontSize={12} />
               <YAxis stroke="#64748B" fontSize={12} tickFormatter={(v) => `${v / 1000}k`} />
-              <Tooltip formatter={(v: number) => formatRupiah(v)} />
+              <Tooltip formatter={(v) => formatRupiah(Number(v))} />
               <Line type="monotone" dataKey="omzet" stroke="#10B981" strokeWidth={2.5} dot={{ r: 4 }} />
             </LineChart>
           )}

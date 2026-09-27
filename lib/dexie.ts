@@ -186,7 +186,7 @@ export async function syncPendingProductOps(handlers: {
       ? idMap.get(op.product_id) ?? op.product_id
       : op.product_id;
 
-    let payload = { ...op.payload };
+    const payload = { ...op.payload };
     if (op.image_blob) {
       const url = await handlers.upload(op.image_blob, op.tenant_id);
       if (!url) continue; // upload masih gagal (mis. masih offline) — coba lagi lain kali, JANGAN tandai synced.

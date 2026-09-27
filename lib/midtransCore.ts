@@ -10,6 +10,8 @@
  * membuat instance baru dari config yang diberikan (lihat createMidtransCoreApi).
  */
 
+import { createHash } from "crypto";
+
 export interface MidtransBranchConfig {
   serverKey: string;
   clientKey?: string | null;
@@ -97,9 +99,7 @@ export function createMidtransCoreApi(config: MidtransBranchConfig) {
 
     /** Hitung signature SHA-512 notifikasi webhook memakai server key CABANG INI (bukan key platform). */
     verifySignature(params: { orderId: string; statusCode: string; grossAmount: string; signatureKey: string }) {
-      const crypto = require("crypto") as typeof import("crypto");
-      const expected = crypto
-        .createHash("sha512")
+      const expected = createHash("sha512")
         .update(`${params.orderId}${params.statusCode}${params.grossAmount}${config.serverKey}`)
         .digest("hex");
       return expected === params.signatureKey;

@@ -235,7 +235,7 @@ export default function TargetPage() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
                 <XAxis dataKey="day" stroke="#64748B" fontSize={11} />
                 <YAxis stroke="#64748B" fontSize={12} tickFormatter={(v) => `${v / 1000}k`} />
-                <Tooltip formatter={(v: number) => formatRupiah(v)} labelFormatter={(d) => `Tanggal ${d}`} />
+                <Tooltip formatter={(v) => formatRupiah(Number(v))} labelFormatter={(d) => `Tanggal ${d}`} />
                 <ReferenceLine y={dailyTargetLine} stroke="#F59E0B" strokeDasharray="4 4" label={{ value: "Target/hari", position: "insideTopRight", fontSize: 11, fill: "#F59E0B" }} />
                 <Bar dataKey="omzet" fill="#10B981" radius={[4, 4, 0, 0]} />
               </BarChart>
