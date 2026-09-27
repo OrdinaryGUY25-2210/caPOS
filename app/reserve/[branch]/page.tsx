@@ -11,7 +11,11 @@ import { formatRupiah } from "@/lib/utils";
  * create_reservation() lewat anon key — status awal 'pending' menunggu
  * konfirmasi Manager/Owner (lihat phase4_schema.sql bagian 2b).
  */
-export default function PublicReservationPage({ params }: { params: { branch: string } }) {
+export default function PublicReservationPage({
+  params,
+}: {
+  params: Promise<{ branch: string }>;
+}) {
   const [branch, setBranch] = useState<{ id: string; name: string; address: string | null } | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -31,7 +35,8 @@ export default function PublicReservationPage({ params }: { params: { branch: st
 
   useEffect(() => {
     (async () => {
-      const { data } = await supabase.rpc("get_branch_public_info", { p_branch_slug: params.branch });
+      const { branch: branchSlug } = await params;
+      const { data } = await supabase.rpc("get_branch_public_info", { p_branch_slug: branchSlug });
       if (!data || data.error) {
         setNotFound(true);
       } else {
@@ -40,7 +45,7 @@ export default function PublicReservationPage({ params }: { params: { branch: st
       setLoading(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.branch]);
+  }, [params]);
 
   async function submit() {
     if (!branch) return;
