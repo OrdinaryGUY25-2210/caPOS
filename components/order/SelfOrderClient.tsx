@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ShoppingBag, Plus, Minus, X, Loader2, CheckCircle2, ChefHat, Clock, ArrowLeft, Ban } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { formatRupiah, cx } from "@/lib/utils";
+import { playNotificationSound } from "@/lib/notificationSound";
 import type { QrOrderPageProduct, QrCartItem, QrOrderStatusData, QrPaymentMethod, MenuAvailabilityBroadcast } from "@/lib/types";
 
 type Phase = "menu" | "checkout" | "paying" | "tracking";
@@ -36,6 +37,8 @@ export default function SelfOrderClient({
   products,
   tenantId,
   staticQrisUrl,
+  qrisMode = "DYNAMIC",
+  soundSettings,
 }: {
   branchSlug: string;
   tableNumber: string;
@@ -48,6 +51,16 @@ export default function SelfOrderClient({
   /** URL publik QRIS statis milik owner (Storage bucket "menu-images",
    * dicek di server component page.tsx). Null kalau owner belum unggah. */
   staticQrisUrl?: string | null;
+  /** migration_022 — branches.qris_mode, EKSPLISIT dari owner (bukan lagi
+   * ditebak dari ada/tidaknya staticQrisUrl seperti sebelumnya). Kalau
+   * owner set DYNAMIC tapi kebetulan masih ada file lama ter-upload,
+   * DYNAMIC yang menang — sesuai maksud PRD "mutually exclusive". */
+  qrisMode?: "DYNAMIC" | "STATIC";
+  /** migration_022 — Storage Audio Notifikasi (PRD §4C), dibaca dari
+   * branches.sound_*. Diputar di layar ini saat QRIS Dinamis pelanggan
+   * sendiri terkonfirmasi lunas (bukan untuk alur QRIS Statis — di situ
+   * "lunas" baru terjadi setelah staf verifikasi manual di kasir/dashboard). */
+  soundSettings?: { enabled: boolean; tone: string; volume: number };
 }) {
   const [phase, setPhase] = useState<Phase>("menu");
   const [cart, setCart] = useState<QrCartItem[]>([]);
@@ -259,6 +272,8 @@ export default function SelfOrderClient({
           branchSlug={branchSlug}
           tableNumber={tableNumber}
           staticQrisUrl={staticQrisUrl}
+          qrisMode={qrisMode}
+          soundSettings={soundSettings}
           onBack={() => setPhase("menu")}
           onSubmitted={(id) => {
             setTrackedQrOrderId(id);
@@ -446,6 +461,8 @@ function CheckoutView({
   branchSlug,
   tableNumber,
   staticQrisUrl,
+  qrisMode = "DYNAMIC",
+  soundSettings,
   onBack,
   onSubmitted,
 }: {
@@ -454,6 +471,8 @@ function CheckoutView({
   branchSlug: string;
   tableNumber: string;
   staticQrisUrl?: string | null;
+  qrisMode?: "DYNAMIC" | "STATIC";
+  soundSettings?: { enabled: boolean; tone: string; volume: number };
   onBack: () => void;
   onSubmitted: (qrOrderId: string) => void;
 }) {
@@ -490,13 +509,17 @@ function CheckoutView({
     const result = data[0] as { order_id: string; qr_order_id: string; order_number: string; total_amount: number };
     setQrOrderId(result.qr_order_id);
 
-    if (paymentMethod === "qris" && staticQrisUrl) {
-      // Owner sudah unggah QRIS statis (lihat SelfOrderPage/page.tsx) —
-      // pakai itu langsung, TIDAK perlu charge Midtrans. Karena QRIS statis
-      // tidak ada webhook konfirmasi otomatis, pelanggan menekan tombol
-      // "Saya Sudah Bayar" sendiri (lihat render di bawah), lalu staf yang
-      // memverifikasi pembayaran — sama seperti alur "Bayar di Kasir".
-      setQrisImageUrl(staticQrisUrl);
+    if (paymentMethod === "qris" && qrisMode === "STATIC") {
+      // Owner sudah set mode Statis (migration_022, branches.qris_mode) —
+      // pakai gambar QRIS toko langsung, TIDAK perlu charge Midtrans.
+      // Dulu ini ditebak dari ada/tidaknya file staticQrisUrl; sekarang
+      // eksplisit dari setelan owner, jadi kalau owner ganti balik ke
+      // Dinamis, jalur di bawah (else-if) yang dipakai walau file lama
+      // masih ada di Storage. Karena QRIS statis tidak ada webhook
+      // konfirmasi otomatis, pelanggan menekan tombol "Saya Sudah Bayar"
+      // sendiri (lihat render di bawah), lalu staf yang memverifikasi
+      // pembayaran — sama seperti alur "Bayar di Kasir".
+      setQrisImageUrl(staticQrisUrl ?? null);
     } else if (paymentMethod === "qris") {
       // Minta QRIS dinamis dari server (Midtrans) — nominal dihitung
       // ulang di server dari total_amount hasil submit_qr_order, bukan
@@ -544,7 +567,7 @@ function CheckoutView({
           )}
           {errorMsg && <p className="text-xs text-urgent mt-3">{errorMsg}</p>}
 
-          {staticQrisUrl ? (
+          {qrisMode === "STATIC" ? (
             <>
               <p className="text-xs text-neutral-400 mt-4 mb-3">
                 Scan lalu bayar sesuai nominal di atas. Setelah transfer berhasil, tekan tombol di bawah —
@@ -562,7 +585,20 @@ function CheckoutView({
               <p className="text-xs text-neutral-400 mt-4">
                 Halaman ini otomatis lanjut begitu pembayaran terkonfirmasi.
               </p>
-              <QrisPaymentWatcher qrOrderId={qrOrderId} onPaid={() => onSubmitted(qrOrderId)} />
+              <QrisPaymentWatcher
+                qrOrderId={qrOrderId}
+                onPaid={() => {
+                  // Sesuai PRD §4C — begitu status berubah PAID, langsung
+                  // bunyikan notifikasi di layar ini (untuk pelanggan) SEBELUM
+                  // pindah ke halaman tracking. Sisi kasir dibunyikan terpisah
+                  // di app/pos/page.tsx untuk alur QRIS Dinamis yang dibuat
+                  // dari kasir sendiri (beda transaksi/pemicu).
+                  if (soundSettings?.enabled) {
+                    playNotificationSound(soundSettings.tone, soundSettings.volume, true);
+                  }
+                  onSubmitted(qrOrderId);
+                }}
+              />
             </>
           )}
         </div>

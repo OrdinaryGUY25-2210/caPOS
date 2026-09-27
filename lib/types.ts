@@ -544,7 +544,18 @@ export interface QrOrderPageData {
   error?: "branch_not_found" | "table_not_found";
   /** `tenant_id` (Migrasi 020) dipakai murni sebagai nama topik broadcast
    * realtime `products-<tenant_id>` — bukan untuk query apa pun di klien. */
-  branch?: { name: string; slug: string; address: string | null; tenant_id: string };
+  branch?: {
+    name: string;
+    slug: string;
+    address: string | null;
+    tenant_id: string;
+    /** migration_022 — PRD QRIS Self-Service & Storage Audio Notifikasi. */
+    qris_mode?: "DYNAMIC" | "STATIC";
+    static_qris_image_url?: string | null;
+    sound_enabled?: boolean;
+    sound_tone?: string;
+    sound_volume?: number;
+  };
   table?: { id: string; table_number: string; capacity: number };
   products?: QrOrderPageProduct[];
 }

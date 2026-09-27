@@ -8,8 +8,9 @@ export const dynamic = "force-dynamic";
  * Halaman publik QR Self-Order — capos.id/order/[branch_slug]/[table_number].
  * TIDAK memerlukan login (lihat middleware.ts: "/order" ditambahkan ke
  * publicPaths). Satu panggilan RPC `get_qr_order_page` (anon key) memuat
- * SEMUA data yang dibutuhkan sekaligus — info cabang, meja, dan katalog
- * menu — supaya halaman tetap ringan & cepat di jaringan seluler.
+ * SEMUA data yang dibutuhkan sekaligus — info cabang, meja, katalog menu,
+ * dan (sejak migration_022) mode QRIS + setelan audio — supaya halaman
+ * tetap ringan & cepat di jaringan seluler.
  *
  * Dijalankan sebagai Server Component (bukan client fetch) supaya HTML
  * pertama yang sampai ke HP pelanggan sudah berisi menu, bukan skeleton
@@ -33,30 +34,6 @@ export default async function SelfOrderPage({
   });
 
   const pageData = (data as QrOrderPageData) ?? { error: "branch_not_found" };
-
-  // QRIS statis milik owner (diunggah di /dashboard/settings, bucket publik
-  // "menu-images", path `${tenant_id}/qris-code.jpg` — pola sama persis
-  // dengan logo kafe). Dicek dengan service role di server component ini
-  // (bukan anon) supaya tidak bergantung pada izin `list()` anon pada
-  // bucket publik. Kalau owner belum pernah unggah, SelfOrderClient tetap
-  // jatuh ke alur QRIS dinamis Midtrans yang sudah ada (tidak ada yang
-  // berubah untuk tenant yang belum pakai fitur ini).
-  let staticQrisUrl: string | null = null;
-  if (pageData.branch?.tenant_id) {
-    const svc = createSupabaseClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
-    const { data: files } = await svc.storage
-      .from("menu-images")
-      .list(pageData.branch.tenant_id, { search: "qris-code" });
-    if (files && files.length > 0) {
-      const { data: pub } = svc.storage
-        .from("menu-images")
-        .getPublicUrl(`${pageData.branch.tenant_id}/qris-code.jpg`);
-      staticQrisUrl = pub.publicUrl;
-    }
-  }
 
   if (error || pageData.error || !pageData.branch || !pageData.table) {
     return (
@@ -83,7 +60,17 @@ export default async function SelfOrderPage({
       // `products-<tenant_id>` untuk notifikasi Sold Out/Menu 86 instan,
       // BUKAN untuk query apa pun langsung ke tabel dari klien publik ini.
       tenantId={pageData.branch.tenant_id}
-      staticQrisUrl={staticQrisUrl}
+      // migration_022 — PRD "QRIS Self-Service & Storage Audio": diambil
+      // langsung dari kolom `branches` lewat RPC, bukan lagi dari
+      // storage.list() heuristik (lihat riwayat git untuk versi lama;
+      // dibuang karena hardcode ekstensi ".jpg" salah untuk unggahan PNG).
+      staticQrisUrl={pageData.branch.static_qris_image_url ?? null}
+      qrisMode={pageData.branch.qris_mode ?? "DYNAMIC"}
+      soundSettings={{
+        enabled: pageData.branch.sound_enabled ?? true,
+        tone: pageData.branch.sound_tone ?? "bell_chime",
+        volume: pageData.branch.sound_volume ?? 0.8,
+      }}
     />
   );
 }

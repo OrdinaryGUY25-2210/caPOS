@@ -10,6 +10,7 @@ import AccessDeniedNotice from "@/components/AccessDeniedNotice";
 import SendToKitchenModal from "@/components/SendToKitchenModal";
 import OpenBillPanel from "@/components/pos/OpenBillPanel";
 import ShiftModal from "@/components/ShiftModal";
+import { unlockNotificationAudio, playNotificationSound } from "@/lib/notificationSound";
 import SoldOutToggle from "@/components/pos/SoldOutToggle";
 import ProductConfigModal, { type ProductGroupWithModifiers, type ConfiguredCartPayload } from "@/components/pos/ProductConfigModal";
 import { CustomerLoyaltyModal } from "@/components/crm/CustomerLoyaltyModal";
@@ -113,7 +114,10 @@ export default function PosPage() {
   // app/api/pos/qris-charge akan menolak dan kasir tinggal pakai QRIS
   // manual seperti biasa (opsi ini tidak wajib dipakai).
   const [qrisConfigured, setQrisConfigured] = useState(false);
-  const [qrisDynamicEnabled, setQrisDynamicEnabled] = useState(false);
+  // migration_022 — PRD Storage Audio Notifikasi §4C, dibaca dari
+  // branches.sound_* (lihat fetch di atas), dipakai efek di bawah untuk
+  // membunyikan notifikasi begitu qrisStatus berubah jadi "paid".
+  const [soundSettings, setSoundSettings] = useState({ enabled: true, tone: "bell_chime", volume: 0.8 });  const [qrisDynamicEnabled, setQrisDynamicEnabled] = useState(false);
   const [qrisOrder, setQrisOrder] = useState<{ orderId: string; qrUrl: string } | null>(null);
   const [qrisStatus, setQrisStatus] = useState<"idle" | "creating" | "pending" | "paid" | "failed" | "expired">("idle");
   const [qrisPollError, setQrisPollError] = useState<string | null>(null);
@@ -198,7 +202,7 @@ export default function PosPage() {
       if (!effectiveBranchId) {
         const { data: mainBranch } = await supabase
           .from("branches")
-          .select("id, name, midtrans_client_key")
+          .select("id, name, midtrans_client_key, sound_enabled, sound_tone, sound_volume")
           .eq("tenant_id", profile.tenant_id)
           .eq("is_main", true)
           .single();
@@ -206,12 +210,26 @@ export default function PosPage() {
         if (mainBranch) {
           setBranchName(mainBranch.name);
           setQrisConfigured(!!mainBranch.midtrans_client_key);
+          setSoundSettings({
+            enabled: mainBranch.sound_enabled ?? true,
+            tone: mainBranch.sound_tone ?? "bell_chime",
+            volume: mainBranch.sound_volume ?? 0.8,
+          });
         }
       } else {
-        const { data: branch } = await supabase.from("branches").select("name, midtrans_client_key").eq("id", effectiveBranchId).single();
+        const { data: branch } = await supabase
+          .from("branches")
+          .select("name, midtrans_client_key, sound_enabled, sound_tone, sound_volume")
+          .eq("id", effectiveBranchId)
+          .single();
         if (branch) {
           setBranchName(branch.name);
           setQrisConfigured(!!branch.midtrans_client_key);
+          setSoundSettings({
+            enabled: branch.sound_enabled ?? true,
+            tone: branch.sound_tone ?? "bell_chime",
+            volume: branch.sound_volume ?? 0.8,
+          });
         }
       }
       setSession({ tenantId: profile.tenant_id, cashierId: userId, branchId: effectiveBranchId });
@@ -772,6 +790,15 @@ export default function PosPage() {
           if (pollData.status === "paid" || pollData.status === "failed" || pollData.status === "expired") {
             setQrisStatus(pollData.status);
             stopQrisPolling();
+            if (pollData.status === "paid" && soundSettings.enabled) {
+              // PRD §4C — dipanggil PERSIS SEKALI di sini (bukan lewat
+              // useEffect yang mengamati qrisStatus, yang berisiko terpanggil
+              // ulang tiap re-render selama status masih "paid"), karena
+              // polling sudah dihentikan tepat setelah baris ini dan tidak
+              // akan pernah menyentuh cabang "paid" ini lagi untuk order yang
+              // sama.
+              playNotificationSound(soundSettings.tone, soundSettings.volume, true);
+            }
           }
         } catch {
           // Jaringan bermasalah sesaat — biarkan interval coba lagi di
@@ -1555,6 +1582,10 @@ export default function PosPage() {
             setShiftId(id);
             setShiftStartedAt(openedAt);
             setShowShiftModal(false);
+            // PRD §4C — "interaksi pertama user (misal: saat menekan tombol
+            // Buka Shift Kasir)" untuk melewati pembatasan Autoplay Policy
+            // browser SEBELUM notifikasi beneran dibutuhkan nanti.
+            unlockNotificationAudio();
           }}
           onClosed={() => {
             // Shift baru saja ditutup (Z-Report sudah ditampilkan & di-
