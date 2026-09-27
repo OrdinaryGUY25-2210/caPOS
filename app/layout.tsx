@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
+import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
 import "./globals.css";
 
 // Font di-load sekali di root layout dan diekspos sebagai CSS variable
@@ -39,7 +40,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="id" className={inter.variable}>
-      <body className="font-sans">{children}</body>
+      <body className="font-sans">
+        <ServiceWorkerRegister />
+        {children}
+      </body>
     </html>
   );
 }

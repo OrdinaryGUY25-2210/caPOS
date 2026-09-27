@@ -44,6 +44,25 @@ export interface PendingTransaction {
   // back to a full table scan (db.table.filter(...)), which gets slow once
   // a cafe has accumulated thousands of receipts offline.
   synced: 0 | 1;
+  /**
+   * 1 = server MENOLAK transaksi ini secara PERMANEN, jadi mencoba sync lagi
+   * tidak akan pernah berhasil (mis. `STOCK_INSUFFICIENT` karena device/
+   * cabang lain sudah menghabiskan stok selama jendela offline). Retry tak
+   * henti hanya menumpuk antrian yang tidak akan pernah kosong, sementara
+   * uang kasir sudah diterima dan struk sudah dicetak.
+   *
+   * undefined/0 = masih layak dicoba ulang (kegagalan jaringan sementara).
+   * Datanya TIDAK dihapus supaya tetap ada jejak audit untuk void/refund.
+   *
+   * Field ini sengaja TIDAK di-index: Dexie menyimpan seluruh objek, jadi
+   * property baru tetap ikut tersimpan tanpa perlu bump versi skema (dan
+   * tanpa risiko migrasi). Di-query lewat filter JS di bawah karena
+   * jumlahnya cuma antrian yang pending.
+   */
+  sync_rejected?: 0 | 1;
+  /** Pesan error penolakan terakhir, ditampilkan ke kasir lewat SyncStatusBadge. */
+  sync_error?: string | null;
+  sync_rejected_at?: string | null;
   created_at: string;
 }
 
@@ -146,7 +165,14 @@ export async function syncPendingTransactions(
 ) {
   // Indexed lookup (uses the `synced` index) instead of scanning + filtering
   // every row in the table.
-  const pending = await db.pendingTransactions.where("synced").equals(0).toArray();
+  //
+  // Baris yang `sync_rejected = 1` sengaja DILEWATI: penolakan server untuk
+  // transaksi itu permanen, jadi mengirimnya lagi hanya menghasilkan error
+  // yang sama persis, selamanya. Filter JS di atas index `synced` aman
+  // karena yang di-filter hanya antrian pending, bukan seluruh tabel.
+  const pending = (await db.pendingTransactions.where("synced").equals(0).toArray()).filter(
+    (tx) => !tx.sync_rejected
+  );
   for (const tx of pending) {
     const ok = await insertFn(tx);
     if (ok && tx.local_id) {

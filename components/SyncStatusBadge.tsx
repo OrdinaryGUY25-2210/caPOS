@@ -49,6 +49,11 @@ export default function SyncStatusBadge({ compact = false }: { compact?: boolean
   }, [status.state, status.lastSyncedAt]);
 
   const hasQueue = status.pendingCount > 0;
+  // Transaksi yang ditolak permanen TIDAK akan terkirim dengan sendirinya.
+  // Badge wajib membedakan ini dari "antrian normal": kalau tidak, kasir
+  // melihat angka yang turun pelan lalu statt "_semua data sudah
+  // tersinkron_" padahal uangnya masih dalam limbo.
+  const hasRejected = status.rejectedCount > 0;
 
   let label = "Online";
   let colorClasses = "bg-primary-light text-primary-dark";
@@ -90,6 +95,14 @@ export default function SyncStatusBadge({ compact = false }: { compact?: boolean
             {status.pendingCount}
           </span>
         )}
+        {hasRejected && (
+          <span
+            className="ml-0.5 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-white text-[10px] font-semibold"
+            title={`${status.rejectedCount} transaksi ditolak server dan perlu void/refund`}
+          >
+            {status.rejectedCount}
+          </span>
+        )}
       </button>
 
       {open && (
@@ -105,6 +118,19 @@ export default function SyncStatusBadge({ compact = false }: { compact?: boolean
               </span>
             </div>
 
+            {hasRejected && (
+              <div className="rounded-xl bg-urgent-light/60 border border-urgent/20 p-2.5 space-y-1.5">
+                <p className="text-xs font-semibold text-urgent">
+                  {status.rejectedCount} transaksi ditolak server
+                </p>
+                <p className="text-[11px] text-urgent/90">
+                  Biasanya terjadi karena stok sudah berkurang di device atau cabang lain saat kamu
+                  offline. Transaksi ini <strong>tidak akan dikirim ulang</strong> — kasir perlu
+                  void atau refund manual, lalu cocokkan stok fisik.
+                </p>
+              </div>
+            )}
+
             {hasQueue && (
               <p className="text-xs text-neutral-500">
                 {status.pendingCount} item (transaksi/menu) masih menunggu dikirim ke server
@@ -117,20 +143,27 @@ export default function SyncStatusBadge({ compact = false }: { compact?: boolean
                 <p className="text-xs text-urgent">
                   {status.lastError ?? "Sinkronisasi terakhir gagal."}
                 </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setOpen(false);
-                    triggerSync();
-                  }}
-                  className="btn-danger w-full text-xs py-1.5 inline-flex items-center justify-center gap-1.5"
-                >
-                  <RefreshCw size={12} /> Coba Lagi
-                </button>
+                {/* "Coba Lagi" HANYA berguna kalau masih ada antrian yang
+                    bisa dicoba. Kalau yang tersisa cuma penolakan permanen,
+                    retry tidak akan pernah berhasil — jadi tombolnya
+                    disembunyikan supaya kasir tidak mengetiknya berulang
+                    kali dengan hasil yang sama. */}
+                {hasQueue && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpen(false);
+                      triggerSync();
+                    }}
+                    className="btn-danger w-full text-xs py-1.5 inline-flex items-center justify-center gap-1.5"
+                  >
+                    <RefreshCw size={12} /> Coba Lagi
+                  </button>
+                )}
               </div>
             )}
 
-            {!hasQueue && status.state !== "error" && (
+            {!hasQueue && !hasRejected && status.state !== "error" && (
               <p className="text-xs text-neutral-400">Semua data sudah tersinkron.</p>
             )}
 

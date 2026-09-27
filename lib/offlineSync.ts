@@ -25,10 +25,46 @@ let syncInFlight = false;
 
 export type SyncState = "idle" | "syncing" | "success" | "error";
 
+/**
+ * Pola error dari `checkout_transaction` yang berarti penolakan PERMANEN:
+ * server sudah memutuskan transaksi itu tidak bisa diproses, dan mencoba
+ * ulang dengan data yang sama tidak akan mengubah hasilnya.
+ *
+ * Kena utamanya `STOCK_INSUFFICIENT` — skenario yang paling sering terjadi
+ * pada mode offline: kasir selling memakai cache stok lama, lalu stok
+ * berkurang di device/cabang lain sebelum sinkronasi sempat jalan.
+ *
+ * Sengaja KONSERVATIF: pola yang tidak dikenal dianggap transient (masih
+ * dicoba ulang), karena salah menganggap transaksi permanen berarti
+ * transaksi itu hilang dari sinkronisasi tanpa pernah masuk server.
+ */
+const PERMANENT_REJECTION_PATTERNS = [
+  "STOCK_INSUFFICIENT",
+  "PRODUCT_NOT_FOUND",
+  "INVALID_INVOICE",
+  "DUPLICATE_INVOICE",
+  "MEMBER_NOT_FOUND",
+  "INVALID_VOUCHER",
+  "VOUCHER_EXPIRED",
+  "CUSTOMER_NOT_FOUND",
+];
+
+function isPermanentRejection(message: string): boolean {
+  const upper = message.toUpperCase();
+  return PERMANENT_REJECTION_PATTERNS.some((p) => upper.includes(p));
+}
+
 export interface SyncStatus {
   state: SyncState;
   /** Jumlah transaksi + perubahan menu yang masih menunggu disinkron. */
   pendingCount: number;
+  /**
+   * Jumlah transaksi yang ditolak server secara permanen. Berbeda dengan
+   * `pendingCount`: item ini TIDAK akan pernah terkirim dengan sendirinya dan
+   * butuh void/refund oleh kasir, jadi tidak boleh ikut tersamar sebagai
+   * "antrian normal" yang akan self-heal begitu online.
+   */
+  rejectedCount: number;
   /** Pesan error ringkas dari percobaan sinkron terakhir (untuk recovery UI). */
   lastError: string | null;
   /** Kapan sinkron terakhir SUKSES (ISO string), untuk badge "✓ Synced". */
@@ -38,6 +74,7 @@ export interface SyncStatus {
 let syncStatus: SyncStatus = {
   state: "idle",
   pendingCount: 0,
+  rejectedCount: 0,
   lastError: null,
   lastSyncedAt: null,
 };
@@ -64,12 +101,17 @@ export function subscribeSyncStatus(cb: (status: SyncStatus) => void): () => voi
 
 /** Hitung ulang jumlah antrian (queue) dari Dexie — dipanggil sebelum & sesudah tiap sinkron. */
 async function refreshPendingCount() {
-  const [pendingTx, pendingOps] = await Promise.all([
+  const [pendingTx, pendingOps, rejectedTx] = await Promise.all([
     db.pendingTransactions.where("synced").equals(0).count(),
     db.pendingProductOps.where("synced").equals(0).count(),
+    db.pendingTransactions.where("synced").equals(0).filter((tx) => !!tx.sync_rejected).count(),
   ]);
-  setSyncStatus({ pendingCount: pendingTx + pendingOps });
-  return pendingTx + pendingOps;
+  // Yang ditolak permanen DIHAPUS dari pendingCount: `syncPendingTransactions`
+  // sudah melompatinya, jadi menghitungnya sebagai "antrian" akan membuat
+  // badge menjanjikan pengiriman ulang yang memang tidak akan pernah terjadi.
+  const pending = pendingTx - rejectedTx + pendingOps;
+  setSyncStatus({ pendingCount: pending, rejectedCount: rejectedTx });
+  return pending;
 }
 
 /**
@@ -116,6 +158,31 @@ export async function runBackgroundSync() {
         p_voucher_code: null,
       });
       if (error) {
+        // Bedakan dua jenis kegagalan, karena keduanya punya konsekuensi yang
+        // SANGAT berbeda untuk uang kasir:
+        //
+        // 1. Penolakan permanen (server sudah memutuskan, retry sia-sia).
+        //    Tandai synced_rejected supaya tidak dicoba lagi selamanya, tapi
+        //    barisnya TIDAK dihapus — ini bukti audit untuk void/refund.
+        // 2. Gagal sementara (jaringan putus, timeout). Biarkan di antrian,
+        //    dicoba lagi di percobaan sync berikutnya.
+        if (isPermanentRejection(error.message)) {
+          console.error(
+            "Sync transaksi offline DITOLAK PERMANEN oleh server (tidak akan dicoba lagi, perlu void/refund):",
+            tx.invoice_number,
+            error.message
+          );
+          if (tx.local_id) {
+            await db.pendingTransactions.update(tx.local_id, {
+              sync_rejected: 1,
+              sync_error: error.message,
+              sync_rejected_at: new Date().toISOString(),
+            });
+          }
+          hadFailure = true;
+          lastErrorMessage = `Transaksi ${tx.invoice_number} ditolak server: ${error.message.replace(/^STOCK_INSUFFICIENT:\s*/, "")} — perlu void/refund.`;
+          return false;
+        }
         console.error("Sync transaksi offline gagal (akan dicoba lagi nanti):", tx.invoice_number, error.message);
         hadFailure = true;
         lastErrorMessage = `Transaksi ${tx.invoice_number}: ${error.message}`;
