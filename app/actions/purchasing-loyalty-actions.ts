@@ -245,6 +245,8 @@ export async function createGoodsReceipt(formData: {
   }>;
   notes?: string;
 }) {
+  let createdGrnId: string | null = null;
+
   try {
     const supabase = await createClient();
     const { profile } = await getServerProfile();
@@ -301,6 +303,7 @@ export async function createGoodsReceipt(formData: {
       .single();
 
     if (grnError) throw grnError;
+    createdGrnId = grnData.id;
 
     // Insert GRN items — ingredient_id & purchase_unit WAJIB diisi, karena
     // process_goods_receipt() hanya meng-update stok+HPP (weighted average
@@ -337,6 +340,15 @@ export async function createGoodsReceipt(formData: {
     return { data: { id: grnData.id, grn_number }, success: true };
   } catch (error) {
     console.error('Error creating GRN:', error);
+
+    // Header GRN (dan item-nya, via ON DELETE CASCADE) sudah kadung tersimpan
+    // sebelum langkah proses stok/HPP gagal → hapus supaya tidak ada GRN
+    // "hantu" dan PO bisa diterima ulang setelah masalahnya diperbaiki.
+    if (createdGrnId) {
+      const supabase = await createClient();
+      await supabase.from('goods_receipts').delete().eq('id', createdGrnId);
+    }
+
     return { error: toErrorMessage(error, 'Gagal menyimpan penerimaan barang.') };
   }
 }
