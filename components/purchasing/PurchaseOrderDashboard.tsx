@@ -1,19 +1,26 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { createPurchaseOrder, getSuppliers, createGoodsReceipt } from '@/app/actions/purchasing-loyalty-actions';
+import {
+  createPurchaseOrder,
+  getSuppliers,
+  createGoodsReceipt,
+  getIngredientsForPurchasing,
+} from '@/app/actions/purchasing-loyalty-actions';
+import { useBranch, ALL_BRANCHES } from '@/lib/branchContext';
 import Modal from '@/components/Modal';
 
 interface POLineItem {
-  product_id: string;
+  ingredient_id: string;
   product_name: string;
+  unit: string;
   qty_ordered: number;
   unit_price: number;
 }
 
 interface GRNLineItem {
   po_item_id: string;
-  product_id: string;
+  ingredient_id: string;
   product_name: string;
   unit: string;
   qty_received: number;
@@ -26,8 +33,23 @@ interface Supplier {
   company_name: string;
 }
 
+interface IngredientOption {
+  id: string;
+  name: string;
+  category: string | null;
+  purchase_unit: string;
+}
+
 export function PurchaseOrderDashboard() {
+  const { selectedBranchId, selectedBranch, canSwitchBranch, ownBranchId } = useBranch();
+  const isConsolidated = selectedBranchId === ALL_BRANCHES;
+  // Cabang yang benar-benar dipakai untuk transaksi tulis: kalau owner sedang
+  // di "Laporan Konsolidasi" (ALL_BRANCHES bukan uuid asli), tidak ada cabang
+  // valid untuk disimpan → PO/GRN harus diblokir sampai 1 cabang dipilih.
+  const writeBranchId = isConsolidated ? ownBranchId : selectedBranchId;
+
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [ingredients, setIngredients] = useState<IngredientOption[]>([]);
   const [showPOForm, setShowPOForm] = useState(false);
   const [showGRNForm, setShowGRNForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,21 +63,22 @@ export function PurchaseOrderDashboard() {
   });
 
   const [grnFormData, setGrnFormData] = useState({
-    po_id: '',
+    po_number: '',
     notes: '',
     items: [] as GRNLineItem[],
   });
 
   const [newLineItem, setNewLineItem] = useState<POLineItem>({
-    product_id: '',
+    ingredient_id: '',
     product_name: '',
+    unit: '',
     qty_ordered: 0,
     unit_price: 0,
   });
 
   const [newGrnItem, setNewGrnItem] = useState<GRNLineItem>({
     po_item_id: '',
-    product_id: '',
+    ingredient_id: '',
     product_name: '',
     unit: '',
     qty_received: 0,
@@ -64,6 +87,7 @@ export function PurchaseOrderDashboard() {
 
   useEffect(() => {
     loadSuppliers();
+    loadIngredients();
   }, []);
 
   const loadSuppliers = async () => {
@@ -73,10 +97,39 @@ export function PurchaseOrderDashboard() {
     }
   };
 
+  const loadIngredients = async () => {
+    const result = await getIngredientsForPurchasing();
+    if (!result.error) {
+      setIngredients(result.data || []);
+    }
+  };
+
+  /** Dipanggil dari dropdown "Nama Produk" (PO) — isi ingredient_id, nama, dan unit sekaligus. */
+  const handlePickPOIngredient = (ingredientId: string) => {
+    const ing = ingredients.find((i) => i.id === ingredientId);
+    setNewLineItem((prev) => ({
+      ...prev,
+      ingredient_id: ingredientId,
+      product_name: ing?.name || '',
+      unit: ing?.purchase_unit || '',
+    }));
+  };
+
+  /** Sama seperti di atas, tapi untuk dropdown "Produk" di form GRN. */
+  const handlePickGrnIngredient = (ingredientId: string) => {
+    const ing = ingredients.find((i) => i.id === ingredientId);
+    setNewGrnItem((prev) => ({
+      ...prev,
+      ingredient_id: ingredientId,
+      product_name: ing?.name || '',
+      unit: ing?.purchase_unit || '',
+    }));
+  };
+
   // =========== PO Form Handlers ===========
   const handleAddPOItem = () => {
-    if (!newLineItem.product_name || newLineItem.qty_ordered <= 0 || newLineItem.unit_price <= 0) {
-      setError('Lengkapi semua field item terlebih dahulu');
+    if (!newLineItem.ingredient_id || newLineItem.qty_ordered <= 0 || newLineItem.unit_price <= 0) {
+      setError('Pilih bahan baku dan lengkapi qty & harga terlebih dahulu');
       return;
     }
 
@@ -86,8 +139,9 @@ export function PurchaseOrderDashboard() {
     }));
 
     setNewLineItem({
-      product_id: '',
+      ingredient_id: '',
       product_name: '',
+      unit: '',
       qty_ordered: 0,
       unit_price: 0,
     });
@@ -115,9 +169,15 @@ export function PurchaseOrderDashboard() {
       return;
     }
 
+    if (!writeBranchId) {
+      setError('Pilih 1 cabang dulu di kanan atas sebelum membuat PO (tidak bisa dari mode Laporan Konsolidasi).');
+      return;
+    }
+
     try {
       const result = await createPurchaseOrder({
         supplier_id: poFormData.supplier_id,
+        branch_id: writeBranchId,
         expected_delivery_date: poFormData.expected_delivery_date,
         notes: poFormData.notes,
         items: poFormData.items,
@@ -131,7 +191,7 @@ export function PurchaseOrderDashboard() {
         resetPOForm();
       }
     } catch (err) {
-      setError(String(err));
+      setError(err instanceof Error ? err.message : 'Gagal membuat PO.');
     }
   };
 
@@ -143,8 +203,9 @@ export function PurchaseOrderDashboard() {
       items: [],
     });
     setNewLineItem({
-      product_id: '',
+      ingredient_id: '',
       product_name: '',
+      unit: '',
       qty_ordered: 0,
       unit_price: 0,
     });
@@ -153,11 +214,11 @@ export function PurchaseOrderDashboard() {
   // =========== GRN Form Handlers ===========
   const handleAddGrnItem = () => {
     if (
-      !newGrnItem.product_name ||
+      !newGrnItem.ingredient_id ||
       newGrnItem.qty_received <= 0 ||
       newGrnItem.unit_price <= 0
     ) {
-      setError('Lengkapi semua field item GRN terlebih dahulu');
+      setError('Pilih bahan baku dan lengkapi qty & harga item GRN terlebih dahulu');
       return;
     }
 
@@ -168,7 +229,7 @@ export function PurchaseOrderDashboard() {
 
     setNewGrnItem({
       po_item_id: '',
-      product_id: '',
+      ingredient_id: '',
       product_name: '',
       unit: '',
       qty_received: 0,
@@ -188,8 +249,8 @@ export function PurchaseOrderDashboard() {
     setError(null);
     setSuccess(null);
 
-    if (!grnFormData.po_id) {
-      setError('Pilih PO terlebih dahulu');
+    if (!grnFormData.po_number.trim()) {
+      setError('Masukkan nomor PO terlebih dahulu');
       return;
     }
 
@@ -200,7 +261,7 @@ export function PurchaseOrderDashboard() {
 
     try {
       const result = await createGoodsReceipt({
-        po_id: grnFormData.po_id,
+        po_number: grnFormData.po_number.trim(),
         notes: grnFormData.notes,
         items: grnFormData.items,
       });
@@ -211,13 +272,13 @@ export function PurchaseOrderDashboard() {
         setSuccess(`GRN berhasil dibuat: ${result.data.grn_number}`);
         setShowGRNForm(false);
         setGrnFormData({
-          po_id: '',
+          po_number: '',
           notes: '',
           items: [],
         });
       }
     } catch (err) {
-      setError(String(err));
+      setError(err instanceof Error ? err.message : 'Gagal menyimpan GRN.');
     }
   };
 
@@ -336,18 +397,23 @@ export function PurchaseOrderDashboard() {
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                   <div>
                     <label className="text-xs font-medium">Nama Produk</label>
-                    <input
-                      type="text"
-                      placeholder="Misal: Kopi Arabika"
-                      value={newLineItem.product_name}
-                      onChange={(e) =>
-                        setNewLineItem((prev) => ({
-                          ...prev,
-                          product_name: e.target.value,
-                        }))
-                      }
+                    <select
+                      value={newLineItem.ingredient_id}
+                      onChange={(e) => handlePickPOIngredient(e.target.value)}
                       className="w-full px-2 py-2 border rounded text-sm mt-1"
-                    />
+                    >
+                      <option value="">-- Pilih Bahan Baku --</option>
+                      {ingredients.map((ing) => (
+                        <option key={ing.id} value={ing.id}>
+                          {ing.name} ({ing.purchase_unit})
+                        </option>
+                      ))}
+                    </select>
+                    {ingredients.length === 0 && (
+                      <p className="text-xs text-amber-600 mt-1">
+                        Belum ada Bahan Baku terdaftar — tambahkan dulu di menu Bahan Baku.
+                      </p>
+                    )}
                   </div>
 
                   <div>
@@ -497,15 +563,15 @@ export function PurchaseOrderDashboard() {
               <label className="block text-sm font-medium mb-2">Nomor PO *</label>
               <input
                 type="text"
-                placeholder="Masukkan nomor PO"
-                value={grnFormData.po_id}
+                placeholder="Misal: PO-2026-017"
+                value={grnFormData.po_number}
                 onChange={(e) =>
-                  setGrnFormData((prev) => ({ ...prev, po_id: e.target.value }))
+                  setGrnFormData((prev) => ({ ...prev, po_number: e.target.value }))
                 }
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg"
               />
               <p className="text-xs text-gray-500 mt-1">
-                Fitur pencarian PO dapat ditambahkan di dashboard
+                Salin persis nomor PO dari daftar Purchase Order (contoh: PO-2026-017).
               </p>
             </div>
 
@@ -518,33 +584,28 @@ export function PurchaseOrderDashboard() {
                 <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
                   <div>
                     <label className="text-xs font-medium">Produk</label>
-                    <input
-                      type="text"
-                      placeholder="Nama produk"
-                      value={newGrnItem.product_name}
-                      onChange={(e) =>
-                        setNewGrnItem((prev) => ({
-                          ...prev,
-                          product_name: e.target.value,
-                        }))
-                      }
+                    <select
+                      value={newGrnItem.ingredient_id}
+                      onChange={(e) => handlePickGrnIngredient(e.target.value)}
                       className="w-full px-2 py-2 border rounded text-sm mt-1"
-                    />
+                    >
+                      <option value="">-- Pilih Bahan Baku --</option>
+                      {ingredients.map((ing) => (
+                        <option key={ing.id} value={ing.id}>
+                          {ing.name}
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
                   <div>
                     <label className="text-xs font-medium">Unit</label>
                     <input
                       type="text"
-                      placeholder="kg, liter"
                       value={newGrnItem.unit}
-                      onChange={(e) =>
-                        setNewGrnItem((prev) => ({
-                          ...prev,
-                          unit: e.target.value,
-                        }))
-                      }
-                      className="w-full px-2 py-2 border rounded text-sm mt-1"
+                      readOnly
+                      placeholder="Otomatis dari Bahan Baku"
+                      className="w-full px-2 py-2 border rounded text-sm mt-1 bg-gray-100 text-gray-600"
                     />
                   </div>
 

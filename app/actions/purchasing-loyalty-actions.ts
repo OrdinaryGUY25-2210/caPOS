@@ -112,23 +112,45 @@ export async function getSuppliers() {
 // PURCHASE ORDER MANAGEMENT — PO & Goods Receipt
 // =========================================================
 
+/** Ambil pesan error yang bisa dibaca manusia dari error apapun (Error, PostgrestError, atau nilai lain). */
+function toErrorMessage(error: unknown, fallback = 'Terjadi kesalahan, coba lagi.'): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === 'object' && 'message' in error && typeof (error as any).message === 'string') {
+    return (error as any).message;
+  }
+  if (typeof error === 'string') return error;
+  return fallback;
+}
+
 export async function createPurchaseOrder(formData: {
   supplier_id: string;
-  branch_id?: string;
+  branch_id: string;
   expected_delivery_date?: string;
   notes?: string;
   items: Array<{
-    product_id: string;
+    ingredient_id: string;
+    product_name: string;
+    unit: string;
     qty_ordered: number;
     unit_price: number;
   }>;
 }) {
+  let createdPoId: string | null = null;
+
   try {
     const supabase = await createClient();
     const { profile } = await getServerProfile();
 
     if (!profile?.tenant_id) {
       return { error: 'Tenant tidak ditemukan' };
+    }
+
+    if (!formData.branch_id) {
+      return { error: 'Cabang belum dipilih. Pilih 1 cabang dulu di kanan atas sebelum membuat PO.' };
+    }
+
+    if (!formData.items || formData.items.length === 0) {
+      return { error: 'Tambahkan minimal satu item' };
     }
 
     // Generate PO Number
@@ -160,7 +182,7 @@ export async function createPurchaseOrder(formData: {
         po_number,
         supplier_id: formData.supplier_id,
         branch_id: formData.branch_id,
-        expected_delivery_date: formData.expected_delivery_date,
+        expected_delivery_date: formData.expected_delivery_date || null,
         notes: formData.notes,
         subtotal_amount,
         total_amount: subtotal_amount,
@@ -171,11 +193,17 @@ export async function createPurchaseOrder(formData: {
       .single();
 
     if (poError) throw poError;
+    createdPoId = poData.id;
 
-    // Insert PO items
+    // Insert PO items — ingredient_id dipakai untuk pembelian bahan baku
+    // (bukan product_id) supaya process_goods_receipt bisa update stok & HPP
+    // ingredient yang benar saat barang diterima nanti.
     const items = formData.items.map((item) => ({
       po_id: poData.id,
-      product_id: item.product_id,
+      ingredient_id: item.ingredient_id,
+      product_name: item.product_name,
+      unit: item.unit,
+      purchase_unit: item.unit,
       qty_ordered: item.qty_ordered,
       unit_price: item.unit_price,
       subtotal: item.qty_ordered * item.unit_price,
@@ -191,15 +219,25 @@ export async function createPurchaseOrder(formData: {
     return { data: { id: poData.id, po_number }, success: true };
   } catch (error) {
     console.error('Error creating PO:', error);
-    return { error: String(error) };
+
+    // Item gagal disimpan tapi header PO sudah kadung ter-insert sebelumnya
+    // → hapus lagi header-nya supaya tidak ada PO "hantu" tanpa item
+    // (seperti kasus PO-2026-017 yang branch_id-nya NULL dan item-nya kosong).
+    if (createdPoId) {
+      const supabase = await createClient();
+      await supabase.from('purchase_orders').delete().eq('id', createdPoId);
+    }
+
+    return { error: toErrorMessage(error, 'Gagal membuat PO.') };
   }
 }
 
 export async function createGoodsReceipt(formData: {
-  po_id: string;
+  /** Nomor PO seperti diketik user di form, mis. "PO-2026-017" — BUKAN uuid id. */
+  po_number: string;
   items: Array<{
-    po_item_id: string;
-    product_id: string;
+    po_item_id?: string;
+    ingredient_id: string;
     product_name: string;
     unit: string;
     qty_received: number;
@@ -215,14 +253,21 @@ export async function createGoodsReceipt(formData: {
       return { error: 'Tenant tidak ditemukan' };
     }
 
-    // Get PO info
+    if (!formData.po_number?.trim()) {
+      return { error: 'Masukkan nomor PO terlebih dahulu' };
+    }
+
+    // Get PO info — dicari berdasarkan po_number (yang diketik user), bukan
+    // id (uuid internal). Sebelumnya kode ini mencocokkan ke kolom `id`,
+    // makanya nomor PO yang benar tetap dianggap "tidak ditemukan".
     const { data: poData, error: poError } = await supabase
       .from('purchase_orders')
       .select('*, branch_id')
-      .eq('id', formData.po_id)
+      .eq('po_number', formData.po_number.trim())
+      .eq('tenant_id', profile.tenant_id)
       .single();
 
-    if (poError || !poData) throw new Error('PO tidak ditemukan');
+    if (poError || !poData) throw new Error(`PO dengan nomor "${formData.po_number}" tidak ditemukan`);
 
     // Generate GRN Number
     const { data: lastGRN } = await supabase
@@ -246,7 +291,7 @@ export async function createGoodsReceipt(formData: {
       .insert({
         tenant_id: profile.tenant_id,
         branch_id: poData.branch_id,
-        po_id: formData.po_id,
+        po_id: poData.id,
         grn_number,
         supplier_id: poData.supplier_id,
         notes: formData.notes,
@@ -257,13 +302,18 @@ export async function createGoodsReceipt(formData: {
 
     if (grnError) throw grnError;
 
-    // Insert GRN items
+    // Insert GRN items — ingredient_id & purchase_unit WAJIB diisi, karena
+    // process_goods_receipt() hanya meng-update stok+HPP (weighted average
+    // cost) kalau ingredient_id ada isinya. Kalau kosong, fungsi itu diam-diam
+    // fallback ke jalur lama (stock_movements produk jadi) dan stok bahan
+    // baku tidak pernah bertambah.
     const grnItems = formData.items.map((item) => ({
       grn_id: grnData.id,
-      po_item_id: item.po_item_id,
-      product_id: item.product_id,
+      po_item_id: item.po_item_id || null,
+      ingredient_id: item.ingredient_id,
       product_name: item.product_name,
       unit: item.unit,
+      purchase_unit: item.unit,
       qty_received: item.qty_received,
       unit_price: item.unit_price,
       actual_cost: item.qty_received * item.unit_price,
@@ -287,7 +337,34 @@ export async function createGoodsReceipt(formData: {
     return { data: { id: grnData.id, grn_number }, success: true };
   } catch (error) {
     console.error('Error creating GRN:', error);
-    return { error: String(error) };
+    return { error: toErrorMessage(error, 'Gagal menyimpan penerimaan barang.') };
+  }
+}
+
+/** Daftar Bahan Baku aktif tenant — dipakai untuk dropdown pemilihan item di form PO & GRN,
+ *  supaya ingredient_id selalu valid (tidak lagi ketik nama produk bebas sebagai teks). */
+export async function getIngredientsForPurchasing() {
+  try {
+    const supabase = await createClient();
+    const { profile } = await getServerProfile();
+
+    if (!profile?.tenant_id) {
+      return { error: 'Tenant tidak ditemukan' };
+    }
+
+    const { data, error } = await supabase
+      .from('ingredients')
+      .select('id, name, category, purchase_unit')
+      .eq('tenant_id', profile.tenant_id)
+      .eq('status', 'active')
+      .order('name');
+
+    if (error) throw error;
+
+    return { data };
+  } catch (error) {
+    console.error('Error fetching ingredients:', error);
+    return { error: toErrorMessage(error) };
   }
 }
 
