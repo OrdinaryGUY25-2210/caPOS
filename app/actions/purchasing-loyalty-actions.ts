@@ -384,6 +384,77 @@ export async function getIngredientsForPurchasing() {
 // CUSTOMER MANAGEMENT — CRM & Loyalty Integration
 // =========================================================
 
+/** Daftar riwayat PO beserta jumlah item dan nama pemasok — dipakai untuk kartu ringkasan dan tabel Riwayat PO. */
+export async function getPurchaseOrders(branchId?: string) {
+  try {
+    const supabase = await createClient();
+    const { profile } = await getServerProfile();
+
+    if (!profile?.tenant_id) {
+      return { error: 'Tenant tidak ditemukan' };
+    }
+
+    let query = supabase
+      .from('purchase_orders')
+      .select(
+        `id, po_number, status, po_date, expected_delivery_date, received_date,
+         total_amount, notes, created_at,
+         suppliers ( company_name ),
+         po_items ( id, product_name, qty_ordered, unit, unit_price )`
+      )
+      .eq('tenant_id', profile.tenant_id)
+      .order('created_at', { ascending: false })
+      .limit(100);
+
+    if (branchId) {
+      query = query.eq('branch_id', branchId);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    return { data: data || [] };
+  } catch (error) {
+    console.error('Error fetching purchase orders:', error);
+    return { error: toErrorMessage(error) };
+  }
+}
+
+/** Daftar riwayat GRN (penerimaan barang) beserta item dan nomor PO asalnya. */
+export async function getGoodsReceipts(branchId?: string) {
+  try {
+    const supabase = await createClient();
+    const { profile } = await getServerProfile();
+
+    if (!profile?.tenant_id) {
+      return { error: 'Tenant tidak ditemukan' };
+    }
+
+    let query = supabase
+      .from('goods_receipts')
+      .select(
+        `id, grn_number, notes, created_at,
+         purchase_orders ( po_number ),
+         grn_items ( id, product_name, qty_received, unit, unit_price, actual_cost )`
+      )
+      .eq('tenant_id', profile.tenant_id)
+      .order('created_at', { ascending: false })
+      .limit(100);
+
+    if (branchId) {
+      query = query.eq('branch_id', branchId);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    return { data: data || [] };
+  } catch (error) {
+    console.error('Error fetching goods receipts:', error);
+    return { error: toErrorMessage(error) };
+  }
+}
+
 export async function createCustomer(formData: {
   customer_code: string;
   customer_name: string;

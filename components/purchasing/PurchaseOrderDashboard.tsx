@@ -6,6 +6,8 @@ import {
   getSuppliers,
   createGoodsReceipt,
   getIngredientsForPurchasing,
+  getPurchaseOrders,
+  getGoodsReceipts,
 } from '@/app/actions/purchasing-loyalty-actions';
 import { useBranch, ALL_BRANCHES } from '@/lib/branchContext';
 import Modal from '@/components/Modal';
@@ -50,6 +52,11 @@ export function PurchaseOrderDashboard() {
 
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [ingredients, setIngredients] = useState<IngredientOption[]>([]);
+  const [poList, setPoList] = useState<any[]>([]);
+  const [grnList, setGrnList] = useState<any[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+  const [expandedPo, setExpandedPo] = useState<string | null>(null);
+  const [expandedGrn, setExpandedGrn] = useState<string | null>(null);
   const [showPOForm, setShowPOForm] = useState(false);
   const [showGRNForm, setShowGRNForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -88,7 +95,8 @@ export function PurchaseOrderDashboard() {
   useEffect(() => {
     loadSuppliers();
     loadIngredients();
-  }, []);
+    loadHistory();
+  }, [writeBranchId]);
 
   const loadSuppliers = async () => {
     const result = await getSuppliers();
@@ -103,6 +111,44 @@ export function PurchaseOrderDashboard() {
       setIngredients(result.data || []);
     }
   };
+
+  const loadHistory = async () => {
+    setLoadingHistory(true);
+    const branchFilter = isConsolidated ? undefined : selectedBranchId;
+    const [poRes, grnRes] = await Promise.all([
+      getPurchaseOrders(branchFilter || undefined),
+      getGoodsReceipts(branchFilter || undefined),
+    ]);
+    if (!poRes.error) setPoList(poRes.data || []);
+    if (!grnRes.error) setGrnList(grnRes.data || []);
+    setLoadingHistory(false);
+  };
+
+  // ---- Statistik ringkasan, dihitung dari data riwayat yang sesungguhnya ----
+  const poPendingCount = poList.filter((po) =>
+    ['DRAFT', 'SENT', 'CONFIRMED', 'PARTIAL_RECEIVED'].includes(po.status)
+  ).length;
+  const barangDiterimaCount = grnList.length;
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const totalPembelian30Hari = grnList
+    .filter((g) => new Date(g.created_at) >= thirtyDaysAgo)
+    .reduce(
+      (sum, g) => sum + (g.grn_items || []).reduce((s: number, i: any) => s + (i.actual_cost || 0), 0),
+      0
+    );
+
+  const statusLabel: Record<string, string> = {
+    DRAFT: 'Draft', SENT: 'Terkirim', CONFIRMED: 'Dikonfirmasi',
+    PARTIAL_RECEIVED: 'Sebagian Diterima', RECEIVED: 'Diterima', CANCELLED: 'Dibatalkan',
+  };
+  const statusColor: Record<string, string> = {
+    DRAFT: 'bg-gray-100 text-gray-700', SENT: 'bg-blue-100 text-blue-700',
+    CONFIRMED: 'bg-indigo-100 text-indigo-700', PARTIAL_RECEIVED: 'bg-amber-100 text-amber-700',
+    RECEIVED: 'bg-green-100 text-green-700', CANCELLED: 'bg-red-100 text-red-700',
+  };
+  const fmtRp = (n: number) => 'Rp ' + Math.round(n || 0).toLocaleString('id-ID');
+  const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
 
   /** Dipanggil dari dropdown "Nama Produk" (PO) — isi ingredient_id, nama, dan unit sekaligus. */
   const handlePickPOIngredient = (ingredientId: string) => {
@@ -189,6 +235,7 @@ export function PurchaseOrderDashboard() {
         setSuccess(`PO berhasil dibuat: ${result.data.po_number}`);
         setShowPOForm(false);
         resetPOForm();
+        loadHistory();
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Gagal membuat PO.');
@@ -276,6 +323,7 @@ export function PurchaseOrderDashboard() {
           notes: '',
           items: [],
         });
+        loadHistory();
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Gagal menyimpan GRN.');
@@ -332,16 +380,157 @@ export function PurchaseOrderDashboard() {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-white rounded-lg p-6 shadow">
           <div className="text-sm text-gray-600">PO Pending</div>
-          <div className="text-3xl font-bold mt-2">-</div>
+          <div className="text-3xl font-bold mt-2">{loadingHistory ? '-' : poPendingCount}</div>
         </div>
         <div className="bg-white rounded-lg p-6 shadow">
           <div className="text-sm text-gray-600">Barang Diterima</div>
-          <div className="text-3xl font-bold mt-2">-</div>
+          <div className="text-3xl font-bold mt-2">{loadingHistory ? '-' : barangDiterimaCount}</div>
         </div>
         <div className="bg-white rounded-lg p-6 shadow">
           <div className="text-sm text-gray-600">Total Pembelian (30 hari)</div>
-          <div className="text-3xl font-bold mt-2">Rp -</div>
+          <div className="text-3xl font-bold mt-2">{loadingHistory ? 'Rp -' : fmtRp(totalPembelian30Hari)}</div>
         </div>
+      </div>
+
+      {/* Riwayat PO */}
+      <div className="bg-white rounded-lg shadow">
+        <div className="p-4 border-b font-semibold">Riwayat Purchase Order</div>
+        {loadingHistory ? (
+          <div className="p-6 text-sm text-gray-500">Memuat...</div>
+        ) : poList.length === 0 ? (
+          <div className="p-6 text-sm text-gray-500">
+            Belum ada PO {isConsolidated ? '' : 'untuk cabang ini'}. Klik + Buat PO untuk membuat yang pertama.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-gray-600">
+                <tr>
+                  <th className="text-left p-3">Nomor PO</th>
+                  <th className="text-left p-3">Pemasok</th>
+                  <th className="text-left p-3">Tanggal</th>
+                  <th className="text-left p-3">Status</th>
+                  <th className="text-right p-3">Total</th>
+                  <th className="p-3"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {poList.map((po) => (
+                  <React.Fragment key={po.id}>
+                    <tr className="border-t">
+                      <td className="p-3 font-medium">{po.po_number}</td>
+                      <td className="p-3">{po.suppliers?.company_name || '-'}</td>
+                      <td className="p-3">{fmtDate(po.po_date || po.created_at)}</td>
+                      <td className="p-3">
+                        <span className={`px-2 py-1 rounded text-xs font-medium ${statusColor[po.status] || 'bg-gray-100 text-gray-700'}`}>
+                          {statusLabel[po.status] || po.status}
+                        </span>
+                      </td>
+                      <td className="p-3 text-right">{fmtRp(po.total_amount)}</td>
+                      <td className="p-3 text-right">
+                        <button
+                          className="text-blue-600 text-xs hover:underline"
+                          onClick={() => setExpandedPo(expandedPo === po.id ? null : po.id)}
+                        >
+                          {expandedPo === po.id ? 'Tutup' : 'Lihat item'}
+                        </button>
+                      </td>
+                    </tr>
+                    {expandedPo === po.id && (
+                      <tr className="bg-gray-50 border-t">
+                        <td colSpan={6} className="p-3">
+                          <table className="w-full text-xs">
+                            <thead className="text-gray-500">
+                              <tr><th className="text-left py-1">Produk</th><th className="text-left py-1">Qty</th><th className="text-right py-1">Harga Satuan</th></tr>
+                            </thead>
+                            <tbody>
+                              {(po.po_items || []).map((it: any) => (
+                                <tr key={it.id}>
+                                  <td className="py-1">{it.product_name}</td>
+                                  <td className="py-1">{it.qty_ordered} {it.unit}</td>
+                                  <td className="py-1 text-right">{fmtRp(it.unit_price)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                          {po.notes && <p className="text-xs text-gray-500 mt-2">Catatan: {po.notes}</p>}
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Riwayat GRN */}
+      <div className="bg-white rounded-lg shadow">
+        <div className="p-4 border-b font-semibold">Riwayat Penerimaan Barang (GRN)</div>
+        {loadingHistory ? (
+          <div className="p-6 text-sm text-gray-500">Memuat...</div>
+        ) : grnList.length === 0 ? (
+          <div className="p-6 text-sm text-gray-500">Belum ada penerimaan barang tercatat.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-gray-600">
+                <tr>
+                  <th className="text-left p-3">Nomor GRN</th>
+                  <th className="text-left p-3">Dari PO</th>
+                  <th className="text-left p-3">Tanggal</th>
+                  <th className="text-right p-3">Total Diterima</th>
+                  <th className="p-3"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {grnList.map((g) => {
+                  const total = (g.grn_items || []).reduce((s: number, i: any) => s + (i.actual_cost || 0), 0);
+                  return (
+                    <React.Fragment key={g.id}>
+                      <tr className="border-t">
+                        <td className="p-3 font-medium">{g.grn_number}</td>
+                        <td className="p-3">{g.purchase_orders?.po_number || '-'}</td>
+                        <td className="p-3">{fmtDate(g.created_at)}</td>
+                        <td className="p-3 text-right">{fmtRp(total)}</td>
+                        <td className="p-3 text-right">
+                          <button
+                            className="text-blue-600 text-xs hover:underline"
+                            onClick={() => setExpandedGrn(expandedGrn === g.id ? null : g.id)}
+                          >
+                            {expandedGrn === g.id ? 'Tutup' : 'Lihat item'}
+                          </button>
+                        </td>
+                      </tr>
+                      {expandedGrn === g.id && (
+                        <tr className="bg-gray-50 border-t">
+                          <td colSpan={5} className="p-3">
+                            <table className="w-full text-xs">
+                              <thead className="text-gray-500">
+                                <tr><th className="text-left py-1">Produk</th><th className="text-left py-1">Qty Diterima</th><th className="text-right py-1">Harga Satuan</th></tr>
+                              </thead>
+                              <tbody>
+                                {(g.grn_items || []).map((it: any) => (
+                                  <tr key={it.id}>
+                                    <td className="py-1">{it.product_name}</td>
+                                    <td className="py-1">{it.qty_received} {it.unit}</td>
+                                    <td className="py-1 text-right">{fmtRp(it.unit_price)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                            {g.notes && <p className="text-xs text-gray-500 mt-2">Catatan: {g.notes}</p>}
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* PO Form Modal */}
