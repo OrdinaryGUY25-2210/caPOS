@@ -176,42 +176,65 @@ export async function POST(request: Request) {
   const { data: authUser, error: authError } = await anonClient().auth.signUp({
     email,
     password,
-  });
+});
 
-  // Supabase signUp() TIDAK mengembalikan error untuk email yang sudah
-  // terdaftar & terkonfirmasi (supaya tidak bocor mana email yang valid) —
-  // sebagai gantinya ia balas "sukses" tapi user.identities kosong ([]).
-  // Ini jaring pengaman kedua di belakang cek langkah 0 di atas.
-  const isDuplicateEmail =
-    authError?.message?.toLowerCase().includes("already registered") ||
-    (authUser?.user && Array.isArray(authUser.user.identities) && authUser.user.identities.length === 0);
+  const signUpUser = authUser?.user ?? null;
 
-  if (authError || !authUser.user || isDuplicateEmail) {
-    if (!isDuplicateEmail) console.error("auth signUp failed", authError);
+  // Supabase SENGAJA tidak memberi tahu apakah email sudah terdaftar (anti
+  // user-enumeration). Manifestasinya bisa berupa error "already registered",
+  // ATAU user object dengan `identities` kosong.
+  //
+  // PENTING: `identities` kosong TIDAK boleh dipakai sebagai bukti duplikat.
+  // Dengan setting "Confirm email" = ON, Supabase juga mengembalikannya kosong
+  // untuk pendaftaran yang BARU dan sah. Versi lama kode ini memakai
+  // `identities.length === 0` sebagai deteksi duplikat, dan itu gagal dua arah:
+  // false positive (pendaftaran baru ditolak sebagai "sudah terdaftar") dan
+  // false negative (akun lama lolos, lalu mentabrak PK di langkah 6).
+  //
+  // Satu-satunya bukti yang bisa dipercaya: apakah auth user ini sudah punya
+  // baris `profiles`. Profile = akun yang benar-benar selesai dibuat.
+  if (authError || !signUpUser) {
+    console.error("auth signUp failed", authError);
     await supabase.from("tenants").delete().eq("id", tenant.id);
     return NextResponse.json(
-      {
-        message: isDuplicateEmail
-          ? "Email ini sudah terdaftar. Silakan login, atau gunakan email lain untuk mendaftar."
-          : "Pendaftaran gagal. Periksa kembali data Anda atau gunakan email lain.",
-      },
+      { message: "Pendaftaran gagal. Periksa kembali data Anda atau gunakan email lain." },
       { status: 400 }
     );
   }
 
-  // 6. Create owner profile.
-  // BUG FIX (evaluasi audit): sebelumnya insert ini tidak dicek error-nya
-  // sama sekali — kalau gagal (race condition, constraint, dsb), auth
-  // user & tenant sudah terlanjur dibuat tapi profilnya tidak ada, dan
-  // response TETAP bilang { success: true } ke pengguna. Hasilnya akun
-  // "setengah jadi": tidak pernah bisa login normal (getCurrentProfile()
-  // akan selalu null), padahal pengguna sudah diberi tahu pendaftaran
-  // berhasil. Sekarang: kalau gagal, bersihkan semua yang sudah terlanjur
-  // dibuat (auth user + tenant, sama seperti jalur gagal lain di atas)
-  // dan beri tahu pengguna dengan jujur supaya mereka coba daftar ulang,
-  // bukan menunggu email verifikasi yang tidak akan pernah berguna.
+  const { data: profileForUser } = await supabase
+    .from("profiles")
+    .select("id, email")
+    .eq("id", signUpUser.id)
+    .maybeSingle();
+
+  if (profileForUser) {
+    // Auth user + profile-nya sudah ada => email ini sudah terdaftar.
+    //
+    // authUser di sini milik akun yang SUDAH ADA, jadi JANGAN dihapus:
+    // menghapusnya akan menghapus akun orang lain yang sah. Cukup buang
+    // tenant yang baru dibuat di langkah 1 — subscription, referrals, dan
+    // seluruh data lain ikut terhapus lewat ON DELETE CASCADE.
+    console.warn("registrasi ditolak: auth user sudah punya profile", signUpUser.id);
+    await supabase.from("tenants").delete().eq("id", tenant.id);
+    return NextResponse.json(
+      {
+        message:
+          "Email ini sudah terdaftar. Silakan login, atau gunakan email lain untuk mendaftar.",
+      },
+      { status: 409 }
+    );
+  }
+
+// 6. Create owner profile.
+  // Sebenarnya di sini paling aman pakai upsert (onConflict: id) supaya
+  // tabrakan PK self-healing, tapi itu TIDAK kita lakukan: insert yang
+  // diam-diam menimpa profile yang sudah ada bisa menimpa role/tenant milik
+  // akun lain. Konflik ditangani eksplisit di bawah — lebih aman, dan
+  // pesannya bisa sampai ke pengguna sebagai "sudah terdaftar" (409)
+  // alih-alih 500 yang tidak informatif.
   const { error: profileError } = await supabase.from("profiles").insert({
-    id: authUser.user.id,
+    id: signUpUser.id,
     tenant_id: tenant.id,
     role: "owner",
     full_name: ownerName,
@@ -219,8 +242,28 @@ export async function POST(request: Request) {
   });
 
   if (profileError) {
+    // 23505 = unique violation. Terjadi saat dua pendaftaran untuk email yang
+    // sama tiba bersamaan: keduanya membuat auth user, keduanya sampai di
+    // insert ini, yang kalah kalah. Akunnya sudah ada, jadi perlakukan sebagai
+    // duplikat (409) — BUKAN server error — dan JANGAN hapus auth user karena
+    // itu milik request yang menang balapan.
+    if (profileError.code === "23505") {
+      console.warn("profiles insert 23505 (race), diperlakukan sebagai duplikat:", signUpUser.id);
+      await supabase.from("tenants").delete().eq("id", tenant.id);
+      return NextResponse.json(
+        {
+          message:
+            "Email ini sudah terdaftar. Silakan login, atau gunakan email lain untuk mendaftar.",
+        },
+        { status: 409 }
+      );
+    }
+
+    // Untuk error lain, auth user ini PASTI milik request ini: signUp
+    // baru saja membuatnya dan kita sudah memastikan belum ada profile-nya,
+    // jadi belum ada akun lain yang bisa bergantung padanya. Aman dihapus.
     console.error("owner profile insert failed", profileError);
-    await supabase.auth.admin.deleteUser(authUser.user.id).catch(() => {});
+    await supabase.auth.admin.deleteUser(signUpUser.id).catch(() => {});
     await supabase.from("tenants").delete().eq("id", tenant.id);
     return NextResponse.json(
       { message: "Pendaftaran gagal menyimpan data akun. Silakan coba lagi." },
