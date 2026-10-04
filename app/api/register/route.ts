@@ -172,11 +172,29 @@ export async function POST(request: Request) {
     ownReferralCode = generateReferralCode(); // tabrakan kode (sangat jarang) — coba lagi
   }
 
-  // 5. Create auth user DAN kirim email verifikasi asli (kode OTP).
+// 5. Create auth user DAN kirim email verifikasi asli (kode OTP).
+  //
+  // Profile TIDAK dibuat di sini. Trigger profil di auth.users sudah dihapus
+  // (lihat migration_023) karena ia selalu bentrok dengan langkah 6: trigger
+  // hanya mengisi id/full_name/email, sehingga `role` jatuh ke DEFAULT
+  // 'cashier' dan `tenant_id` NULL — lalu insert di langkah 6 kena 23505
+  // (profiles_pkey), dan user yang lolos mendarat di /pos tanpa tenant.
+  // Baris profile sekarang dibuat oleh langkah 6, dengan role + tenant_id
+  // yang benar.
+  //
+  // `app: "capos"` disimpan di metadata supaya dashboard analitik (Cortex)
+  // bisa membedakan user caPOS dari user lain, karena keduanya berbagi satu
+  // tabel auth.users.
   const { data: authUser, error: authError } = await anonClient().auth.signUp({
     email,
     password,
-});
+    options: {
+      data: {
+        app: "capos",
+        full_name: ownerName,
+      },
+    },
+  });
 
   const signUpUser = authUser?.user ?? null;
 
@@ -202,20 +220,24 @@ export async function POST(request: Request) {
     );
   }
 
+  // Profile yang sudah ada sebelum langkah 6 = akun lama milik orang.
+  // Kalau `tenant_id` terisi, akun itu benar-benar punya kafe, jadi tolak
+  // sebagai duplikat dan JANGAN sentuh authUser: menghapusnya akan
+  // menghapus akun orang lain yang sah hanya karena emailnya sama.
   const { data: profileForUser } = await supabase
     .from("profiles")
-    .select("id, email")
+    .select("id, email, tenant_id, role")
     .eq("id", signUpUser.id)
     .maybeSingle();
 
-  if (profileForUser) {
-    // Auth user + profile-nya sudah ada => email ini sudah terdaftar.
+  if (profileForUser?.tenant_id) {
+    // Profile-nya sudah punya tenant => akun sungguhan milik orang.
     //
     // authUser di sini milik akun yang SUDAH ADA, jadi JANGAN dihapus:
-    // menghapusnya akan menghapus akun orang lain yang sah. Cukup buang
-    // tenant yang baru dibuat di langkah 1 — subscription, referrals, dan
-    // seluruh data lain ikut terhapus lewat ON DELETE CASCADE.
-    console.warn("registrasi ditolak: auth user sudah punya profile", signUpUser.id);
+    // menghapusnya akan menghapus akun orang lain yang sah hanya karena
+    // emailnya sama. Cukup buang tenant yang baru dibuat di langkah 1 —
+    // subscription, referrals, dan data lain ikut terhapus via CASCADE.
+    console.warn("registrasi ditolak: email sudah punya akun aktif", signUpUser.id);
     await supabase.from("tenants").delete().eq("id", tenant.id);
     return NextResponse.json(
       {
@@ -227,12 +249,11 @@ export async function POST(request: Request) {
   }
 
 // 6. Create owner profile.
-  // Sebenarnya di sini paling aman pakai upsert (onConflict: id) supaya
-  // tabrakan PK self-healing, tapi itu TIDAK kita lakukan: insert yang
-  // diam-diam menimpa profile yang sudah ada bisa menimpa role/tenant milik
-  // akun lain. Konflik ditangani eksplisit di bawah — lebih aman, dan
-  // pesannya bisa sampai ke pengguna sebagai "sudah terdaftar" (409)
-  // alih-alih 500 yang tidak informatif.
+  //
+  // `insert` (bukan `upsert`) supaya baris milik akun lain tidak bisa tertimpa
+  // diam-diam. Tabrakan PK ditangani eksplisit di bawah sebagai 409, bukan
+  // 500, dan tidak menghapus auth user karena itu milik request yang menang
+  // balapan.
   const { error: profileError } = await supabase.from("profiles").insert({
     id: signUpUser.id,
     tenant_id: tenant.id,
