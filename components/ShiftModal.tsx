@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Wallet, ArrowDownCircle, ArrowUpCircle, Loader2, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { Wallet, ArrowDownCircle, ArrowUpCircle, Loader2, AlertTriangle, CheckCircle2, LogOut } from "lucide-react";
 import Modal from "@/components/Modal";
 import { createClient } from "@/lib/supabase/client";
 import { formatRupiah, formatNumberWithDots, stripNumberDots } from "@/lib/utils";
@@ -54,6 +54,19 @@ export default function ShiftModal({
   const [confirmingClose, setConfirmingClose] = useState(false);
   const [closeError, setCloseError] = useState<string | null>(null);
   const [closedResult, setClosedResult] = useState<{ expected: number; actual: number; difference: number } | null>(null);
+
+  // --- State: keluar dari akun sebelum shift dibuka ---
+  // Screen "Buka Shift — Modal Awal Kas" tadinya JEBakan: tombol X & klik
+  // backdrop Modal memanggil `onClose`, tapi /pos/page.tsx merender
+  // <ShiftModal> selama `(showShiftModal || !shiftId)` — selama shiftId masih
+  // null, `!shiftId` tetap true, jadi modal tidak pernah menutup, dan navbar
+  // kasir (tempatnya tombol logout) tertutup overlay. Kasir yang salah login
+  // atau tidak mau input modal awal jadi terkunci total. Sekarang X / klik
+  // backdrop / tombol "Keluar dari Akun" membuka konfirmasi dulu (pola yang
+  // sama dengan `confirmingClose` di bawah) baru signOut — supaya tidak
+  // keluar cuma gara-gara salah sentuh di layar penuh.
+  const [confirmExit, setConfirmExit] = useState(false);
+  const [exiting, setExiting] = useState(false);
 
   // CATATAN PENTING (Blind Cashier Shift Closing — Requirement 3):
   // Sebelumnya modul ini memanggil `shift_cash_summary` dan LANGSUNG
@@ -126,6 +139,12 @@ export default function ShiftModal({
     // window.confirm) sebelum benar-benar menutup shift secara permanen.
     setCloseError(null);
     setConfirmingClose(true);
+  }
+
+  async function handleExitWithoutShift() {
+    setExiting(true);
+    await createClient().auth.signOut();
+    window.location.href = "/login";
   }
 
   async function applyCloseShift() {
@@ -223,11 +242,45 @@ export default function ShiftModal({
     return (
       <Modal
         title="Buka Shift — Modal Awal Kas"
-        onClose={onClose}
+        onClose={() => (confirmExit ? handleExitWithoutShift() : setConfirmExit(true))}
         footer={
-          <button disabled={openingSaving} onClick={handleOpenShift} className="btn-primary w-full flex items-center justify-center gap-2">
-            {openingSaving && <Loader2 className="animate-spin" size={16} />} Mulai Shift
-          </button>
+          confirmExit ? (
+            <div className="space-y-2.5">
+              <p className="text-xs text-urgent flex items-start gap-1.5">
+                <LogOut size={14} className="shrink-0 mt-0.5" />
+                Keluar dari akun kasir ini di perangkat ini? Shift belum dibuka, jadi tidak ada modal awal yang tercatat dan transaksi tidak bisa dilayani sampai shift dibuka.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  disabled={exiting}
+                  onClick={() => setConfirmExit(false)}
+                  className="btn-outline flex-1 text-sm py-2 disabled:opacity-60"
+                >
+                  Batal
+                </button>
+                <button
+                  disabled={exiting}
+                  onClick={handleExitWithoutShift}
+                  className="flex-1 text-sm py-2 rounded-xl bg-urgent hover:bg-red-600 text-white font-semibold flex items-center justify-center gap-2 disabled:opacity-60"
+                >
+                  {exiting && <Loader2 className="animate-spin" size={16} />} Ya, Keluar
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <button disabled={openingSaving} onClick={handleOpenShift} className="btn-primary w-full flex items-center justify-center gap-2">
+                {openingSaving && <Loader2 className="animate-spin" size={16} />} Mulai Shift
+              </button>
+              <button
+                disabled={openingSaving}
+                onClick={() => setConfirmExit(true)}
+                className="btn-outline w-full flex items-center justify-center gap-2 text-sm"
+              >
+                <LogOut size={14} /> Keluar dari Akun
+              </button>
+            </div>
+          )
         }
       >
         <p className="text-sm text-neutral-500">
@@ -245,6 +298,10 @@ export default function ShiftModal({
             className="input-field text-lg font-semibold"
           />
         </div>
+        <p className="text-xs text-neutral-400">
+          Belum mau mulai shift? Tekan <span className="font-medium">Keluar dari Akun</span> di bawah atau tombol
+          X di atas.
+        </p>
       </Modal>
     );
   }
