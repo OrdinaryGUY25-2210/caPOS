@@ -17,6 +17,8 @@ import {
   CreditCard,
   TrendingUp,
   Search,
+  BarChart3,
+  Wallet,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -79,7 +81,7 @@ interface SpecialCodeRow {
   note: string | null;
 }
 
-type TabKey = "ringkasan" | "langganan" | "pengguna" | "kode";
+type TabKey = "ringkasan" | "diagram" | "langganan" | "pengguna" | "kode";
 
 const STATUS_STYLE: Record<string, string> = {
   active: "badge-active",
@@ -101,6 +103,13 @@ const TIER_STYLE: Record<Tier, { label: string; badge: string; color: string }> 
   pro: { label: "Pro", badge: "badge-active", color: "#2563eb" },
   free: { label: "Free / Trial", badge: "badge-warning", color: "#94a3b8" },
 };
+
+const PLAN_PRICE_MONTHLY = 100000;
+const PLAN_PRICE_YEARLY = 900000;
+
+function rupiah(n: number): string {
+  return "Rp " + new Intl.NumberFormat("id-ID").format(Math.round(n));
+}
 
 // Meniru fungsi SQL `tenant_tier()` supaya angka di dashboard konsisten
 // dengan limitasi fitur yang ditegakkan di database.
@@ -147,6 +156,7 @@ export default function AdminPanel() {
   const [confirmLogout, setConfirmLogout] = useState(false);
 
   const [userQuery, setUserQuery] = useState("");
+  const [authorized, setAuthorized] = useState(false);
 
   async function loadData() {
     setLoading(true);
@@ -227,7 +237,24 @@ export default function AdminPanel() {
   }
 
   useEffect(() => {
-    loadData();
+    let cancelled = false;
+    (async () => {
+      const { profile } = await getCurrentProfile();
+      if (cancelled) return;
+      if (!profile) {
+        router.replace("/login");
+        return;
+      }
+      if (profile.role !== "super_admin") {
+        router.replace("/dashboard");
+        return;
+      }
+      setAuthorized(true);
+      loadData();
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const stats = useMemo(() => {
@@ -271,6 +298,92 @@ export default function AdminPanel() {
       })),
     };
   }, [tenants, users, stats.byTier]);
+
+  const extra = useMemo(() => {
+    const statusCount: Record<TenantStatus, number> = { trial: 0, active: 0, past_due: 0, expired: 0 };
+    tenants.forEach((t) => {
+      statusCount[t.status] += 1;
+    });
+
+    const statusPie = [
+      { name: "Aktif", value: statusCount.active, color: "#16a34a" },
+      { name: "Trial", value: statusCount.trial, color: "#f59e0b" },
+      { name: "Past Due", value: statusCount.past_due, color: "#f97316" },
+      { name: "Expired", value: statusCount.expired, color: "#dc2626" },
+    ].filter((d) => d.value > 0);
+
+    const activeUsers = users.filter((u) => u.isActive).length;
+    const userPie = [
+      { name: "Aktif", value: activeUsers, color: "#2563eb" },
+      { name: "Nonaktif", value: users.length - activeUsers, color: "#94a3b8" },
+    ].filter((d) => d.value > 0);
+
+    const customWebsite = tenants.filter((t) => t.hasCustomWebsite).length;
+    const websitePie = [
+      { name: "Website Custom", value: customWebsite, color: "#7c3aed" },
+      { name: "Standar", value: tenants.length - customWebsite, color: "#94a3b8" },
+    ].filter((d) => d.value > 0);
+
+    const mrr = tenants.reduce((sum, t) => {
+      if (t.status !== "active") return sum;
+      if (t.plan === "yearly") return sum + PLAN_PRICE_YEARLY / 12;
+      if (t.plan === "monthly") return sum + PLAN_PRICE_MONTHLY;
+      return sum;
+    }, 0);
+
+    const usersByTenant = new Map<string, number>();
+    users.forEach((u) => {
+      if (!u.tenantId) return;
+      usersByTenant.set(u.tenantId, (usersByTenant.get(u.tenantId) ?? 0) + 1);
+    });
+    const topTenants = tenants
+      .map((t) => ({ name: t.name, Pengguna: usersByTenant.get(t.id) ?? 0 }))
+      .sort((a, b) => b.Pengguna - a.Pengguna)
+      .slice(0, 5);
+
+    const months = lastNMonths(12);
+    const tenantByMonth = new Map<string, number>();
+    tenants.forEach((t) => {
+      const k = monthKey(t.createdAtRaw);
+      tenantByMonth.set(k, (tenantByMonth.get(k) ?? 0) + 1);
+    });
+    const windowStart = months[0].key;
+    const baseline = tenants.filter((t) => monthKey(t.createdAtRaw) < windowStart).length;
+    const cumulative = months.reduce<{ label: string; Tenant: number }[]>((acc, m) => {
+      const prev = acc.length > 0 ? acc[acc.length - 1].Tenant : baseline;
+      acc.push({ label: m.label, Tenant: prev + (tenantByMonth.get(m.key) ?? 0) });
+      return acc;
+    }, []);
+
+    const thisMonth = tenantByMonth.get(months[months.length - 1].key) ?? 0;
+    const prevMonth = months.length > 1 ? tenantByMonth.get(months[months.length - 2].key) ?? 0 : 0;
+    const momPct = prevMonth > 0 ? Math.round(((thisMonth - prevMonth) / prevMonth) * 100) : thisMonth > 0 ? 100 : 0;
+
+    const referralCount = Math.max(0, tenants.length - missingReferrals.length);
+    const activeCodes = specialCodes.filter((c) => {
+      const expired = new Date(c.expiresAt) < new Date();
+      const usedUp = c.maxUses !== null && c.usedCount >= c.maxUses;
+      return c.isActive && !expired && !usedUp;
+    }).length;
+    const totalSpecialUses = specialCodes.reduce((sum, c) => sum + c.usedCount, 0);
+
+    return {
+      statusPie,
+      userPie,
+      websitePie,
+      customWebsite,
+      mrr,
+      arr: mrr * 12,
+      avgUsersPerTenant: users.length / Math.max(1, tenants.length),
+      topTenants,
+      cumulative,
+      newThisMonth: thisMonth,
+      momPct,
+      referralCount,
+      activeCodes,
+      totalSpecialUses,
+    };
+  }, [tenants, users, specialCodes, missingReferrals]);
 
   const filteredUsers = useMemo(() => {
     const q = userQuery.trim().toLowerCase();
@@ -399,7 +512,7 @@ export default function AdminPanel() {
     router.push("/login");
   }
 
-  if (loading) {
+  if (loading || !authorized) {
     return (
       <div className="min-h-screen bg-neutral-50">
         <header className="h-16 bg-neutral-900 flex items-center justify-between px-6">
@@ -423,6 +536,7 @@ export default function AdminPanel() {
 
   const tabs: { key: TabKey; label: string; icon: typeof Store }[] = [
     { key: "ringkasan", label: "Ringkasan", icon: LayoutDashboard },
+    { key: "diagram", label: "Diagram", icon: BarChart3 },
     { key: "langganan", label: "Langganan", icon: CreditCard },
     { key: "pengguna", label: "Pengguna", icon: Users },
     { key: "kode", label: "Kode & Referral", icon: KeyRound },
@@ -535,6 +649,139 @@ export default function AdminPanel() {
                     </p>
                   </div>
                 ))}
+              </div>
+            </section>
+          </>
+        )}
+
+        {tab === "diagram" && (
+          <>
+            <section className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <StatCard label="MRR (estimasi)" value={rupiah(extra.mrr)} icon={Wallet} tone="primary" sub="per bulan" />
+              <StatCard label="ARR (estimasi)" value={rupiah(extra.arr)} icon={TrendingUp} tone="violet" sub="per tahun" />
+              <StatCard label="Rata-rata Pengguna / Tenant" value={extra.avgUsersPerTenant.toFixed(1)} icon={Users} tone="neutral" />
+              <StatCard
+                label="Tenant Baru Bulan Ini"
+                value={extra.newThisMonth}
+                icon={Store}
+                tone="warning"
+                sub={`${extra.momPct >= 0 ? "+" : ""}${extra.momPct}% vs bulan lalu`}
+              />
+            </section>
+
+            <section className="grid gap-4 lg:grid-cols-3">
+              <div className="card p-5">
+                <h2 className="text-base font-bold text-neutral-900">Status Langganan</h2>
+                <p className="text-xs text-neutral-500 mb-4">Sebaran status seluruh tenant.</p>
+                <div style={{ width: "100%", height: 250 }}>
+                  {extra.statusPie.length > 0 ? (
+                    <ResponsiveContainer>
+                      <PieChart>
+                        <Pie data={extra.statusPie} dataKey="value" nameKey="name" innerRadius={50} outerRadius={85} paddingAngle={2}>
+                          {extra.statusPie.map((d) => (
+                            <Cell key={d.name} fill={d.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                        <Legend wrapperStyle={{ fontSize: 12 }} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <EmptyChart />
+                  )}
+                </div>
+              </div>
+
+              <div className="card p-5">
+                <h2 className="text-base font-bold text-neutral-900">Status Pengguna</h2>
+                <p className="text-xs text-neutral-500 mb-4">Akun aktif vs nonaktif lintas tenant.</p>
+                <div style={{ width: "100%", height: 250 }}>
+                  {extra.userPie.length > 0 ? (
+                    <ResponsiveContainer>
+                      <PieChart>
+                        <Pie data={extra.userPie} dataKey="value" nameKey="name" innerRadius={50} outerRadius={85} paddingAngle={2}>
+                          {extra.userPie.map((d) => (
+                            <Cell key={d.name} fill={d.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                        <Legend wrapperStyle={{ fontSize: 12 }} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <EmptyChart />
+                  )}
+                </div>
+              </div>
+
+              <div className="card p-5">
+                <h2 className="text-base font-bold text-neutral-900">Website Custom</h2>
+                <p className="text-xs text-neutral-500 mb-4">Tenant bercustom website vs standar.</p>
+                <div style={{ width: "100%", height: 250 }}>
+                  {extra.websitePie.length > 0 ? (
+                    <ResponsiveContainer>
+                      <PieChart>
+                        <Pie data={extra.websitePie} dataKey="value" nameKey="name" innerRadius={50} outerRadius={85} paddingAngle={2}>
+                          {extra.websitePie.map((d) => (
+                            <Cell key={d.name} fill={d.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                        <Legend wrapperStyle={{ fontSize: 12 }} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <EmptyChart />
+                  )}
+                </div>
+              </div>
+            </section>
+
+            <section className="grid gap-4 lg:grid-cols-2">
+              <div className="card p-5">
+                <h2 className="text-base font-bold text-neutral-900">Top 5 Tenant (Pengguna)</h2>
+                <p className="text-xs text-neutral-500 mb-4">Tenant dengan jumlah akun terbanyak.</p>
+                <div style={{ width: "100%", height: 280 }}>
+                  {extra.topTenants.length > 0 ? (
+                    <ResponsiveContainer>
+                      <BarChart data={extra.topTenants} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e5e5e5" />
+                        <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+                        <YAxis type="category" dataKey="name" width={100} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+                        <Tooltip />
+                        <Bar dataKey="Pengguna" fill="#2563eb" radius={[0, 4, 4, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <EmptyChart />
+                  )}
+                </div>
+              </div>
+
+              <div className="card p-5">
+                <h2 className="text-base font-bold text-neutral-900">Pertumbuhan Kumulatif Tenant</h2>
+                <p className="text-xs text-neutral-500 mb-4">Total tenant menaik tiap bulan.</p>
+                <div style={{ width: "100%", height: 280 }}>
+                  <ResponsiveContainer>
+                    <BarChart data={extra.cumulative} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e5e5" />
+                      <XAxis dataKey="label" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+                      <YAxis allowDecimals={false} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+                      <Tooltip />
+                      <Bar dataKey="Tenant" fill="#7c3aed" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <h2 className="text-lg font-bold text-neutral-900 mb-1">Referral &amp; Kode</h2>
+              <p className="text-sm text-neutral-500 mb-4">Ringkasan kode referral tenant dan kode khusus admin.</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <StatCard label="Kode Referral" value={extra.referralCount} icon={Gift} tone="neutral" />
+                <StatCard label="Kode Khusus Aktif" value={extra.activeCodes} icon={KeyRound} tone="primary" />
+                <StatCard label="Total Pemakaian Kode Khusus" value={extra.totalSpecialUses} icon={CreditCard} tone="violet" />
               </div>
             </section>
           </>
@@ -789,7 +1036,7 @@ function StatCard({
   sub,
 }: {
   label: string;
-  value: number;
+  value: number | string;
   icon: typeof Store;
   tone: "neutral" | "primary" | "violet" | "warning" | "urgent";
   sub?: string;
@@ -809,6 +1056,14 @@ function StatCard({
       </div>
       <p className={`text-2xl font-bold mt-1 ${toneClass[tone]}`}>{value}</p>
       {sub && <p className="text-xs text-neutral-400 mt-0.5">{sub}</p>}
+    </div>
+  );
+}
+
+function EmptyChart() {
+  return (
+    <div className="h-full flex items-center justify-center text-sm text-neutral-400">
+      Belum ada data.
     </div>
   );
 }
