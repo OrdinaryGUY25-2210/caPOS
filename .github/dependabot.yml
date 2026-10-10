@@ -1,0 +1,22 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # Batasi jumlah PR terbuka supaya tidak banjir branch preview
+    open-pull-requests-limit: 3
+    # Update besar (major) jangan otomatis: Tailwind v3 -> v4 mengubah
+    # konfigurasi PostCSS dan akan merusak build kalau tidak dimigrasi manual.
+    ignore:
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "next"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
