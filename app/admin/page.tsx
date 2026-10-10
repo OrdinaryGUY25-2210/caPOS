@@ -1,8 +1,36 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Shield, LogOut, Loader2, Gift, KeyRound, Plus, Ban, RefreshCw } from "lucide-react";
+import {
+  Shield,
+  LogOut,
+  Loader2,
+  Gift,
+  KeyRound,
+  Plus,
+  Ban,
+  RefreshCw,
+  Users,
+  Store,
+  LayoutDashboard,
+  CreditCard,
+  TrendingUp,
+  Search,
+} from "lucide-react";
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  PieChart,
+  Pie,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+} from "recharts";
 import { daysRemaining } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
@@ -11,14 +39,32 @@ import Modal from "@/components/Modal";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { Skeleton, SkeletonStatGrid, SkeletonList } from "@/components/Skeleton";
 
+type TenantStatus = "trial" | "active" | "past_due" | "expired";
+type Tier = "free" | "pro" | "supreme";
+
 interface TenantRow {
   id: string;
   name: string;
-  status: "trial" | "active" | "past_due" | "expired";
+  status: TenantStatus;
+  plan: string | null;
   hasCustomWebsite: boolean;
   createdAt: string;
+  createdAtRaw: string;
   trialEndsAt: string | null;
+  validUntil: string | null;
   daysLeft: number | null;
+}
+
+interface UserRow {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  tenantId: string | null;
+  tenantName: string;
+  isActive: boolean;
+  createdAt: string;
+  createdAtRaw: string;
 }
 
 interface SpecialCodeRow {
@@ -33,6 +79,8 @@ interface SpecialCodeRow {
   note: string | null;
 }
 
+type TabKey = "ringkasan" | "langganan" | "pengguna" | "kode";
+
 const STATUS_STYLE: Record<string, string> = {
   active: "badge-active",
   trial: "badge-warning",
@@ -40,9 +88,52 @@ const STATUS_STYLE: Record<string, string> = {
   expired: "badge-urgent",
 };
 
+const ROLE_LABEL: Record<string, string> = {
+  super_admin: "Super Admin",
+  owner: "Admin",
+  manager: "Supervisor",
+  cashier: "Kasir",
+  kitchen: "Dapur",
+};
+
+const TIER_STYLE: Record<Tier, { label: string; badge: string; color: string }> = {
+  supreme: { label: "Supreme", badge: "badge-active", color: "#7c3aed" },
+  pro: { label: "Pro", badge: "badge-active", color: "#2563eb" },
+  free: { label: "Free / Trial", badge: "badge-warning", color: "#94a3b8" },
+};
+
+// Meniru fungsi SQL `tenant_tier()` supaya angka di dashboard konsisten
+// dengan limitasi fitur yang ditegakkan di database.
+function tierOf(t: TenantRow): Tier {
+  if (t.status === "active" && t.plan === "yearly") return "supreme";
+  if (t.status === "active" && t.plan === "monthly") return "pro";
+  return "free";
+}
+
+function monthKey(value: string | Date): string {
+  const d = new Date(value);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function lastNMonths(n: number): { key: string; label: string }[] {
+  const out: { key: string; label: string }[] = [];
+  const now = new Date();
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    out.push({
+      key: monthKey(d),
+      label: d.toLocaleDateString("id-ID", { month: "short", year: "2-digit" }),
+    });
+  }
+  return out;
+}
+
 export default function AdminPanel() {
   const router = useRouter();
+  const [tab, setTab] = useState<TabKey>("ringkasan");
+
   const [tenants, setTenants] = useState<TenantRow[]>([]);
+  const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [extendingId, setExtendingId] = useState<string | null>(null);
 
@@ -55,28 +146,53 @@ export default function AdminPanel() {
   const [togglingCodeId, setTogglingCodeId] = useState<string | null>(null);
   const [confirmLogout, setConfirmLogout] = useState(false);
 
+  const [userQuery, setUserQuery] = useState("");
+
   async function loadData() {
     setLoading(true);
     const supabase = createClient();
 
     const { data: tenantRows } = await supabase
       .from("tenants")
-      .select("id, name, has_custom_website, created_at, subscriptions(status, trial_ends_at)")
+      .select("id, name, has_custom_website, created_at, subscriptions(status, plan, trial_ends_at, valid_until)")
       .order("created_at", { ascending: false });
 
-    const mappedTenants = (tenantRows ?? []).map((t: any) => {
+    const mappedTenants: TenantRow[] = (tenantRows ?? []).map((t: any) => {
       const sub = t.subscriptions?.[0];
       return {
         id: t.id,
         name: t.name,
         hasCustomWebsite: t.has_custom_website,
         createdAt: new Date(t.created_at).toLocaleDateString("id-ID"),
-        status: sub?.status ?? "trial",
+        createdAtRaw: t.created_at,
+        status: (sub?.status ?? "trial") as TenantStatus,
+        plan: sub?.plan ?? null,
         trialEndsAt: sub?.trial_ends_at ?? null,
+        validUntil: sub?.valid_until ?? null,
         daysLeft: sub?.trial_ends_at ? daysRemaining(sub.trial_ends_at) : null,
       };
     });
     setTenants(mappedTenants);
+
+    // Semua akun terdaftar (RLS mengizinkan super_admin membaca seluruh baris).
+    const { data: profileRows } = await supabase
+      .from("profiles")
+      .select("id, tenant_id, role, full_name, email, is_active, created_at")
+      .order("created_at", { ascending: false });
+
+    const tenantNameById = new Map(mappedTenants.map((t) => [t.id, t.name]));
+    const mappedUsers: UserRow[] = (profileRows ?? []).map((p: any) => ({
+      id: p.id,
+      name: p.full_name || "(tanpa nama)",
+      email: p.email || "-",
+      role: p.role || "cashier",
+      tenantId: p.tenant_id ?? null,
+      tenantName: p.tenant_id ? tenantNameById.get(p.tenant_id) ?? "Tenant tidak dikenal" : "— Platform",
+      isActive: p.is_active !== false,
+      createdAt: new Date(p.created_at).toLocaleDateString("id-ID"),
+      createdAtRaw: p.created_at,
+    }));
+    setUsers(mappedUsers);
 
     // Cari tenant yang belum punya baris di tabel `referrals` (kode
     // referral tidak akan muncul di halaman mereka sampai ini diisi).
@@ -113,6 +229,60 @@ export default function AdminPanel() {
   useEffect(() => {
     loadData();
   }, []);
+
+  const stats = useMemo(() => {
+    const byTier: Record<Tier, number> = { free: 0, pro: 0, supreme: 0 };
+    tenants.forEach((t) => {
+      byTier[tierOf(t)] += 1;
+    });
+    return {
+      totalTenant: tenants.length,
+      totalUsers: users.length,
+      activeUsers: users.filter((u) => u.isActive).length,
+      byTier,
+      trial: tenants.filter((t) => t.status === "trial").length,
+      active: tenants.filter((t) => t.status === "active").length,
+      expired: tenants.filter((t) => t.status === "expired" || t.status === "past_due").length,
+    };
+  }, [tenants, users]);
+
+  const chartData = useMemo(() => {
+    const months = lastNMonths(12);
+    const tenantByMonth = new Map<string, number>();
+    const userByMonth = new Map<string, number>();
+    tenants.forEach((t) => {
+      const k = monthKey(t.createdAtRaw);
+      tenantByMonth.set(k, (tenantByMonth.get(k) ?? 0) + 1);
+    });
+    users.forEach((u) => {
+      const k = monthKey(u.createdAtRaw);
+      userByMonth.set(k, (userByMonth.get(k) ?? 0) + 1);
+    });
+    return {
+      growth: months.map((m) => ({
+        label: m.label,
+        Tenant: tenantByMonth.get(m.key) ?? 0,
+        Pengguna: userByMonth.get(m.key) ?? 0,
+      })),
+      planPie: (["supreme", "pro", "free"] as Tier[]).map((tier) => ({
+        name: TIER_STYLE[tier].label,
+        value: stats.byTier[tier],
+        color: TIER_STYLE[tier].color,
+      })),
+    };
+  }, [tenants, users, stats.byTier]);
+
+  const filteredUsers = useMemo(() => {
+    const q = userQuery.trim().toLowerCase();
+    if (!q) return users;
+    return users.filter(
+      (u) =>
+        u.name.toLowerCase().includes(q) ||
+        u.email.toLowerCase().includes(q) ||
+        u.tenantName.toLowerCase().includes(q) ||
+        (ROLE_LABEL[u.role] ?? u.role).toLowerCase().includes(q)
+    );
+  }, [users, userQuery]);
 
   async function extendTrial(tenantId: string) {
     setExtendingId(tenantId);
@@ -251,6 +421,13 @@ export default function AdminPanel() {
     );
   }
 
+  const tabs: { key: TabKey; label: string; icon: typeof Store }[] = [
+    { key: "ringkasan", label: "Ringkasan", icon: LayoutDashboard },
+    { key: "langganan", label: "Langganan", icon: CreditCard },
+    { key: "pengguna", label: "Pengguna", icon: Users },
+    { key: "kode", label: "Kode & Referral", icon: KeyRound },
+  ];
+
   return (
     <div className="min-h-screen bg-neutral-50">
       <header className="h-16 bg-neutral-900 flex items-center justify-between px-6">
@@ -264,152 +441,322 @@ export default function AdminPanel() {
         </button>
       </header>
 
-      <div className="p-6 space-y-8 max-w-5xl mx-auto">
-        <section className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="card p-4">
-            <p className="text-xs text-neutral-500">Total Tenant</p>
-            <p className="text-2xl font-bold text-neutral-900 mt-1">{tenants.length}</p>
-          </div>
-          <div className="card p-4">
-            <p className="text-xs text-neutral-500">Active (Subscribed)</p>
-            <p className="text-2xl font-bold text-primary mt-1">
-              {tenants.filter((t) => t.status === "active").length}
-            </p>
-          </div>
-          <div className="card p-4">
-            <p className="text-xs text-neutral-500">Trial</p>
-            <p className="text-2xl font-bold text-warning mt-1">
-              {tenants.filter((t) => t.status === "trial").length}
-            </p>
-          </div>
-          <div className="card p-4">
-            <p className="text-xs text-neutral-500">Expired / Past Due</p>
-            <p className="text-2xl font-bold text-urgent mt-1">
-              {tenants.filter((t) => t.status === "expired" || t.status === "past_due").length}
-            </p>
-          </div>
-        </section>
+      <div className="max-w-5xl mx-auto px-6">
+        <nav className="flex gap-1 border-b border-neutral-200 mt-4 overflow-x-auto">
+          {tabs.map(({ key, label, icon: Icon }) => {
+            const active = tab === key;
+            return (
+              <button
+                key={key}
+                onClick={() => setTab(key)}
+                className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors ${
+                  active
+                    ? "border-neutral-900 text-neutral-900"
+                    : "border-transparent text-neutral-500 hover:text-neutral-800"
+                }`}
+              >
+                <Icon size={16} /> {label}
+              </button>
+            );
+          })}
+        </nav>
+      </div>
 
-        <section>
-          <h1 className="text-lg font-bold text-neutral-900 mb-1">Daftar Tenant Kafe</h1>
-          <p className="text-sm text-neutral-500 mb-4">
-            Akses tak terbatas ke seluruh tenant untuk keperluan demo & konten. Registrasi
-            terbuka untuk siapa saja lewat <code>/register</code> — tidak lagi memerlukan kode akses.
-          </p>
-          <div className="card divide-y divide-neutral-100">
-            {tenants.map((t) => (
-              <div key={t.id} className="flex items-center justify-between p-4 gap-3">
-                <div className="min-w-0">
-                  <p className="font-medium text-neutral-900 text-sm truncate">{t.name}</p>
-                  <p className="text-xs text-neutral-400">
-                    Terdaftar {t.createdAt} {t.hasCustomWebsite && "· Website Custom Active"}
-                    {t.status === "trial" && t.daysLeft !== null && (
-                      <> · Sisa trial: {t.daysLeft > 0 ? `${t.daysLeft} hari` : "habis"}</>
-                    )}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <span className={STATUS_STYLE[t.status]}>{t.status.replace("_", " ")}</span>
-                  {t.status !== "active" && (
-                    <>
-                      <button
-                        onClick={() => extendTrial(t.id)}
-                        disabled={extendingId === t.id}
-                        className="text-xs font-medium text-primary hover:underline disabled:opacity-50 whitespace-nowrap"
-                        title="Perpanjang trial 28 hari dari sekarang"
-                      >
-                        +28 hari
-                      </button>
-                      <button
-                        onClick={() => activateTenant(t.id)}
-                        disabled={extendingId === t.id}
-                        className="text-xs font-medium text-neutral-500 hover:underline disabled:opacity-50 whitespace-nowrap"
-                        title="Set jadi active, bebas hitungan trial"
-                      >
-                        Aktifkan
-                      </button>
-                    </>
-                  )}
+      <div className="p-6 space-y-8 max-w-5xl mx-auto">
+        {tab === "ringkasan" && (
+          <>
+            <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+              <StatCard label="Total Tenant" value={stats.totalTenant} icon={Store} tone="neutral" />
+              <StatCard label="Total Pengguna" value={stats.totalUsers} icon={Users} tone="primary" sub={`${stats.activeUsers} aktif`} />
+              <StatCard label="Supreme" value={stats.byTier.supreme} icon={TrendingUp} tone="violet" />
+              <StatCard label="Pro" value={stats.byTier.pro} icon={CreditCard} tone="primary" />
+              <StatCard label="Free / Trial" value={stats.byTier.free} icon={Store} tone="warning" />
+              <StatCard label="Expired" value={stats.expired} icon={Ban} tone="urgent" />
+            </section>
+
+            <section className="grid gap-4 lg:grid-cols-5">
+              <div className="card p-5 lg:col-span-3">
+                <h2 className="text-base font-bold text-neutral-900">Pertumbuhan 12 Bulan</h2>
+                <p className="text-xs text-neutral-500 mb-4">Registrasi tenant baru &amp; pengguna baru per bulan.</p>
+                <div style={{ width: "100%", height: 280 }}>
+                  <ResponsiveContainer>
+                    <BarChart data={chartData.growth} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e5e5" />
+                      <XAxis dataKey="label" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+                      <YAxis allowDecimals={false} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+                      <Tooltip />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      <Bar dataKey="Tenant" fill="#7c3aed" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="Pengguna" fill="#2563eb" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
                 </div>
               </div>
-            ))}
-            {tenants.length === 0 && <p className="p-6 text-center text-neutral-400 text-sm">Belum ada tenant terdaftar.</p>}
-          </div>
-        </section>
 
-        {missingReferrals.length > 0 && (
-          <section>
-            <h2 className="text-lg font-bold text-neutral-900 mb-1 flex items-center gap-2">
-              <Gift size={18} /> Kode Referral Bermasalah
-            </h2>
-            <p className="text-sm text-neutral-500 mb-4">
-              Tenant di bawah ini belum punya kode referral (biasanya akun dibuat sebelum fitur ini ada, atau dibuat manual). Klik generate untuk membuatkan kode baru untuk mereka.
-            </p>
-            <div className="card divide-y divide-neutral-100">
-              {missingReferrals.map((t) => (
-                <div key={t.id} className="flex items-center justify-between p-4 gap-3">
-                  <p className="font-medium text-neutral-900 text-sm truncate">{t.name}</p>
-                  <button
-                    onClick={() => generateMissingReferral(t.id)}
-                    disabled={generatingReferralId === t.id}
-                    className="btn-outline text-xs flex items-center gap-1.5 shrink-0 disabled:opacity-50"
-                  >
-                    {generatingReferralId === t.id ? <Loader2 className="animate-spin" size={12} /> : <RefreshCw size={12} />}
-                    Generate Kode
-                  </button>
+              <div className="card p-5 lg:col-span-2">
+                <h2 className="text-base font-bold text-neutral-900">Distribusi Paket</h2>
+                <p className="text-xs text-neutral-500 mb-4">Jumlah tenant per paket berjalan.</p>
+                <div style={{ width: "100%", height: 280 }}>
+                  <ResponsiveContainer>
+                    <PieChart>
+                      <Pie
+                        data={chartData.planPie}
+                        dataKey="value"
+                        nameKey="name"
+                        innerRadius={55}
+                        outerRadius={90}
+                        paddingAngle={2}
+                      >
+                        {chartData.planPie.map((d) => (
+                          <Cell key={d.name} fill={d.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
                 </div>
-              ))}
+              </div>
+            </section>
+
+            <section>
+              <h2 className="text-lg font-bold text-neutral-900 mb-1">Hitungan per Paket</h2>
+              <p className="text-sm text-neutral-500 mb-4">Total paket berjalan dihitung dari status langganan tiap tenant.</p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {(["supreme", "pro", "free"] as Tier[]).map((tier) => (
+                  <div key={tier} className="card p-4">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: TIER_STYLE[tier].color }} />
+                      <p className="text-xs text-neutral-500">{TIER_STYLE[tier].label}</p>
+                    </div>
+                    <p className="text-2xl font-bold text-neutral-900 mt-1">{stats.byTier[tier]}</p>
+                    <p className="text-xs text-neutral-400 mt-0.5">
+                      {stats.totalTenant > 0 ? Math.round((stats.byTier[tier] / stats.totalTenant) * 100) : 0}% dari tenant
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </>
+        )}
+
+        {tab === "langganan" && (
+          <section>
+            <h1 className="text-lg font-bold text-neutral-900 mb-1">Langganan Tenant</h1>
+            <p className="text-sm text-neutral-500 mb-4">
+              Akses tak terbatas ke seluruh tenant. Registrasi terbuka lewat <code>/register</code>.
+            </p>
+            <div className="card overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-neutral-500 border-b border-neutral-100">
+                    <th className="font-medium px-4 py-3">Tenant</th>
+                    <th className="font-medium px-4 py-3">Status</th>
+                    <th className="font-medium px-4 py-3">Paket</th>
+                    <th className="font-medium px-4 py-3">Berakhir</th>
+                    <th className="font-medium px-4 py-3">Terdaftar</th>
+                    <th className="font-medium px-4 py-3 text-right">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-100">
+                  {tenants.map((t) => {
+                    const tier = tierOf(t);
+                    const endDate = t.status === "active" ? t.validUntil : t.trialEndsAt;
+                    return (
+                      <tr key={t.id} className="align-top">
+                        <td className="px-4 py-3">
+                          <p className="font-medium text-neutral-900">{t.name}</p>
+                          {t.hasCustomWebsite && <p className="text-xs text-neutral-400">Website Custom</p>}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={STATUS_STYLE[t.status]}>{t.status.replace("_", " ")}</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={TIER_STYLE[tier].badge}>{TIER_STYLE[tier].label}</span>
+                        </td>
+                        <td className="px-4 py-3 text-neutral-600 whitespace-nowrap">
+                          {endDate ? new Date(endDate).toLocaleDateString("id-ID") : "-"}
+                          {t.status === "trial" && t.daysLeft !== null && (
+                            <span className="block text-xs text-neutral-400">
+                              {t.daysLeft > 0 ? `sisa ${t.daysLeft} hari` : "habis"}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-neutral-500 whitespace-nowrap">{t.createdAt}</td>
+                        <td className="px-4 py-3 text-right whitespace-nowrap">
+                          {t.status !== "active" ? (
+                            <div className="flex items-center justify-end gap-3">
+                              <button
+                                onClick={() => extendTrial(t.id)}
+                                disabled={extendingId === t.id}
+                                className="text-xs font-medium text-primary hover:underline disabled:opacity-50"
+                                title="Perpanjang trial 28 hari dari sekarang"
+                              >
+                                +28 hari
+                              </button>
+                              <button
+                                onClick={() => activateTenant(t.id)}
+                                disabled={extendingId === t.id}
+                                className="text-xs font-medium text-neutral-500 hover:underline disabled:opacity-50"
+                                title="Set jadi active, bebas hitungan trial"
+                              >
+                                Aktifkan
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-neutral-300">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {tenants.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-6 text-center text-neutral-400">
+                        Belum ada tenant terdaftar.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </section>
         )}
 
-        <section>
-          <div className="flex items-center justify-between mb-1">
-            <h2 className="text-lg font-bold text-neutral-900 flex items-center gap-2">
-              <KeyRound size={18} /> Kode Khusus Admin
-            </h2>
-            <button onClick={() => setShowSpecialForm(true)} className="btn-primary text-sm flex items-center gap-1.5">
-              <Plus size={14} /> Buat Kode Baru
-            </button>
-          </div>
-          <p className="text-sm text-neutral-500 mb-4">
-            Kode promo yang Anda buat & bagikan sendiri (misal ke partner/campaign tertentu) — beda dari kode referral tenant. Setiap kode punya masa berlaku, lama trial Supreme, diskon pendaftar, dan batas pemakaian sendiri.
-          </p>
-          <div className="card divide-y divide-neutral-100">
-            {specialCodes.map((c) => {
-              const expired = new Date(c.expiresAt) < new Date();
-              const usedUp = c.maxUses !== null && c.usedCount >= c.maxUses;
-              const statusLabel = !c.isActive ? "Nonaktif" : expired ? "Kedaluwarsa" : usedUp ? "Habis Kuota" : "Aktif";
-              const statusStyle = statusLabel === "Aktif" ? "badge-active" : statusLabel === "Nonaktif" ? "badge-urgent" : "badge-warning";
-              return (
-                <div key={c.id} className="flex items-center justify-between p-4 gap-3 flex-wrap">
-                  <div className="min-w-0">
-                    <p className="font-mono font-bold text-neutral-900 text-sm">{c.code}</p>
-                    <p className="text-xs text-neutral-400">
-                      Trial {c.trialDays} hari · Diskon {c.discountPct}% · Berlaku s/d {new Date(c.expiresAt).toLocaleDateString("id-ID")}
-                      {" · "}Dipakai {c.usedCount}{c.maxUses !== null ? `/${c.maxUses}` : ""}
-                      {c.note ? ` · ${c.note}` : ""}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className={statusStyle}>{statusLabel}</span>
-                    <button
-                      onClick={() => toggleSpecialCode(c)}
-                      disabled={togglingCodeId === c.id}
-                      className="text-xs font-medium text-neutral-500 hover:underline disabled:opacity-50 flex items-center gap-1"
-                      title={c.isActive ? "Nonaktifkan kode" : "Aktifkan lagi kode"}
-                    >
-                      <Ban size={12} /> {c.isActive ? "Nonaktifkan" : "Aktifkan"}
-                    </button>
-                  </div>
+        {tab === "pengguna" && (
+          <section>
+            <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+              <div>
+                <h1 className="text-lg font-bold text-neutral-900 mb-1">Pengguna Terdaftar</h1>
+                <p className="text-sm text-neutral-500">Semua akun lintas tenant ({users.length} akun).</p>
+              </div>
+              <div className="relative">
+                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+                <input
+                  value={userQuery}
+                  onChange={(e) => setUserQuery(e.target.value)}
+                  placeholder="Cari nama / email / tenant…"
+                  className="input-field pl-9 w-64"
+                />
+              </div>
+            </div>
+            <div className="card overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-neutral-500 border-b border-neutral-100">
+                    <th className="font-medium px-4 py-3">Nama</th>
+                    <th className="font-medium px-4 py-3">Email</th>
+                    <th className="font-medium px-4 py-3">Peran</th>
+                    <th className="font-medium px-4 py-3">Tenant</th>
+                    <th className="font-medium px-4 py-3">Status</th>
+                    <th className="font-medium px-4 py-3">Terdaftar</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-100">
+                  {filteredUsers.map((u) => (
+                    <tr key={u.id}>
+                      <td className="px-4 py-3 font-medium text-neutral-900">{u.name}</td>
+                      <td className="px-4 py-3 text-neutral-600">{u.email}</td>
+                      <td className="px-4 py-3 text-neutral-600">{ROLE_LABEL[u.role] ?? u.role}</td>
+                      <td className="px-4 py-3 text-neutral-600">{u.tenantName}</td>
+                      <td className="px-4 py-3">
+                        <span className={u.isActive ? "badge-active" : "badge-urgent"}>
+                          {u.isActive ? "Aktif" : "Nonaktif"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-neutral-500 whitespace-nowrap">{u.createdAt}</td>
+                    </tr>
+                  ))}
+                  {filteredUsers.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-6 text-center text-neutral-400">
+                        {users.length === 0 ? "Belum ada pengguna terdaftar." : "Tidak ada pengguna yang cocok."}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
+        {tab === "kode" && (
+          <>
+            {missingReferrals.length > 0 && (
+              <section>
+                <h2 className="text-lg font-bold text-neutral-900 mb-1 flex items-center gap-2">
+                  <Gift size={18} /> Kode Referral Bermasalah
+                </h2>
+                <p className="text-sm text-neutral-500 mb-4">
+                  Tenant di bawah ini belum punya kode referral (biasanya akun dibuat sebelum fitur ini ada, atau dibuat manual). Klik generate untuk membuatkan kode baru untuk mereka.
+                </p>
+                <div className="card divide-y divide-neutral-100">
+                  {missingReferrals.map((t) => (
+                    <div key={t.id} className="flex items-center justify-between p-4 gap-3">
+                      <p className="font-medium text-neutral-900 text-sm truncate">{t.name}</p>
+                      <button
+                        onClick={() => generateMissingReferral(t.id)}
+                        disabled={generatingReferralId === t.id}
+                        className="btn-outline text-xs flex items-center gap-1.5 shrink-0 disabled:opacity-50"
+                      >
+                        {generatingReferralId === t.id ? <Loader2 className="animate-spin" size={12} /> : <RefreshCw size={12} />}
+                        Generate Kode
+                      </button>
+                    </div>
+                  ))}
                 </div>
-              );
-            })}
-            {specialCodes.length === 0 && (
-              <p className="p-6 text-center text-neutral-400 text-sm">Belum ada kode khusus dibuat.</p>
+              </section>
             )}
-          </div>
-        </section>
+
+            <section>
+              <div className="flex items-center justify-between mb-1">
+                <h2 className="text-lg font-bold text-neutral-900 flex items-center gap-2">
+                  <KeyRound size={18} /> Kode Khusus Admin
+                </h2>
+                <button onClick={() => setShowSpecialForm(true)} className="btn-primary text-sm flex items-center gap-1.5">
+                  <Plus size={14} /> Buat Kode Baru
+                </button>
+              </div>
+              <p className="text-sm text-neutral-500 mb-4">
+                Kode promo yang Anda buat & bagikan sendiri (misal ke partner/campaign tertentu) — beda dari kode referral tenant. Setiap kode punya masa berlaku, lama trial Supreme, diskon pendaftar, dan batas pemakaian sendiri.
+              </p>
+              <div className="card divide-y divide-neutral-100">
+                {specialCodes.map((c) => {
+                  const expired = new Date(c.expiresAt) < new Date();
+                  const usedUp = c.maxUses !== null && c.usedCount >= c.maxUses;
+                  const statusLabel = !c.isActive ? "Nonaktif" : expired ? "Kedaluwarsa" : usedUp ? "Habis Kuota" : "Aktif";
+                  const statusStyle = statusLabel === "Aktif" ? "badge-active" : statusLabel === "Nonaktif" ? "badge-urgent" : "badge-warning";
+                  return (
+                    <div key={c.id} className="flex items-center justify-between p-4 gap-3 flex-wrap">
+                      <div className="min-w-0">
+                        <p className="font-mono font-bold text-neutral-900 text-sm">{c.code}</p>
+                        <p className="text-xs text-neutral-400">
+                          Trial {c.trialDays} hari · Diskon {c.discountPct}% · Berlaku s/d {new Date(c.expiresAt).toLocaleDateString("id-ID")}
+                          {" · "}Dipakai {c.usedCount}{c.maxUses !== null ? `/${c.maxUses}` : ""}
+                          {c.note ? ` · ${c.note}` : ""}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className={statusStyle}>{statusLabel}</span>
+                        <button
+                          onClick={() => toggleSpecialCode(c)}
+                          disabled={togglingCodeId === c.id}
+                          className="text-xs font-medium text-neutral-500 hover:underline disabled:opacity-50 flex items-center gap-1"
+                          title={c.isActive ? "Nonaktifkan kode" : "Aktifkan lagi kode"}
+                        >
+                          <Ban size={12} /> {c.isActive ? "Nonaktifkan" : "Aktifkan"}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+                {specialCodes.length === 0 && (
+                  <p className="p-6 text-center text-neutral-400 text-sm">Belum ada kode khusus dibuat.</p>
+                )}
+              </div>
+            </section>
+          </>
+        )}
       </div>
 
       {showSpecialForm && (
@@ -430,6 +777,38 @@ export default function AdminPanel() {
           onConfirm={applyLogout}
         />
       )}
+    </div>
+  );
+}
+
+function StatCard({
+  label,
+  value,
+  icon: Icon,
+  tone,
+  sub,
+}: {
+  label: string;
+  value: number;
+  icon: typeof Store;
+  tone: "neutral" | "primary" | "violet" | "warning" | "urgent";
+  sub?: string;
+}) {
+  const toneClass: Record<typeof tone, string> = {
+    neutral: "text-neutral-900",
+    primary: "text-primary",
+    violet: "text-violet-600",
+    warning: "text-warning",
+    urgent: "text-urgent",
+  };
+  return (
+    <div className="card p-4">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-neutral-500">{label}</p>
+        <Icon size={15} className="text-neutral-300" />
+      </div>
+      <p className={`text-2xl font-bold mt-1 ${toneClass[tone]}`}>{value}</p>
+      {sub && <p className="text-xs text-neutral-400 mt-0.5">{sub}</p>}
     </div>
   );
 }
