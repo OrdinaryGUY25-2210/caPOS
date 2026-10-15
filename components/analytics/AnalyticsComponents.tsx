@@ -7,6 +7,8 @@ import {
   getWasteLossReport,
   recordWasteLoss,
 } from '@/app/actions/purchasing-loyalty-actions';
+import { tenantHasNoActivity } from '@/lib/demoMode';
+import { DEMO_PRODUCT_PROFITABILITY, DEMO_PEAK_HOURS, DEMO_WASTE_LOGS } from '@/lib/demoData';
 
 // =========================================================
 // PRODUCT PROFITABILITY ANALYTICS
@@ -21,23 +23,27 @@ export function ProductProfitabilityAnalytics() {
     loadProfitabilityData();
   }, [sortBy]);
 
+  const sortRows = (rows: any[]) => {
+    // Sort based on selected option
+    switch (sortBy) {
+      case 'revenue':
+        return [...rows].sort((a, b) => b.total_revenue - a.total_revenue);
+      case 'margin':
+        return [...rows].sort((a, b) => b.profit_margin_pct - a.profit_margin_pct);
+      default:
+        return [...rows].sort((a, b) => b.gross_profit - a.gross_profit);
+    }
+  };
+
   const loadProfitabilityData = async () => {
     setIsLoading(true);
     const result = await getProductProfitability(undefined, 20);
     if (!result.error) {
-      let data = result.data || [];
-      // Sort based on selected option
-      switch (sortBy) {
-        case 'revenue':
-          data = [...data].sort((a, b) => b.total_revenue - a.total_revenue);
-          break;
-        case 'margin':
-          data = [...data].sort((a, b) => b.profit_margin_pct - a.profit_margin_pct);
-          break;
-        default:
-          data = [...data].sort((a, b) => b.gross_profit - a.gross_profit);
-      }
-      setProfitData(data);
+      setProfitData(sortRows(result.data || []));
+    }
+    const noActivity = await tenantHasNoActivity();
+    if (noActivity) {
+      setProfitData(sortRows(DEMO_PRODUCT_PROFITABILITY as any[]));
     }
     setIsLoading(false);
   };
@@ -173,6 +179,10 @@ export function PeakHoursAnalytics() {
     const result = await getPeakHoursAnalytics();
     if (!result.error) {
       setPeakData(result.data || []);
+    }
+    const noActivity = await tenantHasNoActivity();
+    if (noActivity) {
+      setPeakData(DEMO_PEAK_HOURS as any[]);
     }
     setIsLoading(false);
   };
@@ -324,6 +334,10 @@ export function WasteLossReport() {
     const result = await getWasteLossReport(undefined, 30);
     if (!result.error) {
       setWasteLogs(result.data?.items || []);
+    }
+    const noActivity = await tenantHasNoActivity();
+    if (noActivity) {
+      setWasteLogs(DEMO_WASTE_LOGS as any[]);
     }
     setIsLoading(false);
   };

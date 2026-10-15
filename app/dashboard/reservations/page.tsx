@@ -8,6 +8,9 @@ import { formatRupiah, cx } from "@/lib/utils";
 import type { BranchTable, ReservationCalendarRow, ReservationStatus } from "@/lib/types";
 import ReservationFormModal from "@/components/reservations/ReservationFormModal";
 import TableStatusBoard from "@/components/tables/TableStatusBoard";
+import { tenantHasNoActivity } from "@/lib/demoMode";
+import DemoBadge from "@/components/demo/DemoBadge";
+import { makeDemoReservations } from "@/lib/demoData";
 
 const STATUS_STYLE: Record<ReservationStatus, string> = {
   pending: "bg-warning-light text-warning",
@@ -38,6 +41,7 @@ export default function ReservationsPage() {
   const [tables, setTables] = useState<BranchTable[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [isDemo, setIsDemo] = useState(false);
 
   const effectiveBranchId = selectedBranchId === ALL_BRANCHES ? branches[0]?.id : selectedBranchId;
 
@@ -65,8 +69,14 @@ export default function ReservationsPage() {
       supabase.from("branch_tables").select("*").eq("branch_id", effectiveBranchId).eq("is_active", true),
     ]);
 
-    setReservations((res as ReservationCalendarRow[]) ?? []);
+    const resRows = (res as ReservationCalendarRow[]) ?? [];
+    setReservations(resRows);
     setTables((tbl as BranchTable[]) ?? []);
+
+    const noActivity = await tenantHasNoActivity();
+    const showDemo = resRows.length === 0 && noActivity;
+    setIsDemo(showDemo);
+    if (showDemo) setReservations(makeDemoReservations());
     setLoading(false);
   }
 
@@ -105,11 +115,13 @@ export default function ReservationsPage() {
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-bold text-neutral-900">Reservasi Meja</h1>
-          <p className="text-sm text-neutral-500 mt-1">Kalender & timeline reservasi harian per cabang.</p>
+          {isDemo && <DemoBadge />}
+          <p className="text-sm text-neutral-500 mt-1">Kalender &amp; timeline reservasi harian per cabang.</p>
         </div>
         <button
           onClick={() => setShowForm(true)}
-          className="flex items-center gap-2 bg-primary text-white text-sm font-medium rounded-xl px-4 py-2.5"
+          disabled={isDemo}
+          className="flex items-center gap-2 bg-primary text-white text-sm font-medium rounded-xl px-4 py-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Plus size={16} /> Reservasi Baru
         </button>
@@ -161,36 +173,38 @@ export default function ReservationsPage() {
                 </span>
               </div>
 
-              <div className="flex flex-wrap gap-2 mt-3">
-                {r.status === "pending" && (
-                  <>
-                    <select
-                      defaultValue=""
-                      onChange={(e) => e.target.value && updateStatus(r.id, "confirmed", e.target.value)}
-                      className="text-xs border border-neutral-200 rounded-lg px-2 py-1.5"
-                    >
-                      <option value="" disabled>
-                        Pilih meja &amp; konfirmasi
-                      </option>
-                      {tables.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          Meja {t.table_number}
+              {!isDemo && (
+                <div className="flex flex-wrap gap-2 mt-3">
+                  {r.status === "pending" && (
+                    <>
+                      <select
+                        defaultValue=""
+                        onChange={(e) => e.target.value && updateStatus(r.id, "confirmed", e.target.value)}
+                        className="text-xs border border-neutral-200 rounded-lg px-2 py-1.5"
+                      >
+                        <option value="" disabled>
+                          Pilih meja &amp; konfirmasi
                         </option>
-                      ))}
-                    </select>
-                    <ActionBtn onClick={() => updateStatus(r.id, "cancelled")} icon={XIcon} label="Tolak" tone="urgent" />
-                  </>
-                )}
-                {r.status === "confirmed" && (
-                  <>
-                    <ActionBtn onClick={() => seat(r.id)} icon={LogIn} label="Tamu Tiba (Check-in)" tone="primary" />
-                    <ActionBtn onClick={() => updateStatus(r.id, "cancelled")} icon={XIcon} label="Batalkan" tone="urgent" />
-                  </>
-                )}
-                {r.status === "seated" && (
-                  <ActionBtn onClick={() => updateStatus(r.id, "completed")} icon={Check} label="Selesaikan" tone="primary" />
-                )}
-              </div>
+                        {tables.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            Meja {t.table_number}
+                          </option>
+                        ))}
+                      </select>
+                      <ActionBtn onClick={() => updateStatus(r.id, "cancelled")} icon={XIcon} label="Tolak" tone="urgent" />
+                    </>
+                  )}
+                  {r.status === "confirmed" && (
+                    <>
+                      <ActionBtn onClick={() => seat(r.id)} icon={LogIn} label="Tamu Tiba (Check-in)" tone="primary" />
+                      <ActionBtn onClick={() => updateStatus(r.id, "cancelled")} icon={XIcon} label="Batalkan" tone="urgent" />
+                    </>
+                  )}
+                  {r.status === "seated" && (
+                    <ActionBtn onClick={() => updateStatus(r.id, "completed")} icon={Check} label="Selesaikan" tone="primary" />
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </div>

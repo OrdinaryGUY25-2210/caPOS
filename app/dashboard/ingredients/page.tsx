@@ -11,6 +11,9 @@ import Modal from "@/components/Modal";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import type { Ingredient, Unit } from "@/lib/types";
 import { Skeleton, SkeletonStatGrid, SkeletonTableRows } from "@/components/Skeleton";
+import { tenantHasNoActivity } from "@/lib/demoMode";
+import DemoBadge from "@/components/demo/DemoBadge";
+import { DEMO_INGREDIENTS, DEMO_BRANCH_INGREDIENT_STOCK } from "@/lib/demoData";
 
 /**
  * Kelola Bahan Baku (Ingredients) — Phase 2A F&B Master Data.
@@ -44,6 +47,7 @@ export default function IngredientsPage() {
   const [restocking, setRestocking] = useState<Ingredient | null>(null);
   const [saving, setSaving] = useState(false);
   const [archiveTarget, setArchiveTarget] = useState<Ingredient | null>(null);
+  const [isDemo, setIsDemo] = useState(false);
 
   const isConsolidated = selectedBranchId === ALL_BRANCHES;
   const canWrite = isManagerOrOwner(role);
@@ -67,7 +71,8 @@ export default function IngredientsPage() {
         .eq("tenant_id", profile.tenant_id),
     ]);
 
-    setIngredients((ingData as Ingredient[]) ?? []);
+    const freshIngredients = (ingData as Ingredient[]) ?? [];
+    setIngredients(freshIngredients);
     setUnits((unitData as Unit[]) ?? []);
 
     const map = new Map<string, StockRow[]>();
@@ -77,6 +82,20 @@ export default function IngredientsPage() {
       map.set(row.ingredient_id, list);
     }
     setStockMap(map);
+
+    const noActivity = await tenantHasNoActivity();
+    const showDemo = freshIngredients.length === 0 && noActivity;
+    setIsDemo(showDemo);
+    if (showDemo) {
+      setIngredients(DEMO_INGREDIENTS as Ingredient[]);
+      const demoStockMap = new Map<string, StockRow[]>();
+      for (const row of DEMO_BRANCH_INGREDIENT_STOCK as (StockRow & { ingredient_id: string })[]) {
+        const list = demoStockMap.get(row.ingredient_id) ?? [];
+        list.push(row);
+        demoStockMap.set(row.ingredient_id, list);
+      }
+      setStockMap(demoStockMap);
+    }
     setLoading(false);
   }
 
@@ -258,13 +277,14 @@ export default function IngredientsPage() {
           <h1 className="text-xl font-bold text-neutral-900 flex items-center gap-2">
             <Wheat size={20} className="text-primary-dark" /> Bahan Baku (Ingredients)
           </h1>
+          {isDemo && <DemoBadge />}
           <p className="text-sm text-neutral-500">
             Master bahan baku dasar untuk resep — stok tercatat per cabang
             {canSwitchBranch && !isConsolidated && selectedBranch ? ` (${selectedBranch.name})` : ""}.
           </p>
         </div>
         {canWrite && (
-          <button onClick={() => setEditing("new")} className="btn-primary flex items-center gap-1.5 text-sm">
+          <button onClick={() => setEditing("new")} disabled={isDemo} className="btn-primary flex items-center gap-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
             <Plus size={16} /> Tambah Bahan
           </button>
         )}
@@ -361,7 +381,7 @@ export default function IngredientsPage() {
                     </span>
                   </td>
                   <td className="p-3 text-right whitespace-nowrap">
-                    {canWrite && (
+                    {canWrite && !isDemo && (
                       <>
                         <button
                           onClick={() => setRestocking(ing)}

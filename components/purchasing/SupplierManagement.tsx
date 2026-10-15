@@ -3,6 +3,9 @@
 import React, { useState, useEffect } from 'react';
 import { createSupplier, getSuppliers, updateSupplier } from '@/app/actions/purchasing-loyalty-actions';
 import Modal from '@/components/Modal';
+import { tenantHasNoActivity } from '@/lib/demoMode';
+import DemoBadge from '@/components/demo/DemoBadge';
+import { DEMO_SUPPLIERS } from '@/lib/demoData';
 
 interface Supplier {
   id: string;
@@ -29,6 +32,7 @@ export function SupplierManagement() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [isDemo, setIsDemo] = useState(false);
 
   const [formData, setFormData] = useState({
     supplier_code: '',
@@ -54,11 +58,17 @@ export function SupplierManagement() {
   const loadSuppliers = async () => {
     setIsLoading(true);
     const result = await getSuppliers();
+    const rows = result.data || [];
     if (result.error) {
       setError(result.error);
     } else {
-      setSuppliers(result.data || []);
+      setSuppliers(rows);
     }
+
+    const noActivity = await tenantHasNoActivity();
+    const showDemo = rows.length === 0 && noActivity;
+    setIsDemo(showDemo);
+    if (showDemo) setSuppliers(DEMO_SUPPLIERS as Supplier[]);
     setIsLoading(false);
   };
 

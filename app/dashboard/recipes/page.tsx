@@ -9,6 +9,9 @@ import { isManagerOrOwner } from "@/lib/role";
 import type { Product, ProductVariant, Recipe, RecipeItem, Ingredient } from "@/lib/types";
 import { Skeleton, SkeletonList } from "@/components/Skeleton";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import { tenantHasNoActivity } from "@/lib/demoMode";
+import DemoBadge from "@/components/demo/DemoBadge";
+import { DEMO_RECIPES, DEMO_RECIPE_ITEMS, DEMO_PRODUCTS, DEMO_INGREDIENTS } from "@/lib/demoData";
 
 /**
  * Recipe Builder — Phase 2A F&B Master Data.
@@ -37,6 +40,7 @@ export default function RecipesPage() {
   const [costPreview, setCostPreview] = useState<number | null>(null);
   const [calculating, setCalculating] = useState(false);
   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
+  const [isDemo, setIsDemo] = useState(false);
 
   const canWrite = isManagerOrOwner(role);
 
@@ -53,8 +57,20 @@ export default function RecipesPage() {
       supabase.from("products").select("*").eq("tenant_id", profile.tenant_id).order("name", { ascending: true }),
       supabase.from("ingredients").select("*").eq("tenant_id", profile.tenant_id).eq("status", "active").order("name", { ascending: true }),
     ]);
-    setProducts((prodData as Product[]) ?? []);
-    setIngredients((ingData as Ingredient[]) ?? []);
+    const freshProducts = (prodData as Product[]) ?? [];
+    const freshIngredients = (ingData as Ingredient[]) ?? [];
+    setProducts(freshProducts);
+    setIngredients(freshIngredients);
+
+    const noActivity = await tenantHasNoActivity();
+    const showDemo = freshProducts.length === 0 && noActivity;
+    setIsDemo(showDemo);
+    if (showDemo) {
+      setProducts(DEMO_PRODUCTS as Product[]);
+      setIngredients(DEMO_INGREDIENTS as Ingredient[]);
+      setSelectedProductId(DEMO_PRODUCTS[0]?.id ?? null);
+      setRecipes(DEMO_RECIPES as Recipe[]);
+    }
     setLoading(false);
   }
 
@@ -63,6 +79,13 @@ export default function RecipesPage() {
   }, []);
 
   async function loadForProduct(productId: string) {
+    if (productId.startsWith("demo-")) {
+      setVariants([]);
+      setRecipes((DEMO_RECIPES as Recipe[]).filter((r) => r.product_id === productId));
+      setSelectedVariantId(null);
+      setLoadingRecipe(false);
+      return;
+    }
     setLoadingRecipe(true);
     const supabase = createClient();
     const [{ data: variantData }, { data: recipeData }] = await Promise.all([
@@ -89,6 +112,21 @@ export default function RecipesPage() {
   );
 
   async function loadRecipeItems(recipeId: string) {
+    if (recipeId.startsWith("demo-")) {
+      setItems(
+        ((DEMO_RECIPE_ITEMS as RecipeItem[]) ?? [])
+          .filter((it) => it.recipe_id === recipeId)
+          .map((it) => ({
+            id: it.id,
+            ingredient_id: it.ingredient_id,
+            quantity: String(it.quantity),
+            unit: it.unit,
+            wastage_percentage: it.wastage_percentage ? String(it.wastage_percentage) : "0",
+            notes: it.notes ?? "",
+          }))
+      );
+      return;
+    }
     const supabase = createClient();
     const { data } = await supabase.from("recipe_items").select("*").eq("recipe_id", recipeId);
     setItems(
@@ -247,6 +285,7 @@ export default function RecipesPage() {
         <h1 className="text-xl font-bold text-neutral-900 flex items-center gap-2">
           <ChefHat size={20} className="text-primary-dark" /> Resep & HPP
         </h1>
+        {isDemo && <DemoBadge />}
         <p className="text-sm text-neutral-500">Susun resep bahan baku per menu/varian — HPP dihitung otomatis dari harga bahan.</p>
       </div>
 
@@ -295,14 +334,16 @@ export default function RecipesPage() {
                 {activeRecipe ? `Resep aktif v${activeRecipe.version}` : "Belum ada resep aktif — buat baru di bawah"}
               </p>
             </div>
-            {activeRecipe && canWrite && (
+            {activeRecipe && canWrite && !isDemo && (
               <button onClick={toggleActive} className="text-xs text-urgent font-medium flex items-center gap-1">
                 <XCircle size={14} /> Nonaktifkan Resep
               </button>
             )}
           </div>
 
-          {canWrite ? (
+          {isDemo ? (
+            <p className="text-neutral-400 text-sm">Mode contoh — data di atas hanya untuk tampilan dan tidak bisa diubah.</p>
+          ) : canWrite ? (
             <>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>

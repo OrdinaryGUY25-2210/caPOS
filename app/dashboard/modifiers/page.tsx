@@ -9,6 +9,9 @@ import { isManagerOrOwner } from "@/lib/role";
 import Modal from "@/components/Modal";
 import type { Product, ModifierGroup, Modifier, ModifierIngredientImpact, Ingredient, ProductModifierGroup } from "@/lib/types";
 import { Skeleton, SkeletonList } from "@/components/Skeleton";
+import { tenantHasNoActivity } from "@/lib/demoMode";
+import DemoBadge from "@/components/demo/DemoBadge";
+import { DEMO_MODIFIER_GROUPS, DEMO_MODIFIERS, DEMO_PRODUCT_MODIFIER_GROUPS, DEMO_MODIFIER_IMPACTS } from "@/lib/demoData";
 
 /**
  * Kelola Modifier Groups & Modifiers (mis. "Sugar": Normal/Less/No/Extra) —
@@ -30,6 +33,7 @@ export default function ModifiersPage() {
   const [editingModifier, setEditingModifier] = useState<{ group: ModifierGroup; modifier: Modifier | null } | null>(null);
   const [assigningGroup, setAssigningGroup] = useState<ModifierGroup | null>(null);
   const [saving, setSaving] = useState(false);
+  const [isDemo, setIsDemo] = useState(false);
 
   const canWrite = isManagerOrOwner(role);
 
@@ -77,6 +81,32 @@ export default function ModifiersPage() {
     setIngredients((ingData as Ingredient[]) ?? []);
     setProducts((prodData as Product[]) ?? []);
     setAssignments((assignData as ProductModifierGroup[]) ?? []);
+
+    const noActivity = await tenantHasNoActivity();
+    const showDemo = ((groupData as ModifierGroup[]) ?? []).length === 0 && noActivity;
+    setIsDemo(showDemo);
+    if (showDemo) {
+      setGroups(DEMO_MODIFIER_GROUPS as ModifierGroup[]);
+
+      const demoModMap = new Map<string, Modifier[]>();
+      for (const m of DEMO_MODIFIERS as Modifier[]) {
+        const list = demoModMap.get(m.modifier_group_id) ?? [];
+        list.push(m);
+        demoModMap.set(m.modifier_group_id, list);
+      }
+      setModifiersByGroup(demoModMap);
+
+      const demoImpactMap = new Map<string, (ModifierIngredientImpact & { ingredient_name: string })[]>();
+      for (const raw of DEMO_MODIFIER_IMPACTS as any[]) {
+        const row = { ...raw, ingredient_name: raw.ingredient_name ?? "Bahan" };
+        const list = demoImpactMap.get(row.modifier_id) ?? [];
+        list.push(row);
+        demoImpactMap.set(row.modifier_id, list);
+      }
+      setImpactsByModifier(demoImpactMap);
+
+      setAssignments(DEMO_PRODUCT_MODIFIER_GROUPS as ProductModifierGroup[]);
+    }
     setLoading(false);
   }
 
@@ -249,10 +279,11 @@ export default function ModifiersPage() {
           <h1 className="text-xl font-bold text-neutral-900 flex items-center gap-2">
             <SlidersHorizontal size={20} className="text-primary-dark" /> Modifier
           </h1>
+          {isDemo && <DemoBadge />}
           <p className="text-sm text-neutral-500">Kelola grup pilihan (mis. Gula, Es, Topping) dan dampaknya ke bahan baku.</p>
         </div>
         {canWrite && (
-          <button onClick={() => setEditingGroup("new")} className="btn-primary flex items-center gap-1.5 text-sm">
+          <button onClick={() => setEditingGroup("new")} disabled={isDemo} className="btn-primary flex items-center gap-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
             <Plus size={16} /> Tambah Grup
           </button>
         )}
@@ -277,7 +308,7 @@ export default function ModifiersPage() {
                     </p>
                   </div>
                 </div>
-                {canWrite && (
+                {canWrite && !isDemo && (
                   <div className="flex items-center gap-1">
                     <span
                       role="button"
@@ -324,7 +355,7 @@ export default function ModifiersPage() {
                             {m.price_adjustment > 0 ? "+" : ""}
                             {formatRupiah(m.price_adjustment)}
                           </span>
-                          {canWrite && (
+                          {canWrite && !isDemo && (
                             <>
                               <button onClick={() => toggleModifierAvailable(m)} className="text-xs text-neutral-400 hover:text-neutral-700">
                                 {m.is_available ? "Nonaktifkan" : "Aktifkan"}
@@ -338,7 +369,7 @@ export default function ModifiersPage() {
                       </div>
                     );
                   })}
-                  {canWrite && (
+                  {canWrite && !isDemo && (
                     <button
                       onClick={() => setEditingModifier({ group, modifier: null })}
                       className="text-sm text-primary-dark font-medium flex items-center gap-1 pt-1"

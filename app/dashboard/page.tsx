@@ -14,6 +14,11 @@ import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { getTier, hasSalesHealth, type Tier } from "@/lib/tier";
 import { useBranch, ALL_BRANCHES } from "@/lib/branchContext";
 import { Skeleton, SkeletonStatGrid } from "@/components/Skeleton";
+import { tenantHasNoActivity } from "@/lib/demoMode";
+import DemoBadge from "@/components/demo/DemoBadge";
+import {
+  DEMO_DASH_OMZET, DEMO_DASH_PEAK, DEMO_DASH_BEST, DEMO_DASH_RECENT, DEMO_DASH_TREND,
+} from "@/lib/demoData";
 
 const PIE_COLORS = ["#10B981", "#059669", "#34D399", "#6EE7B7", "#94A3B8"];
 const DAY_LABELS = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
@@ -36,6 +41,7 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [tier, setTier] = useState<Tier>("free");
   const [cafeName, setCafeName] = useState("Kafe Anda");
+  const [isDemo, setIsDemo] = useState(false);
 
   const [omzetData, setOmzetData] = useState<OmzetPoint[]>([]);
   const [peakHours, setPeakHours] = useState<PeakPoint[]>([]);
@@ -224,6 +230,16 @@ export default function ReportsPage() {
         }))
       );
 
+      const noActivity = await tenantHasNoActivity();
+      if (noActivity) {
+        setIsDemo(true);
+        setOmzetData(DEMO_DASH_OMZET);
+        setPeakHours(DEMO_DASH_PEAK);
+        setBestSellers(DEMO_DASH_BEST);
+        setHealthTrendPct(DEMO_DASH_TREND);
+        setRecentTx(DEMO_DASH_RECENT);
+      }
+
       setLoading(false);
     })();
   }, [selectedBranchId]);
@@ -303,6 +319,7 @@ export default function ReportsPage() {
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-bold text-neutral-900">Laporan & Omzet</h1>
+            {isDemo && <DemoBadge />}
             <span className={isPremium ? "badge-active" : "badge-warning"}>
               {isPremium ? "Laporan Lengkap" : "Laporan Dasar"}
             </span>

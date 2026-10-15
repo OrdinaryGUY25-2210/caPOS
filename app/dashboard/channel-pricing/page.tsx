@@ -7,6 +7,9 @@ import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { formatRupiah, cx } from "@/lib/utils";
 import type { ChannelPricing, OnlineChannel } from "@/lib/types";
 import type { Product } from "@/lib/types";
+import { tenantHasNoActivity } from "@/lib/demoMode";
+import DemoBadge from "@/components/demo/DemoBadge";
+import { DEMO_PRODUCTS } from "@/lib/demoData";
 
 const CHANNELS: { key: OnlineChannel; label: string; defaultMarkup: number; defaultCommission: number }[] = [
   { key: "gofood", label: "GoFood", defaultMarkup: 20, defaultCommission: 20 },
@@ -28,6 +31,7 @@ export default function ChannelPricingPage() {
   const [loading, setLoading] = useState(true);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [tenantId, setTenantId] = useState<string>("");
+  const [isDemo, setIsDemo] = useState(false);
 
   useEffect(() => {
     load();
@@ -45,12 +49,18 @@ export default function ChannelPricingPage() {
       supabase.from("channel_pricings").select("*").eq("tenant_id", profile.tenant_id),
     ]);
 
-    setProducts((prods as Product[]) ?? []);
+    const prodRows = (prods as Product[]) ?? [];
+    setProducts(prodRows);
     const map: Record<string, ChannelPricing> = {};
     ((prices as ChannelPricing[]) ?? []).forEach((p) => {
       map[`${p.product_id}:${p.channel}`] = p;
     });
     setPricings(map);
+
+    const noActivity = await tenantHasNoActivity();
+    const showDemo = prodRows.length === 0 && noActivity;
+    setIsDemo(showDemo);
+    if (showDemo) setProducts(DEMO_PRODUCTS as Product[]);
     setLoading(false);
   }
 
@@ -83,6 +93,7 @@ export default function ChannelPricingPage() {
   }
 
   async function save(productId: string) {
+    if (isDemo) return;
     setSavingKey(keyFor(productId));
     const supabase = createClient();
     const markup = getValue(productId, "markup_pct");
@@ -115,6 +126,7 @@ export default function ChannelPricingPage() {
   return (
     <div className="max-w-4xl mx-auto">
       <h1 className="text-xl font-bold text-neutral-900">Penyesuaian Harga per Kanal</h1>
+      {isDemo && <DemoBadge />}
       <p className="text-sm text-neutral-500 mt-1 mb-6">
         Atur markup harga otomatis & komisi platform untuk setiap menu di masing-masing kanal penjualan online.
       </p>
@@ -164,8 +176,9 @@ export default function ChannelPricingPage() {
                       <input
                         type="number"
                         value={markup}
+                        disabled={isDemo}
                         onChange={(e) => setLocalValue(p.id, "markup_pct", Number(e.target.value))}
-                        className="w-16 text-right border border-neutral-200 rounded-lg px-2 py-1 text-xs"
+                        className="w-16 text-right border border-neutral-200 rounded-lg px-2 py-1 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
                       />
                     </td>
                     <td className="px-4 py-3 text-right font-semibold text-primary">{formatRupiah(channelPrice)}</td>
@@ -173,15 +186,16 @@ export default function ChannelPricingPage() {
                       <input
                         type="number"
                         value={commission}
+                        disabled={isDemo}
                         onChange={(e) => setLocalValue(p.id, "commission_pct", Number(e.target.value))}
-                        className="w-16 text-right border border-neutral-200 rounded-lg px-2 py-1 text-xs"
+                        className="w-16 text-right border border-neutral-200 rounded-lg px-2 py-1 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
                       />
                     </td>
                     <td className="px-4 py-3 text-right">
                       <button
                         onClick={() => save(p.id)}
-                        disabled={savingKey === keyFor(p.id)}
-                        className="text-xs font-medium bg-neutral-900 text-white rounded-lg px-3 py-1.5 flex items-center gap-1 disabled:opacity-50"
+                        disabled={isDemo || savingKey === keyFor(p.id)}
+                        className="text-xs font-medium bg-neutral-900 text-white rounded-lg px-3 py-1.5 flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {savingKey === keyFor(p.id) ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
                         Simpan

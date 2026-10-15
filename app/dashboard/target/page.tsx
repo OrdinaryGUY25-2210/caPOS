@@ -10,6 +10,9 @@ import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import Modal from "@/components/Modal";
 import { Skeleton, SkeletonStatGrid } from "@/components/Skeleton";
+import { tenantHasNoActivity } from "@/lib/demoMode";
+import DemoBadge from "@/components/demo/DemoBadge";
+import { DEMO_TARGET, DEMO_DAY_POINTS, DEMO_TARGET_HISTORY } from "@/lib/demoData";
 
 const MONTH_LABEL = [
   "Januari", "Februari", "Maret", "April", "Mei", "Juni",
@@ -27,6 +30,7 @@ export default function TargetPage() {
   const [history, setHistory] = useState<HistoryRow[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [isDemo, setIsDemo] = useState(false);
 
   const now = new Date();
   const year = now.getFullYear();
@@ -106,6 +110,14 @@ export default function TargetPage() {
     }
     setHistory(historyRows);
 
+    const noActivity = await tenantHasNoActivity();
+    if (noActivity) {
+      setIsDemo(true);
+      setTarget(DEMO_TARGET);
+      setDayPoints(DEMO_DAY_POINTS);
+      setHistory(DEMO_TARGET_HISTORY);
+    }
+
     setLoading(false);
   }
 
@@ -164,6 +176,7 @@ export default function TargetPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-neutral-900">Target Bulanan Owner</h1>
+          {isDemo && <DemoBadge />}
           <p className="text-sm text-neutral-500">{MONTH_LABEL[month - 1]} {year}</p>
         </div>
         {isOwner && (

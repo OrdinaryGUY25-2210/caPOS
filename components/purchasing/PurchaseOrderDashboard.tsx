@@ -11,6 +11,9 @@ import {
 } from '@/app/actions/purchasing-loyalty-actions';
 import { useBranch, ALL_BRANCHES } from '@/lib/branchContext';
 import Modal from '@/components/Modal';
+import DemoBadge from '@/components/demo/DemoBadge';
+import { tenantHasNoActivity } from '@/lib/demoMode';
+import { DEMO_PURCHASE_ORDERS, DEMO_GOODS_RECEIPTS } from '@/lib/demoData';
 
 interface POLineItem {
   ingredient_id: string;
@@ -61,6 +64,7 @@ export function PurchaseOrderDashboard() {
   const [showGRNForm, setShowGRNForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [isDemo, setIsDemo] = useState(false);
 
   const [poFormData, setPoFormData] = useState({
     supplier_id: '',
@@ -119,8 +123,16 @@ export function PurchaseOrderDashboard() {
       getPurchaseOrders(branchFilter || undefined),
       getGoodsReceipts(branchFilter || undefined),
     ]);
-    if (!poRes.error) setPoList(poRes.data || []);
-    if (!grnRes.error) setGrnList(grnRes.data || []);
+    const pos = !poRes.error ? (poRes.data || []) : [];
+    const grns = !grnRes.error ? (grnRes.data || []) : [];
+    if (!poRes.error) setPoList(pos);
+    if (!grnRes.error) setGrnList(grns);
+
+    if (pos.length === 0 && grns.length === 0 && (await tenantHasNoActivity())) {
+      setIsDemo(true);
+      setPoList(DEMO_PURCHASE_ORDERS);
+      setGrnList(DEMO_GOODS_RECEIPTS);
+    }
     setLoadingHistory(false);
   };
 
@@ -346,18 +358,21 @@ export function PurchaseOrderDashboard() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Pengadaan Bahan</h1>
+          {isDemo && <DemoBadge />}
           <p className="text-gray-600 mt-2">Kelola Purchase Order dan Penerimaan Barang</p>
         </div>
         <div className="flex gap-2">
           <button
             onClick={() => setShowPOForm(true)}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            disabled={isDemo}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             + Buat PO
           </button>
           <button
             onClick={() => setShowGRNForm(true)}
-            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+            disabled={isDemo}
+            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             + Terima Barang (GRN)
           </button>

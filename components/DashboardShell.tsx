@@ -18,6 +18,7 @@ import { createClient } from "@/lib/supabase/client";
 import { BranchProvider } from "@/lib/branchContext";
 import BranchSwitcher from "./BranchSwitcher";
 import AppTour from "./onboarding/app-tour";
+import DemoBanner from "./demo/DemoBanner";
 
 /**
  * Layout dashboard yang responsif di semua ukuran layar:
@@ -95,6 +96,11 @@ export default function DashboardShell({
 
   const [confirmLogout, setConfirmLogout] = useState(false);
 
+  // True saat in-app tour sedang berjalan — dipakai supaya semua grup di
+  // sidebar dipaksa terbuka (lihat DashboardSidebar forceOpenGroups) agar
+  // tiap item menu bisa di-spotlight.
+  const [tourActive, setTourActive] = useState(false);
+
   async function applyLogout() {
     const { error } = await createClient().auth.signOut();
     if (error) throw new Error(error.message);
@@ -108,10 +114,14 @@ export default function DashboardShell({
         <AccessDeniedNotice />
       </Suspense>
 
-      <AppTour onRequestDrawerOpen={() => setDrawerOpen(true)} onRequestDrawerClose={() => setDrawerOpen(false)} />
+      <AppTour
+        onRequestDrawerOpen={() => setDrawerOpen(true)}
+        onRequestDrawerClose={() => setDrawerOpen(false)}
+        onActiveChange={setTourActive}
+      />
 
       <div className="hidden md:block border-r border-neutral-200">
-        <DashboardSidebar />
+        <DashboardSidebar forceOpenGroups={tourActive} />
       </div>
 
       {drawerOpen && (
@@ -122,7 +132,7 @@ export default function DashboardShell({
             aria-hidden="true"
           />
           <div className="absolute inset-y-0 left-0 shadow-xl">
-            <DashboardSidebar onNavigate={() => setDrawerOpen(false)} />
+            <DashboardSidebar onNavigate={() => setDrawerOpen(false)} forceOpenGroups={tourActive} />
           </div>
         </div>
       )}
@@ -244,7 +254,10 @@ export default function DashboardShell({
         <TrialBanner daysLeft={daysLeft} />
         <LandscapeNotice />
 
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6">{children}</main>
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6">
+          <DemoBanner />
+          {children}
+        </main>
       </div>
     </div>
 

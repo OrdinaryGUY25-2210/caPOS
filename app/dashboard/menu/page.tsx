@@ -13,6 +13,9 @@ import { SYNC_COMPLETE_EVENT } from "@/lib/offlineSync";
 import Modal from "@/components/Modal";
 import type { Product } from "@/lib/types";
 import { Skeleton, SkeletonCardGrid } from "@/components/Skeleton";
+import { tenantHasNoActivity } from "@/lib/demoMode";
+import DemoBadge from "@/components/demo/DemoBadge";
+import { DEMO_PRODUCTS } from "@/lib/demoData";
 
 const CATEGORIES = ["Kopi", "Non-Kopi", "Makanan", "Dessert"];
 
@@ -29,6 +32,7 @@ export default function MenuPage() {
   // jaringan (bukan error lain), jadi yang ditampilkan adalah cache lokal
   // + perubahan yang masih tertunda, bukan data server yang terverifikasi.
   const [isOffline, setIsOffline] = useState(false);
+  const [isDemo, setIsDemo] = useState(false);
 
   async function loadMenu() {
     setLoading(true);
@@ -59,6 +63,12 @@ export default function MenuPage() {
       setMenu(fresh);
       setTier(profile.role === "super_admin" ? "supreme" : getTier(sub));
       setIsOffline(false);
+
+      const noActivity = await tenantHasNoActivity();
+      if (fresh.length === 0 && noActivity) {
+        setIsDemo(true);
+        setMenu(DEMO_PRODUCTS as Product[]);
+      }
 
       // Simpan ke cache lokal (dipakai /pos juga) — HANYA milik tenant ini
       // yang ditimpa, bukan seluruh device (lihat fix cross-tenant di
@@ -299,12 +309,13 @@ export default function MenuPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-neutral-900">Kelola Menu & Stok</h1>
+          {isDemo && <DemoBadge />}
           <p className="text-sm text-neutral-500">
             Tambah, edit foto, dan atur ketersediaan menu
             {tier === "free" && <> — {menu.length}/{FREE_TIER_LIMITS.maxMenu} menu terpakai (paket {TIER_LABEL.free})</>}
           </p>
         </div>
-        <button onClick={openNew} className="btn-primary flex items-center gap-2">
+        <button onClick={openNew} disabled={isDemo} className="btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
           {atMenuLimit ? <Lock size={16} /> : <Plus size={16} />} Tambah Menu
         </button>
       </div>
@@ -341,12 +352,14 @@ export default function MenuPage() {
               {product.id.startsWith("local-") && (
                 <span className="absolute top-2 left-2 badge-warning text-[10px]">Belum sinkron</span>
               )}
-              <button
-                onClick={() => { setEditing(product); setShowForm(true); }}
-                className="absolute top-2 right-2 w-7 h-7 rounded-full bg-white/90 flex items-center justify-center shadow-sm hover:bg-white"
-              >
-                <Pencil size={12} />
-              </button>
+              {!isDemo && (
+                <button
+                  onClick={() => { setEditing(product); setShowForm(true); }}
+                  className="absolute top-2 right-2 w-7 h-7 rounded-full bg-white/90 flex items-center justify-center shadow-sm hover:bg-white"
+                >
+                  <Pencil size={12} />
+                </button>
+              )}
             </div>
             <p className="text-sm font-semibold text-neutral-900 truncate">{product.name || "Tanpa nama"}</p>
             <p className="text-xs text-neutral-500">{product.category}</p>
@@ -354,6 +367,7 @@ export default function MenuPage() {
 
             <button
               onClick={() => toggleAvailability(product)}
+              disabled={isDemo}
               className={cx(
                 "mt-2 w-full text-xs font-medium py-1.5 rounded-lg transition-colors",
                 product.is_available ? "bg-primary-light text-primary-dark" : "bg-neutral-100 text-neutral-400"

@@ -7,6 +7,9 @@ import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { useBranch, ALL_BRANCHES } from "@/lib/branchContext";
 import { Skeleton, SkeletonList } from "@/components/Skeleton";
+import { tenantHasNoActivity } from "@/lib/demoMode";
+import DemoBadge from "@/components/demo/DemoBadge";
+import { DEMO_QRIS_ROWS } from "@/lib/demoData";
 
 /**
  * Riwayat QRIS Dinamis kasir POS (migration_018) — murni BACA dari
@@ -53,6 +56,7 @@ export default function QrisDinamisPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [isDemo, setIsDemo] = useState(false);
 
   async function load() {
     const { profile } = await getCurrentProfile();
@@ -74,16 +78,20 @@ export default function QrisDinamisPage() {
     }
 
     const { data } = await query;
-    setRows(
-      (data ?? []).map((r: any) => ({
-        id: r.id,
-        order_id: r.order_id,
-        gross_amount: Number(r.gross_amount),
-        status: r.status,
-        created_at: r.created_at,
-        branch_name: r.branches?.name ?? null,
-      }))
-    );
+    const mapped: Row[] = (data ?? []).map((r: any) => ({
+      id: r.id,
+      order_id: r.order_id,
+      gross_amount: Number(r.gross_amount),
+      status: r.status,
+      created_at: r.created_at,
+      branch_name: r.branches?.name ?? null,
+    }));
+    setRows(mapped);
+
+    const noActivity = await tenantHasNoActivity();
+    const showDemo = mapped.length === 0 && noActivity;
+    setIsDemo(showDemo);
+    if (showDemo) setRows(DEMO_QRIS_ROWS as Row[]);
   }
 
   useEffect(() => {
@@ -121,6 +129,7 @@ export default function QrisDinamisPage() {
           <h1 className="text-xl font-bold text-neutral-900 flex items-center gap-2">
             <ScanLine size={20} className="text-neutral-400" /> QRIS Dinamis (Kasir)
           </h1>
+          {isDemo && <DemoBadge />}
           <p className="text-sm text-neutral-500 mt-0.5">
             Riwayat transaksi QRIS Dinamis Midtrans dari kasir POS (200 terakhir) — terpisah dari langganan aplikasi.
           </p>

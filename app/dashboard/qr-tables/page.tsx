@@ -9,6 +9,9 @@ import type { BranchTable } from "@/lib/types";
 import QrTableCard from "@/components/tables/QrTableCard";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { downloadTablesPdf } from "@/components/tables/qrPdfExport";
+import { tenantHasNoActivity } from "@/lib/demoMode";
+import DemoBadge from "@/components/demo/DemoBadge";
+import { DEMO_TABLES } from "@/lib/demoData";
 
 /**
  * Manajemen Meja & Generator QR — Owner/Manager menambah meja per cabang,
@@ -25,6 +28,7 @@ export default function QrTablesPage() {
   const [saving, setSaving] = useState(false);
   const [siteOrigin, setSiteOrigin] = useState("https://capos.id");
   const [deactivateTarget, setDeactivateTarget] = useState<BranchTable | null>(null);
+  const [isDemo, setIsDemo] = useState(false);
 
   const effectiveBranchId = selectedBranchId === ALL_BRANCHES ? branches[0]?.id : selectedBranchId;
 
@@ -51,7 +55,13 @@ export default function QrTablesPage() {
       .eq("branch_id", effectiveBranchId)
       .order("table_number", { ascending: true });
 
-    setTables((data as BranchTable[]) ?? []);
+    const rows = (data as BranchTable[]) ?? [];
+    setTables(rows);
+
+    const noActivity = await tenantHasNoActivity();
+    const showDemo = rows.length === 0 && noActivity;
+    setIsDemo(showDemo);
+    if (showDemo) setTables(DEMO_TABLES as BranchTable[]);
     setLoading(false);
   }
 
@@ -76,6 +86,7 @@ export default function QrTablesPage() {
   }
 
   function removeTable(table: BranchTable) {
+    if (isDemo) return;
     setDeactivateTarget(table);
   }
 
@@ -93,6 +104,7 @@ export default function QrTablesPage() {
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-bold text-neutral-900">QR Meja &amp; Pemesanan Mandiri</h1>
+          {isDemo && <DemoBadge />}
           <p className="text-sm text-neutral-500 mt-1">
             Tambah meja, lalu unduh/cetak QR Code untuk ditempel di masing-masing meja.
           </p>
@@ -129,8 +141,8 @@ export default function QrTablesPage() {
         </div>
         <button
           onClick={addTable}
-          disabled={saving || !newTableNumber.trim()}
-          className="flex items-center gap-2 bg-primary text-white text-sm font-medium rounded-xl px-4 py-2.5 disabled:opacity-50"
+          disabled={isDemo || saving || !newTableNumber.trim()}
+          className="flex items-center gap-2 bg-primary text-white text-sm font-medium rounded-xl px-4 py-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {saving ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Tambah Meja
         </button>

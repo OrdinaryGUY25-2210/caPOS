@@ -8,6 +8,9 @@ import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { getTier, HISTORY_DAYS_LIMIT, type Tier } from "@/lib/tier";
 import { useBranch, ALL_BRANCHES } from "@/lib/branchContext";
 import { Skeleton } from "@/components/Skeleton";
+import { tenantHasNoActivity } from "@/lib/demoMode";
+import DemoBadge from "@/components/demo/DemoBadge";
+import { DEMO_REPORT_TX, DEMO_REPORT_ITEMS, DEMO_REPORT_OPNAME } from "@/lib/demoData";
 
 type RangeKey = "today" | "7" | "month" | "custom";
 
@@ -47,6 +50,7 @@ export default function LaporanPdfPage() {
   const [customEnd, setCustomEnd] = useState(toISODate(new Date()));
   const [tenantId, setTenantId] = useState<string | null>(null);
   const [minDate, setMinDate] = useState<string | null>(null);
+  const [isDemo, setIsDemo] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -73,6 +77,8 @@ export default function LaporanPdfPage() {
         cutoff.setDate(cutoff.getDate() - historyLimit);
         setMinDate(toISODate(cutoff));
       }
+
+      if (await tenantHasNoActivity()) setIsDemo(true);
 
       setLoading(false);
     })();
@@ -124,9 +130,9 @@ export default function LaporanPdfPage() {
         })(),
       ]);
 
-      const transactions = txRows ?? [];
-      const items = itemRows ?? [];
-      const totalOpnameLoss = (opnameRows ?? []).reduce((s: number, r: any) => s + Number(r.loss_value), 0);
+      const transactions = isDemo ? DEMO_REPORT_TX : (txRows ?? []);
+      const items = isDemo ? DEMO_REPORT_ITEMS : (itemRows ?? []);
+      const totalOpnameLoss = (isDemo ? DEMO_REPORT_OPNAME : (opnameRows ?? [])).reduce((s: number, r: any) => s + Number(r.loss_value), 0);
 
       // --- Ringkasan ---
       const totalOmzet = transactions.reduce((s: number, t: any) => s + Number(t.total_amount), 0);
@@ -328,6 +334,7 @@ export default function LaporanPdfPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-bold text-neutral-900">Laporan PDF Otomatis</h1>
+        {isDemo && <DemoBadge />}
         <p className="text-sm text-neutral-500">
           Satu klik: rekap omzet, laba kotor (HPP), kerugian stok opname, keuntungan bersih, menu terlaris,
           metode pembayaran, dan kinerja kasir langsung jadi file PDF rapi.

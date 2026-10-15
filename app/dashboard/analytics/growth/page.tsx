@@ -6,6 +6,9 @@ import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { formatRupiah } from "@/lib/utils";
 import type { GrowthSummary, CustomerVisitStats } from "@/lib/types";
+import { tenantHasNoActivity } from "@/lib/demoMode";
+import DemoBadge from "@/components/demo/DemoBadge";
+import { DEMO_GROWTH_SUMMARY, DEMO_CUSTOMER_STATS, DEMO_INACTIVE_CUSTOMERS } from "@/lib/demoData";
 
 function exportCustomersToCsv(filename: string, rows: CustomerVisitStats[]) {
   if (rows.length === 0) return;
@@ -43,6 +46,7 @@ export default function GrowthAnalyticsPage() {
   const [inactive, setInactive] = useState<CustomerVisitStats[]>([]);
   const [topCustomers, setTopCustomers] = useState<CustomerVisitStats[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isDemo, setIsDemo] = useState(false);
 
   useEffect(() => {
     load();
@@ -73,6 +77,14 @@ export default function GrowthAnalyticsPage() {
     setSummary((growth as GrowthSummary[])?.[0] ?? null);
     setInactive((inactiveCustomers as CustomerVisitStats[]) ?? []);
     setTopCustomers((top as CustomerVisitStats[]) ?? []);
+
+    const noActivity = await tenantHasNoActivity();
+    if (noActivity) {
+      setIsDemo(true);
+      setSummary(DEMO_GROWTH_SUMMARY as GrowthSummary);
+      setInactive(DEMO_INACTIVE_CUSTOMERS as CustomerVisitStats[]);
+      setTopCustomers(DEMO_CUSTOMER_STATS as CustomerVisitStats[]);
+    }
     setLoading(false);
   }
 
@@ -87,6 +99,7 @@ export default function GrowthAnalyticsPage() {
   return (
     <div className="max-w-5xl mx-auto">
       <h1 className="text-xl font-bold text-neutral-900">Analitik Pertumbuhan Pelanggan</h1>
+      {isDemo && <DemoBadge />}
       <p className="text-sm text-neutral-500 mt-1 mb-6">
         Repeat Visit Rate, Customer Lifetime Value, dan deteksi pelanggan tidak aktif — berbasis data Membership.
       </p>

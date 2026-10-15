@@ -173,7 +173,15 @@ const STORAGE_KEY = "capos:sidebar-collapsed-groups";
  * pathname, bukan hanya state awal), jadi tidak mungkin halaman yang
  * sedang dibuka jadi tersembunyi di grup yang collapsed.
  */
-export default function DashboardSidebar({ onNavigate }: { onNavigate?: () => void }) {
+export default function DashboardSidebar({
+  onNavigate,
+  forceOpenGroups,
+}: {
+  onNavigate?: () => void;
+  /** Saat in-app tour berjalan (lihat AppTour), semua grup dipaksa terbuka
+   *  supaya setiap item menu bisa di-spotlight walau tadinya di-collapse. */
+  forceOpenGroups?: boolean;
+}) {
   const pathname = usePathname();
   const router = useRouter();
 
@@ -254,7 +262,7 @@ export default function DashboardSidebar({ onNavigate }: { onNavigate?: () => vo
         {NAV_GROUPS.map((group) => {
           // Sebelum hydrate dari localStorage, anggap semua terbuka supaya tidak
           // ada "flash" grup tertutup lalu tiba-tiba terbuka.
-          const isOpen = group.label === activeGroupLabel || !hydrated || !manuallyClosed.has(group.label);
+          const isOpen = forceOpenGroups || group.label === activeGroupLabel || !hydrated || !manuallyClosed.has(group.label);
           return (
             <div key={group.label} className="pb-1">
               <button
@@ -280,7 +288,7 @@ export default function DashboardSidebar({ onNavigate }: { onNavigate?: () => vo
                         href={item.href}
                         onClick={onNavigate}
                         aria-current={active ? "page" : undefined}
-                        data-tour={item.href === "/dashboard/settings" ? "settings-nav" : undefined}
+                        data-tour={`nav:${item.href}`}
                         className={cx(
                           "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors",
                           active

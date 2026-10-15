@@ -9,6 +9,9 @@ import { useBranch, ALL_BRANCHES } from "@/lib/branchContext";
 import Modal from "@/components/Modal";
 import type { Product } from "@/lib/types";
 import { Skeleton, SkeletonStatGrid, SkeletonTableRows } from "@/components/Skeleton";
+import { tenantHasNoActivity } from "@/lib/demoMode";
+import DemoBadge from "@/components/demo/DemoBadge";
+import { DEMO_PRODUCTS_WITH_STOCK, DEMO_STOCK_MOVEMENTS } from "@/lib/demoData";
 
 /**
  * Kolom stok/HPP (cost_price, track_stock, low_stock_threshold) ditambahkan
@@ -50,6 +53,7 @@ export default function StockPage() {
   const [restocking, setRestocking] = useState<ProductStock | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [isDemo, setIsDemo] = useState(false);
 
   // "Semua Cabang" (Laporan Konsolidasi) -> stok ditampilkan gabungan
   // (read-only); restock/HPP tetap butuh 1 cabang spesifik dipilih.
@@ -89,19 +93,25 @@ export default function StockPage() {
       stockMap.set(row.product_id, (stockMap.get(row.product_id) ?? 0) + Number(row.stock_qty));
     }
 
-    setProducts(
-      ((prodData as ProductStock[]) ?? []).map((p) => ({ ...p, stock_qty: stockMap.get(p.id) ?? 0 }))
-    );
-    setMovements(
-      (moveData ?? []).map((m: any) => ({
-        id: m.id,
-        type: m.type,
-        qty_change: Number(m.qty_change),
-        note: m.note,
-        created_at: m.created_at,
-        product_name: m.products?.name ?? "Produk",
-      }))
-    );
+    const freshProducts = ((prodData as ProductStock[]) ?? []).map((p) => ({ ...p, stock_qty: stockMap.get(p.id) ?? 0 }));
+    const freshMovements: MovementRow[] = (moveData ?? []).map((m: any) => ({
+      id: m.id,
+      type: m.type,
+      qty_change: Number(m.qty_change),
+      note: m.note,
+      created_at: m.created_at,
+      product_name: m.products?.name ?? "Produk",
+    }));
+    setProducts(freshProducts);
+    setMovements(freshMovements);
+
+    const noActivity = await tenantHasNoActivity();
+    const showDemo = freshProducts.length === 0 && noActivity;
+    setIsDemo(showDemo);
+    if (showDemo) {
+      setProducts(DEMO_PRODUCTS_WITH_STOCK as ProductStock[]);
+      setMovements(DEMO_STOCK_MOVEMENTS as MovementRow[]);
+    }
     setLoading(false);
   }
 
@@ -210,6 +220,7 @@ export default function StockPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-neutral-900">Stok & HPP</h1>
+          {isDemo && <DemoBadge />}
           <p className="text-sm text-neutral-500">
             Atur HPP (harga pokok) tiap menu, aktifkan pelacakan stok bahan, dan pantau stok menipis
             {canSwitchBranch && !isConsolidated && selectedBranch ? ` — cabang ${selectedBranch.name}.` : "."}
@@ -288,7 +299,7 @@ export default function StockPage() {
                     )}
                   </td>
                   <td className="p-3 text-right whitespace-nowrap">
-                    {p.track_stock && (
+                    {!isDemo && p.track_stock && (
                       <button
                         onClick={() => setRestocking(p)}
                         disabled={isConsolidated}
@@ -298,13 +309,15 @@ export default function StockPage() {
                         <PackagePlus size={16} />
                       </button>
                     )}
-                    <button
-                      onClick={() => setEditing(p)}
-                      className="text-neutral-500 hover:bg-neutral-100 rounded-lg p-1.5"
-                      title="Atur HPP & Stok"
-                    >
-                      <Pencil size={16} />
-                    </button>
+                    {!isDemo && (
+                      <button
+                        onClick={() => setEditing(p)}
+                        className="text-neutral-500 hover:bg-neutral-100 rounded-lg p-1.5"
+                        title="Atur HPP & Stok"
+                      >
+                        <Pencil size={16} />
+                      </button>
+                    )}
                   </td>
                 </tr>
               );

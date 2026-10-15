@@ -1,6 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, Suspense } from "react";
+import DemoBanner from "@/components/demo/DemoBanner";
+import { tenantHasNoActivity, resetDemoModeCache } from "@/lib/demoMode";
+import { DEMO_PRODUCTS } from "@/lib/demoData";
 import { Search, Plus, Minus, Trash2, Printer, ScanLine, Loader2 } from "lucide-react";
 import PosNavbar from "@/components/PosNavbar";
 import Receipt, { type ReceiptData } from "@/components/Receipt";
@@ -72,6 +75,7 @@ const FALLBACK_PRODUCTS: Product[] = [
 
 export default function PosPage() {
   const [products, setProducts] = useState<StockAwareProduct[]>([]);
+  const [isDemo, setIsDemo] = useState(false);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("Semua");
   const [cart, setCart] = useState<StockAwareCartItem[]>([]);
@@ -375,6 +379,12 @@ export default function PosPage() {
         if (cached.length === 0) setProducts(FALLBACK_PRODUCTS);
       }
 
+      const noActivity = await tenantHasNoActivity();
+      if (noActivity) {
+        setIsDemo(true);
+        setProducts((prev) => (prev.length === 0 ? (DEMO_PRODUCTS as StockAwareProduct[]) : prev));
+      }
+
       // Phase 2A.3 — muat varian + modifier group SEKALI di awal (bukan
       // per-tap kartu produk) supaya menambah item ke keranjang tetap
       // instan dan tidak menimbulkan query berulang (Requirement 25).
@@ -533,6 +543,10 @@ export default function PosPage() {
   }
 
   function addToCart(product: StockAwareProduct) {
+    if (isDemo) {
+      showStockNotice("Ini contoh data. Tambahkan menu asli dulu sebelum menjual.");
+      return;
+    }
     if (!product.is_available) {
       showStockNotice(`"${product.name}" sedang Sold Out.`);
       return;
@@ -986,6 +1000,7 @@ export default function PosPage() {
     setPointsDiscountAmount(0);
     setCashReceived("");
     setShowCheckout(false);
+    resetDemoModeCache();
     resetQrisDynamic();
   }
 
@@ -1114,6 +1129,12 @@ export default function PosPage() {
           window.location.href = "/login";
         }}
       />
+
+      {isDemo && (
+        <div className="px-4 pt-3">
+          <DemoBanner />
+        </div>
+      )}
 
       <div className="flex-1 flex overflow-hidden">
         {/* Menu area — selalu ambil lebar penuh di HP (cart pindah jadi

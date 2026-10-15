@@ -9,6 +9,9 @@ import { formatRupiah } from "@/lib/utils";
 import type { MenuEngineeringRow, MenuEngineeringClass } from "@/lib/types";
 import { Skeleton, SkeletonBlock, SkeletonTableRows } from "@/components/Skeleton";
 import PremiumFeatureLock from "@/components/PremiumFeatureLock";
+import { tenantHasNoActivity } from "@/lib/demoMode";
+import DemoBadge from "@/components/demo/DemoBadge";
+import { DEMO_MENU_ENGINEERING_ROWS } from "@/lib/demoData";
 
 const CLASS_COLOR: Record<MenuEngineeringClass, string> = {
   STAR: "#10B981",
@@ -41,6 +44,7 @@ export default function MenuEngineeringPage() {
 function MenuEngineeringContent() {
   const [rows, setRows] = useState<MenuEngineeringRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isDemo, setIsDemo] = useState(false);
 
   useEffect(() => {
     load();
@@ -53,6 +57,12 @@ function MenuEngineeringContent() {
     const supabase = createClient();
     const { data } = await supabase.rpc("menu_engineering_report", { p_tenant_id: profile.tenant_id });
     setRows((data as MenuEngineeringRow[]) ?? []);
+
+    const noActivity = await tenantHasNoActivity();
+    if (noActivity) {
+      setIsDemo(true);
+      setRows(DEMO_MENU_ENGINEERING_ROWS as MenuEngineeringRow[]);
+    }
     setLoading(false);
   }
 
@@ -85,6 +95,7 @@ function MenuEngineeringContent() {
   return (
     <div className="max-w-5xl mx-auto">
       <h1 className="text-xl font-bold text-neutral-900">Menu Engineering Matrix</h1>
+      {isDemo && <DemoBadge />}
       <p className="text-sm text-neutral-500 mt-1 mb-6">
         Kuadran popularitas (volume terjual) vs profitabilitas (margin HPP) — dibandingkan rata-rata seluruh menu.
       </p>

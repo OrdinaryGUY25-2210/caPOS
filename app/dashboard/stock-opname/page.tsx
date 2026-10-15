@@ -8,6 +8,9 @@ import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { useBranch, ALL_BRANCHES } from "@/lib/branchContext";
 import type { Ingredient } from "@/lib/types";
 import { SkeletonTableRows } from "@/components/Skeleton";
+import { tenantHasNoActivity } from "@/lib/demoMode";
+import DemoBadge from "@/components/demo/DemoBadge";
+import { DEMO_OPNAME_ROWS, DEMO_OPNAME_LOGS } from "@/lib/demoData";
 
 /**
  * Stok Opname — BAHAN BAKU (migration_16).
@@ -73,6 +76,7 @@ export default function StockOpnamePage() {
   const [tenantId, setTenantId] = useState<string | null>(null);
   const [rows, setRows] = useState<OpnameRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isDemo, setIsDemo] = useState(false);
 
   // Cabang yang benar-benar dipakai untuk opname: Owner harus pilih 1
   // cabang spesifik lewat BranchSwitcher (tidak bisa opname "semua cabang"
@@ -113,21 +117,27 @@ export default function StockOpnamePage() {
       (stock ?? []).map((s: any) => [s.ingredient_id, { qty: Number(s.stock_qty), cost: Number(s.cost_price) }])
     );
 
-    setRows(
-      ((ingredients as Ingredient[]) ?? []).map((ing) => {
-        const s = stockMap.get(ing.id);
-        const systemQty = s?.qty ?? 0;
-        return {
-          ingredient: { ...ing, cost_price: s?.cost ?? 0 },
-          systemQty,
-          physicalInput: String(systemQty),
-          reason: "",
-          note: "",
-          saving: false,
-          savedAt: null,
-        };
-      })
-    );
+    const freshRows: OpnameRow[] = ((ingredients as Ingredient[]) ?? []).map((ing) => {
+      const s = stockMap.get(ing.id);
+      const systemQty = s?.qty ?? 0;
+      return {
+        ingredient: { ...ing, cost_price: s?.cost ?? 0 },
+        systemQty,
+        physicalInput: String(systemQty),
+        reason: "",
+        note: "",
+        saving: false,
+        savedAt: null,
+      };
+    });
+    setRows(freshRows);
+
+    const noActivity = await tenantHasNoActivity();
+    const showDemo = freshRows.length === 0 && noActivity;
+    setIsDemo(showDemo);
+    if (showDemo) {
+      setRows(DEMO_OPNAME_ROWS as OpnameRow[]);
+    }
     setLoading(false);
   }
 
@@ -185,6 +195,7 @@ export default function StockOpnamePage() {
           <h1 className="text-xl font-bold text-neutral-900 flex items-center gap-2">
             <ClipboardList size={20} className="text-primary" /> Stok Opname Bahan Baku
           </h1>
+          {isDemo && <DemoBadge />}
           <p className="text-sm text-neutral-500 mt-0.5">
             Bandingkan stok fisik bahan baku dengan stok sistem — selisih otomatis dihitung nilainya berdasarkan HPP,
             dan koreksinya langsung memengaruhi kalkulasi HPP resep produk terkait.
@@ -265,10 +276,11 @@ export default function StockOpnamePage() {
                           type="text"
                           inputMode="numeric"
                           value={row.physicalInput}
+                          disabled={isDemo}
                           onChange={(e) =>
                             updateRow(row.ingredient.id, { physicalInput: e.target.value.replace(/[^0-9]/g, ""), savedAt: null })
                           }
-                          className="input-field w-20 py-1.5"
+                          className="input-field w-20 py-1.5 disabled:opacity-60"
                         />
                       </td>
                       <td className={cx("p-3 font-semibold", difference < 0 ? "text-urgent" : difference > 0 ? "text-primary-dark" : "text-neutral-400")}>
@@ -282,8 +294,9 @@ export default function StockOpnamePage() {
                         {isDirty ? (
                           <select
                             value={row.reason}
+                            disabled={isDemo}
                             onChange={(e) => updateRow(row.ingredient.id, { reason: e.target.value })}
-                            className="input-field py-1.5 text-xs"
+                            className="input-field py-1.5 text-xs disabled:opacity-60"
                           >
                             <option value="">Pilih alasan...</option>
                             {REASON_OPTIONS.map((r) => (
@@ -302,7 +315,7 @@ export default function StockOpnamePage() {
                         ) : (
                           <button
                             onClick={() => submitRow(row)}
-                            disabled={row.saving || !isManagerOrOwner || (isDirty && !row.reason)}
+                            disabled={isDemo || row.saving || !isManagerOrOwner || (isDirty && !row.reason)}
                             className="btn-outline text-xs py-1.5 px-2.5 flex items-center gap-1.5 disabled:opacity-40 ml-auto"
                           >
                             {row.saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
@@ -320,19 +333,24 @@ export default function StockOpnamePage() {
       )}
 
       {tab === "riwayat" && tenantId && (
-        <OpnameHistory tenantId={tenantId} branchId={canSwitchBranch ? (selectedBranchId === ALL_BRANCHES ? null : selectedBranchId) : ownBranchId} showBranchColumn={canSwitchBranch && selectedBranchId === ALL_BRANCHES} />
+        <OpnameHistory tenantId={tenantId} isDemo={isDemo} branchId={canSwitchBranch ? (selectedBranchId === ALL_BRANCHES ? null : selectedBranchId) : ownBranchId} showBranchColumn={canSwitchBranch && selectedBranchId === ALL_BRANCHES} />
       )}
     </div>
   );
 }
 
-function OpnameHistory({ tenantId, branchId, showBranchColumn }: { tenantId: string; branchId: string | null; showBranchColumn: boolean }) {
+function OpnameHistory({ tenantId, branchId, showBranchColumn, isDemo }: { tenantId: string; branchId: string | null; showBranchColumn: boolean; isDemo: boolean }) {
   const [logs, setLogs] = useState<LogRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [start, setStart] = useState(toISODate(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)));
   const [end, setEnd] = useState(toISODate(new Date()));
 
   useEffect(() => {
+    if (isDemo) {
+      setLogs(DEMO_OPNAME_LOGS as LogRow[]);
+      setLoading(false);
+      return;
+    }
     (async () => {
       setLoading(true);
       const supabase = createClient();
@@ -368,7 +386,7 @@ function OpnameHistory({ tenantId, branchId, showBranchColumn }: { tenantId: str
       );
       setLoading(false);
     })();
-  }, [tenantId, branchId, start, end]);
+  }, [tenantId, branchId, start, end, isDemo]);
 
   const totalLoss = useMemo(() => logs.reduce((s, l) => s + l.loss_value, 0), [logs]);
 

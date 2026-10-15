@@ -8,6 +8,9 @@ import { useBranch, ALL_BRANCHES } from "@/lib/branchContext";
 import { formatRupiah, cx } from "@/lib/utils";
 import type { OnlineChannel, ChannelCommissionRow } from "@/lib/types";
 import type { Product, Order, OrderStatus } from "@/lib/types";
+import { tenantHasNoActivity } from "@/lib/demoMode";
+import DemoBadge from "@/components/demo/DemoBadge";
+import { DEMO_ONLINE_ORDERS, DEMO_COMMISSION } from "@/lib/demoData";
 
 const CHANNEL_LABEL: Record<OnlineChannel, string> = {
   gofood: "GoFood",
@@ -39,6 +42,7 @@ export default function OnlineOrdersPage() {
   const [commission, setCommission] = useState<ChannelCommissionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [isDemo, setIsDemo] = useState(false);
 
   const effectiveBranchId = selectedBranchId === ALL_BRANCHES ? branches[0]?.id : selectedBranchId;
 
@@ -66,8 +70,18 @@ export default function OnlineOrdersPage() {
         .order("sale_date", { ascending: false })
         .limit(30),
     ]);
-    setOrders((ord as Order[]) ?? []);
-    setCommission((comm as ChannelCommissionRow[]) ?? []);
+    const ordRows = (ord as Order[]) ?? [];
+    const commRows = (comm as ChannelCommissionRow[]) ?? [];
+    setOrders(ordRows);
+    setCommission(commRows);
+
+    const noActivity = await tenantHasNoActivity();
+    const showDemo = ordRows.length === 0 && commRows.length === 0 && noActivity;
+    setIsDemo(showDemo);
+    if (showDemo) {
+      setOrders(DEMO_ONLINE_ORDERS as Order[]);
+      setCommission(DEMO_COMMISSION as ChannelCommissionRow[]);
+    }
     setLoading(false);
   }
 
@@ -100,11 +114,13 @@ export default function OnlineOrdersPage() {
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-bold text-neutral-900">Online Order Hub</h1>
+          {isDemo && <DemoBadge />}
           <p className="text-sm text-neutral-500 mt-1">Pesanan Takeaway &amp; Delivery dari semua kanal, terpusat di sini.</p>
         </div>
         <button
           onClick={() => setShowForm(true)}
-          className="flex items-center gap-2 bg-primary text-white text-sm font-medium rounded-xl px-4 py-2.5"
+          disabled={isDemo}
+          className="flex items-center gap-2 bg-primary text-white text-sm font-medium rounded-xl px-4 py-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Plus size={16} /> Input Pesanan Masuk
         </button>
@@ -137,7 +153,7 @@ export default function OnlineOrdersPage() {
                 <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-neutral-100 text-neutral-600">
                   {STATUS_LABEL[o.status]}
                 </span>
-                {o.status !== "COMPLETED" && o.status !== "CANCELLED" && (
+                {o.status !== "COMPLETED" && o.status !== "CANCELLED" && !isDemo && (
                   <button
                     onClick={() => advanceStatus(o)}
                     className="text-xs font-medium bg-primary text-white rounded-lg px-3 py-1.5"

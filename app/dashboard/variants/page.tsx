@@ -9,6 +9,9 @@ import { isManagerOrOwner } from "@/lib/role";
 import Modal from "@/components/Modal";
 import type { Product, ProductVariant, Recipe } from "@/lib/types";
 import { Skeleton, SkeletonList } from "@/components/Skeleton";
+import { tenantHasNoActivity } from "@/lib/demoMode";
+import DemoBadge from "@/components/demo/DemoBadge";
+import { DEMO_VARIANTS, DEMO_PRODUCTS } from "@/lib/demoData";
 
 /**
  * Kelola Varian Produk (mis. "Regular"/"Large") — Phase 2A F&B Master Data.
@@ -27,6 +30,7 @@ export default function VariantsPage() {
   const [role, setRole] = useState("owner");
   const [editing, setEditing] = useState<ProductVariant | "new" | null>(null);
   const [saving, setSaving] = useState(false);
+  const [isDemo, setIsDemo] = useState(false);
 
   const canWrite = isManagerOrOwner(role);
 
@@ -40,7 +44,18 @@ export default function VariantsPage() {
     setRole(profile.role);
     const supabase = createClient();
     const { data } = await supabase.from("products").select("*").eq("tenant_id", profile.tenant_id).order("name", { ascending: true });
-    setProducts((data as Product[]) ?? []);
+    const freshProducts = (data as Product[]) ?? [];
+    setProducts(freshProducts);
+
+    const noActivity = await tenantHasNoActivity();
+    const showDemo = freshProducts.length === 0 && noActivity;
+    setIsDemo(showDemo);
+    if (showDemo) {
+      setProducts(DEMO_PRODUCTS as Product[]);
+      setSelectedProductId(DEMO_PRODUCTS[0]?.id ?? null);
+      setVariants(DEMO_VARIANTS as ProductVariant[]);
+      setRecipesByVariant(new Map());
+    }
     setLoading(false);
   }
 
@@ -49,6 +64,12 @@ export default function VariantsPage() {
   }, []);
 
   async function loadVariants(productId: string) {
+    if (productId.startsWith("demo-")) {
+      setVariants((DEMO_VARIANTS as ProductVariant[]).filter((v) => v.product_id === productId));
+      setRecipesByVariant(new Map());
+      setLoadingVariants(false);
+      return;
+    }
     setLoadingVariants(true);
     const supabase = createClient();
     const [{ data: variantData }, { data: recipeData }] = await Promise.all([
@@ -139,6 +160,7 @@ export default function VariantsPage() {
         <h1 className="text-xl font-bold text-neutral-900 flex items-center gap-2">
           <Layers size={20} className="text-primary-dark" /> Varian Produk
         </h1>
+        {isDemo && <DemoBadge />}
         <p className="text-sm text-neutral-500">Kelola varian ukuran/pilihan per menu (mis. Regular/Large), harga, dan HPP masing-masing.</p>
       </div>
 
@@ -166,7 +188,7 @@ export default function VariantsPage() {
               <p className="text-xs text-neutral-400">Harga dasar (tanpa varian): {formatRupiah(selectedProduct.price)}</p>
             </div>
             {canWrite && (
-              <button onClick={() => setEditing("new")} className="btn-primary flex items-center gap-1.5 text-sm">
+              <button onClick={() => setEditing("new")} disabled={isDemo} className="btn-primary flex items-center gap-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
                 <Plus size={16} /> Tambah Varian
               </button>
             )}
@@ -206,7 +228,7 @@ export default function VariantsPage() {
                         )}
                       </td>
                       <td className="p-3">
-                        <button onClick={() => toggleAvailable(v)} disabled={!canWrite} className="flex items-center gap-1">
+                        <button onClick={() => toggleAvailable(v)} disabled={!canWrite || isDemo} className="flex items-center gap-1">
                           {v.is_available ? (
                             <CheckCircle2 size={16} className="text-primary-dark" />
                           ) : (
@@ -218,7 +240,7 @@ export default function VariantsPage() {
                         </button>
                       </td>
                       <td className="p-3 text-right">
-                        {canWrite && (
+                        {canWrite && !isDemo && (
                           <button onClick={() => setEditing(v)} className="text-neutral-500 hover:bg-neutral-100 rounded-lg p-1.5" title="Edit">
                             <Pencil size={16} />
                           </button>

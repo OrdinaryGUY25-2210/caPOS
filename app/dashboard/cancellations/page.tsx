@@ -7,6 +7,9 @@ import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { useBranch, ALL_BRANCHES } from "@/lib/branchContext";
 import { Skeleton, SkeletonList } from "@/components/Skeleton";
+import { tenantHasNoActivity } from "@/lib/demoMode";
+import DemoBadge from "@/components/demo/DemoBadge";
+import { DEMO_LOG_ROWS } from "@/lib/demoData";
 
 /**
  * Log Pembatalan (BARU) — sebelumnya alasan pembatalan pesanan/item cuma
@@ -46,6 +49,7 @@ export default function CancellationsPage() {
   const { selectedBranchId, canSwitchBranch } = useBranch();
   const [rows, setRows] = useState<LogRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isDemo, setIsDemo] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -83,6 +87,11 @@ export default function CancellationsPage() {
           branch_name: r.branches?.name ?? null,
         }))
       );
+      const noActivity = await tenantHasNoActivity();
+      if ((data ?? []).length === 0 && noActivity) {
+        setIsDemo(true);
+        setRows(DEMO_LOG_ROWS as LogRow[]);
+      }
       setLoading(false);
     })();
   }, [selectedBranchId]);
@@ -104,6 +113,7 @@ export default function CancellationsPage() {
       <div>
         <h1 className="text-xl font-bold text-neutral-900 flex items-center gap-2">
           <History size={20} className="text-neutral-400" /> Log Pembatalan
+          {isDemo && <DemoBadge />}
         </h1>
         <p className="text-sm text-neutral-500">
           Riwayat alasan pembatalan pesanan &amp; item dari kasir/manager (200 terakhir).

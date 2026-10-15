@@ -10,6 +10,9 @@ import { getTier, FREE_TIER_LIMITS, TIER_LABEL, type Tier } from "@/lib/tier";
 import { useBranch, ALL_BRANCHES } from "@/lib/branchContext";
 import { Skeleton, SkeletonList } from "@/components/Skeleton";
 import RefundModal from "@/components/pos/RefundModal";
+import { tenantHasNoActivity } from "@/lib/demoMode";
+import DemoBadge from "@/components/demo/DemoBadge";
+import { DEMO_TX_ROWS } from "@/lib/demoData";
 
 interface TxRow {
   id: string;
@@ -31,6 +34,7 @@ export default function TransactionsPage() {
   const [tier, setTier] = useState<Tier>("free");
   const [loading, setLoading] = useState(true);
   const [refundTarget, setRefundTarget] = useState<TxRow | null>(null);
+  const [isDemo, setIsDemo] = useState(false);
 
   async function loadTransactions() {
     setLoading(true);
@@ -114,7 +118,10 @@ export default function TransactionsPage() {
         }
       }
 
-      setRows(txRows);
+      const noActivity = await tenantHasNoActivity();
+      const showDemo = txRows.length === 0 && noActivity;
+      setIsDemo(showDemo);
+      setRows(showDemo ? (DEMO_TX_ROWS as TxRow[]) : txRows);
       setLoading(false);
   }
 
@@ -142,6 +149,7 @@ export default function TransactionsPage() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-bold text-neutral-900">Riwayat Transaksi</h1>
+          {isDemo && <DemoBadge />}
           <p className="text-sm text-neutral-500">
             {tier === "free"
               ? `Menampilkan ${FREE_TIER_LIMITS.historyDays} hari terakhir (paket ${TIER_LABEL.free})`
