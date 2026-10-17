@@ -152,6 +152,9 @@ export default function ForgotPasswordPage() {
                 Kode 6 digit sudah dikirim ke <span className="font-medium text-neutral-700">{email}</span>.
                 Kalau tidak terdaftar, tidak ada kode yang akan diterima.
               </p>
+              <p className="text-xs text-neutral-400 mt-1">
+                Belum menerima kode? Cek juga folder Spam, Promosi, atau Pembaruan di email Anda.
+              </p>
             </div>
 
             {error && (

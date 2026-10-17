@@ -182,6 +182,9 @@ export default function LoginForm() {
                     Akun <span className="font-medium text-neutral-700">{email}</span> belum
                     diverifikasi. Kami baru saja mengirim kode 6 digit ke email tersebut.
                   </p>
+                  <p className="mt-1.5 text-xs text-neutral-400">
+                    Belum menerima kode? Cek juga folder Spam, Promosi, atau Pembaruan di email Anda.
+                  </p>
                 </div>
 
                 {otpError && (

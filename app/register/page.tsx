@@ -139,6 +139,9 @@ export default function RegisterPage() {
                 <span className="font-medium text-neutral-700">{registeredEmail}</span>.
                 Masukkan kodenya di bawah untuk mengaktifkan akun.
               </p>
+              <p className="text-xs text-neutral-400">
+                Belum menerima kode? Cek juga folder Spam, Promosi, atau Pembaruan di email Anda.
+              </p>
             </div>
 
             {otpError && (
