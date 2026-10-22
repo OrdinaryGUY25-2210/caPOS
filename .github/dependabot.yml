@@ -4,19 +4,22 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-    # Batasi jumlah PR terbuka supaya tidak banjir branch preview
-    open-pull-requests-limit: 3
-    # Update besar (major) jangan otomatis: Tailwind v3 -> v4 mengubah
-    # konfigurasi PostCSS dan akan merusak build kalau tidak dimigrasi manual.
-    ignore:
-      - dependency-name: "tailwindcss"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "next"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "react"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "react-dom"
-        update-types: ["version-update:semver-major"]
+      day: "monday"
+      time: "03:00"
+      timezone: "Asia/Jakarta"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
     groups:
       minor-and-patch:
-        update-types: ["minor", "patch"]
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "lucide-react"
+        update-types: ["version-update:semver-major"]
