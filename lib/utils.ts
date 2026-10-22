@@ -19,7 +19,7 @@ export function daysRemaining(dateString: string) {
 }
 
 export function whatsappLink(message: string) {
-  const number = process.env.NEXT_PUBLIC_STUDIO_D13_WHATSAPP || "6281234567890";
+  const number = process.env.NEXT_PUBLIC_STUDIO_D13_WHATSAPP || "6285849226279";
   return `https://wa.me/${number}?text=${encodeURIComponent(message)}`;
 }
 
