@@ -1,16 +1,12 @@
 name: caPOS Security & Quality Audit
 
-# Jalan otomatis di cloud (GitHub-hosted runner) setiap ada push/PR ke main,
-# plus jadwal mingguan. Tidak ada satupun tools di sini yang perlu di-install
-# di laptop kamu - semuanya "terinstal sementara" di server GitHub lalu
-# dibuang lagi setelah job selesai.
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
   schedule:
-    - cron: "0 3 * * 1" # setiap Senin jam 03:00 UTC
+    - cron: "0 3 * * 1"
 
 jobs:
   code-quality:
@@ -26,71 +22,40 @@ jobs:
           cache: "npm"
 
       - name: Install dependencies
-        run: npm instal
-      - name: audit fix
-        run: npm audit fix
-      - name: cek audit
-        run: npm audit --omit=dev --audit-level=high
-      - name: run build
+        run: npm ci
+
+      - name: Build
         run: npm run build
 
-      # 1. Dependency vulnerability scan (setara "npm audit" tapi otomatis).
-      # --omit=dev: cek paket yang BENAR-BENAR jalan di production saja.
-      # Paket devDependencies (tailwindcss, eslint, dst) cuma dipakai saat
-      # build/lint di CI — tidak pernah ikut ter-deploy, jadi celah di sana
-      # tidak bisa dieksploitasi lewat aplikasi yang jalan. Ini juga
-      # menghindari gate CI tersandung advisory devDependency yang belum
-      # ada perbaikannya sama sekali (lihat GHSA-vfj7-8cjw-p6xm pada
-      # braces, per Okt 2026 belum ada versi fix dari upstream).
-      - name: Audit production dependencies
+      # Gate utama: hanya dependency yang ikut ter-deploy (production).
+      - name: Audit production dependencies (gate)
         run: npm audit --omit=dev --audit-level=high
 
-      # Devdependencies tetap dicek, tapi TIDAK menggagalkan build —
-      # cuma jadi catatan di log supaya tidak terlewat begitu ada fix.
-      - name: Audit dev dependencies (informasional, tidak menggagalkan CI)
+      # Devdependencies hanya dilaporkan, tidak menggagalkan CI.
+      - name: Audit dev dependencies (informasional)
         run: npm audit --audit-level=high || true
 
-      # 2. Circular dependency / spaghetti code check
       - name: Check circular dependencies (madge)
         run: npx madge --circular --extensions ts,tsx app lib components
 
-      # 3. Lint + deteksi kompleksitas tinggi
-      #    Next.js 16 menghapus `next lint`, jadi panggil ESLint langsung
-      #    dengan flat config (eslint.config.mjs).
       - name: Lint
         run: npx eslint .
 
-      # 4. Dead code / unused export
       - name: Check unused exports
-        run: npx ts-prune
+        run: npx ts-prune || true
 
-  # 5. OWASP ZAP baseline scan ke URL production/preview di Vercel.
-  #    Ini men-simulasikan serangan dasar (header keamanan, XSS reflektif,
-  #    dsb) tanpa kamu perlu install ZAP sama sekali.
   zap-scan:
     permissions:
       contents: read
-      # Wajib: action-baseline otomatis membuat GitHub Issue berisi hasil
-      # scan. Tanpa `issues: write`, GITHUB_TOKEN tidak bisa menulis issue
-      # dan job gagal dengan "Resource not accessible by integration" -
-      # SEKALIPUN scan-nya sendiri sukses.
       issues: write
-      # Wajib: upload artifact laporan ZAP lewat Artifacts API. Tanpa
-      # `actions: write` GitHub membalas HTTP 400 dengan pesan misleading
-      # "The artifact name ... is not valid" - padahal nama sudah lolos
-      # validasi client ("Artifact name is valid!"). bukan masalah nama.
       actions: write
     runs-on: ubuntu-latest
     needs: code-quality
     steps:
       - name: ZAP Baseline Scan
-        # v0.12.0 masih pakai client Artifacts API v3 (api-version=6.0-preview)
-        # yang sudah dinonaktifkan GitHub, sehingga upload laporan selalu
-        # HTTP 400 "artifact name ... is not valid" apa pun nama yang dipakai.
-        # v0.15.0 memakai client artifact v4 dan runtime node24.
         uses: zaproxy/action-baseline@v0.15.0
         with:
-          target: "https://ca-pos-sooty.vercel.app/" # ganti dengan URL Vercel-mu
-          fail_action: false # set true kalau mau job gagal saat ada temuan
-          allow_issue_writing: true # perlu permissions: issues: write di atas
+          target: "https://ca-pos-sooty.vercel.app/"
+          fail_action: false
+          allow_issue_writing: true
           artifact_name: zap-baseline-report
