@@ -10,6 +10,7 @@ import {
   Receipt,
   ShieldCheck,
   Crown,
+  User,
 } from "lucide-react";
 
 // Array definisi kategori pengaturan
@@ -60,6 +61,14 @@ const SETTINGS_CATEGORIES = [
     description: "PIN Otorisasi kasir dan hak akses",
     icon: ShieldCheck,
     href: "/dashboard/settings/security",
+    section: "Sistem & Akses",
+  },
+  {
+    id: "profile",
+    label: "Profil & Akun",
+    description: "Nama, email, password, dan hapus akun",
+    icon: User,
+    href: "/dashboard/settings/profile",
     section: "Sistem & Akses",
   },
   {
