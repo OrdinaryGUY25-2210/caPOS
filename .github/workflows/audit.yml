@@ -27,6 +27,12 @@ jobs:
 
       - name: Install dependencies
         run: npm instal
+      - name: audit fix
+        run: npm audit fix
+      - name: cek audit
+        run: npm audit --omit=dev --audit-level=high
+      - name: run build
+        run: npm run build
 
       # 1. Dependency vulnerability scan (setara "npm audit" tapi otomatis).
       # --omit=dev: cek paket yang BENAR-BENAR jalan di production saja.
