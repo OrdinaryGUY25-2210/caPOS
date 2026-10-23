@@ -53,7 +53,9 @@ jobs:
       issues: write
       actions: write
     runs-on: ubuntu-latest
+    # Jalankan ZAP meski code-quality gagal, agar scan keamanan tidak ter-skip.
     needs: code-quality
+    if: ${{ always() }}
     steps:
       - name: ZAP Baseline Scan
         uses: zaproxy/action-baseline@v0.15.0
