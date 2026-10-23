@@ -15,7 +15,7 @@ const COLUMNS: { status: OrderStatus; label: string }[] = [
 ];
 
 // Bobot untuk sorting di dalam kolom — urgent di atas, lalu warning,
-// baru normal; tie-break pakai created_at terlama dulu.
+// baru normal; tie-break pakai created_at terlama dulu. 
 const PRIORITY_WEIGHT = { urgent: 0, warning: 1, normal: 2 } as const;
 
 export default function KitchenBoard({
