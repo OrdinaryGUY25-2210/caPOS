@@ -403,7 +403,7 @@ export function CustomerLoyaltyModal({
 }
 
 // =========================================================
-// PROMOTION BUILDER COMPONENT
+// PROMOTION BUILDER COMPONENT 
 // =========================================================
 
 interface PromotionBuilderProps {
