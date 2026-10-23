@@ -8,7 +8,7 @@ export interface AlertProps {
   children?: React.ReactNode;
   className?: string;
 }
-
+ 
 // Selaras dengan Badge/Toast — satu peta status warna untuk seluruh app.
 const variantStyles: Record<NonNullable<AlertProps["variant"]>, string> = {
   success: "bg-primary-light text-primary-dark border-primary/30",
