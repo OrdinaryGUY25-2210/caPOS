@@ -4,7 +4,7 @@ import { cx } from "@/lib/utils";
 
 /**
  * Menu Management §6 — "Filter" dari checklist (filter by kategori) —
- * sebelumnya juga belum ada; seluruh menu selalu ditampilkan sekaligus.
+ * sebelumnya juga belum ada; seluruh menu selalu ditampilkan sekaligus. 
  */
 export default function CategoryFilter({
   categories,
