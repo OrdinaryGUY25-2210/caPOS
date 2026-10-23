@@ -26,7 +26,7 @@ export interface ReceiptData {
 
   // --- Item ---
   items: CartItem[];
-  /** Subtotal eksplisit (opsional) — kalau tidak dikirim, dihitung otomatis dari items. */
+  /** Subtotal eksplisit (opsional) — kalau tidak dikirim, dihitung otomatis dari items. */ 
   subtotal?: number;
 
   // --- Diskon / pajak / service ---
