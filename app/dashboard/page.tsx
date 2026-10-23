@@ -61,7 +61,7 @@ export default function ReportsPage() {
 
   const isPremium = tier === "supreme";
   // Sesuai keputusan: Excel Lengkap + PDF sekarang juga untuk Pro (bukan
-  // cuma Supreme) — supaya cocok dengan janji di kartu paket Pro. Jam
+  // cuma Supreme) — supaya cocok dengan janji di kartu paket Pro. Jam 
   // Ramai (Peak Hours) tetap eksklusif Supreme, TIDAK diubah.
   const canExportExcel = tier === "pro" || tier === "supreme";
   const showHealth = hasSalesHealth(tier);
