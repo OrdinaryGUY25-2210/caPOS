@@ -8,7 +8,7 @@ import StockStatusBadge from "./StockStatusBadge";
 /**
  * Inventory §7 — kartu bahan baku, alternatif dari baris tabel (sebelumnya
  * /dashboard/ingredients cuma punya 1 tampilan tabel; kartu ini dipakai
- * kalau owner lebih suka scan visual per-bahan, mirip pola grid di Menu).
+ * kalau owner lebih suka scan visual per-bahan, mirip pola grid di Menu). 
  */
 export default function IngredientCard({
   ingredient,
