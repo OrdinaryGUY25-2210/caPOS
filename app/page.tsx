@@ -8,4 +8,4 @@ import { redirect } from "next/navigation";
 // sini artinya user BELUM login — lempar ke /login.
 export default function RootPage() {
   redirect("/login");
-}
+} 
