@@ -18,3 +18,4 @@ export function SettingsCard({ title, description, children }: SettingsCardProps
     </Card>
   );
 }
+ 
