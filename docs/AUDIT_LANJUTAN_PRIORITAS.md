@@ -163,7 +163,7 @@ Priority 1 token baru):
 
 **Status: BELUM disentuh — komponen dasarnya (Priority 1) sudah
 tersedia (`EmptyState`, `ErrorState`, `Skeleton`/`SkeletonTableRows`),
-tapi pemakaiannya di tiap halaman belum diaudit.**
+tapi pemakaiannya di tiap halaman belum diaudit.** 
 
 ### Untuk AI lanjutan
 1. Buat daftar semua route di `app/dashboard/**`, `app/pos`,
