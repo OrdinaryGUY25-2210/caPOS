@@ -7,7 +7,7 @@ import type { ProductVariant } from "@/lib/types";
 
 /**
  * Variant & Modifier §5 — form tambah/edit 1 varian produk, dipisah dari
- * app/dashboard/variants/page.tsx (sebelumnya `VariantModal` lokal di file
+ * app/dashboard/variants/page.tsx (sebelumnya `VariantModal` lokal di file 
  * itu).
  */
 export default function VariantModal({
