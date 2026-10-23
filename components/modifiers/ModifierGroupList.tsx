@@ -6,7 +6,7 @@ import type { ModifierGroup, Modifier, ModifierIngredientImpact } from "@/lib/ty
 
 /**
  * Variant & Modifier §5 — daftar grup modifier (accordion), dipisah dari
- * app/dashboard/modifiers/page.tsx.
+ * app/dashboard/modifiers/page.tsx. 
  */
 export default function ModifierGroupList({
   groups,
