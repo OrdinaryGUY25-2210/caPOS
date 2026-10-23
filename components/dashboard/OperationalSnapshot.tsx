@@ -33,7 +33,7 @@ const CARDS = [
  * diminta (Order Aktif & Stok Menipis, digabung jadi satu). Komponen ini
  * memisahkan & melengkapi jadi 5 kartu: Meja Terisi, Order di Dapur,
  * Menunggu Konfirmasi, Bahan Baku Menipis, Reservasi Hari Ini — masing-masing
- * link langsung ke halaman kerjanya.
+ * link langsung ke halaman kerjanya. 
  *
  * "Order di Dapur" = status NEW/ACCEPTED/PREPARING/READY (belum served).
  * "Menunggu Konfirmasi" = subset-nya yang statusnya masih NEW (baru masuk,
