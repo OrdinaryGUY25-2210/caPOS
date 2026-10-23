@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useState, useCallback, type React
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import type { Branch } from "@/lib/types";
-
+ 
 /** Kunci localStorage — supaya pilihan cabang Owner tetap sama walau reload/tab baru. */
 const STORAGE_KEY = "capos_selected_branch";
 
