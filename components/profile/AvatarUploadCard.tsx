@@ -5,7 +5,7 @@ import { SettingsCard } from '@/components/settings/SettingsCard';
 // and the avatar itself was always a hardcoded "A" placeholder. Blocked
 // by Supabase — the `profiles` table (lib/types.ts) has no avatar_url
 // column and no storage bucket is set up for it, so there's nothing to
-// upload to yet. Removed the dead button instead of leaving a fake one.
+// upload to yet. Removed the dead button instead of leaving a fake one. 
 export function AvatarUploadCard() {
   return (
     <SettingsCard title="Foto Profil" description="Ubah foto profil Anda">
