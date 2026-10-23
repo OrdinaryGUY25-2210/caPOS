@@ -26,4 +26,4 @@ export function MobileDrawer({ open, onClose, children }: MobileDrawerProps) {
       </div>
     </div>
   );
-}
+} 
