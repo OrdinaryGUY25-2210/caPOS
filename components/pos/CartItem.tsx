@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState } from "react"; 
 import { Trash2, StickyNote } from "lucide-react";
 import { cx, formatRupiah } from "@/lib/utils";
 import { PosInput, QuantityStepper } from "./ui";
