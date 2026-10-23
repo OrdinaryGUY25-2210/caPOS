@@ -32,7 +32,7 @@ const ORDER_TYPE_LABEL: Record<string, string> = { dine_in: "Dine-in", takeaway:
  * "Variant/modifier". Sebelumnya tidak ada tampilan detail sama sekali —
  * baris transaksi cuma menampilkan total & metode bayar. Detail item +
  * variant/modifier diambil dari order_items lewat order yang
- * transaction_id-nya = transaksi ini (order 1:1 dengan transaksi di
+ * transaction_id-nya = transaksi ini (order 1:1 dengan transaksi di 
  * checkout_order_v2).
  */
 export default function TransactionDetailModal({ tx, onClose, onRefunded }: { tx: TxRow; onClose: () => void; onRefunded: () => void }) {
