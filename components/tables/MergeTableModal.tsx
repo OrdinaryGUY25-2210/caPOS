@@ -7,7 +7,7 @@ import { formatRupiah } from "@/lib/utils";
 /**
  * Table Management §4 — "Merge table": gabungkan item dari order
  * `activeTable` ke order meja lain yang juga sedang terisi, jadi 1 tagihan.
- * Meja asal otomatis dibebaskan (dikosongkan) oleh RPC `merge` di server.
+ * Meja asal otomatis dibebaskan (dikosongkan) oleh RPC `merge` di server. 
  */
 export default function MergeTableModal({
   activeTable,
