@@ -19,6 +19,7 @@ ini, baca urutan berikut:
    keputusan desain, bug yang diperbaiki saat penggabungan, dan hal-hal
    yang sengaja BELUM dikerjakan (technical debt yang disadari).
 
+
 ---
 
 ## 1. Empat Fase Fitur
