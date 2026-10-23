@@ -8,7 +8,7 @@ interface ColumnMapperProps {
   /** PRIORITY 14: target fields now depend on the selected import type
    *  (products/customers/suppliers each have different real columns) —
    *  the old hardcoded name/email/phone list only fit one case. Falls
-   *  back to that original list if the caller doesn't pass one, so
+   *  back to that original list if the caller doesn't pass one, so 
    *  nothing else that might use this component breaks. */
   targetFields?: { value: string; label: string; required?: boolean }[];
 }
