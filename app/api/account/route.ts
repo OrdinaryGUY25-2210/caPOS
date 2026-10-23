@@ -10,7 +10,7 @@ function serviceClient() {
 }
 
 /**
- * DELETE /api/account — "Hapus Akun" milik Owner.
+ * DELETE /api/account — "Hapus Akun" milik Owner. 
  *
  * Beda dengan DELETE /api/employees (yang cuma hapus 1 auth user karyawan),
  * ini menghapus SELURUH tenant: kafe, semua karyawan, menu, transaksi,
