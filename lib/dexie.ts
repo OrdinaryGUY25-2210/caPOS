@@ -79,7 +79,7 @@ export interface CachedProfile {
 export interface PendingProductOp {
   local_id?: number;
   tenant_id: string;
-  op: "insert" | "update" | "toggle_availability";
+  op: "insert" | "update" | "toggle_availability" | "create_with_recipe";
   /**
    * ID produk asli (kalau update/toggle produk yang sudah ada), ATAU id
    * sementara berformat `local-<uuid>` untuk produk yang DIBUAT waktu
@@ -88,6 +88,9 @@ export interface PendingProductOp {
    * menampilkan produk itu secara optimistic sebelum benar-benar tersimpan.
    */
   product_id: string;
+  branch_id?: string;
+  stock_mode?: string;
+  items?: { ingredient_id: string; quantity: number; unit: string }[];
   payload: {
     name?: string;
     price?: number;
@@ -229,7 +232,21 @@ export async function syncPendingProductOps(handlers: {
       payload.image_url = url;
     }
 
-    if (op.op === "insert") {
+    if (op.op === "create_with_recipe") {
+      if (!op.branch_id || !op.stock_mode || !op.items) continue;
+      const newId = await handlers.createWithRecipe({
+        product_id: op.product_id,
+        tenant_id: op.tenant_id,
+        branch_id: op.branch_id,
+        name: payload.name ?? "",
+        category: payload.category ?? "",
+        price: payload.price ?? 0,
+        stock_mode: op.stock_mode,
+        items: op.items,
+      });
+      if (!newId) continue; // gagal — tetap di antrian, dicoba lagi nanti
+      realProductId = newId;
+    } else if (op.op === "insert") {
       const newId = await handlers.insert({ ...payload, tenant_id: op.tenant_id });
       if (!newId) continue; // insert gagal — tetap di antrian, dicoba lagi nanti.
       idMap.set(op.product_id, newId);
