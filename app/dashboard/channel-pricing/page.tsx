@@ -176,7 +176,6 @@ export default function ChannelPricingPage() {
                       <input
                         type="number"
                         value={markup}
-                        disabled={isDemo}
                         onChange={(e) => setLocalValue(p.id, "markup_pct", Number(e.target.value))}
                         className="w-16 text-right border border-neutral-200 rounded-lg px-2 py-1 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
                       />
@@ -186,7 +185,6 @@ export default function ChannelPricingPage() {
                       <input
                         type="number"
                         value={commission}
-                        disabled={isDemo}
                         onChange={(e) => setLocalValue(p.id, "commission_pct", Number(e.target.value))}
                         className="w-16 text-right border border-neutral-200 rounded-lg px-2 py-1 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
                       />
@@ -194,7 +192,7 @@ export default function ChannelPricingPage() {
                     <td className="px-4 py-3 text-right">
                       <button
                         onClick={() => save(p.id)}
-                        disabled={isDemo || savingKey === keyFor(p.id)}
+                        disabled={savingKey === keyFor(p.id)}
                         className="text-xs font-medium bg-neutral-900 text-white rounded-lg px-3 py-1.5 flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {savingKey === keyFor(p.id) ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}

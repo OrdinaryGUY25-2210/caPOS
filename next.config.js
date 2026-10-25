@@ -1,4 +1,6 @@
 /** @type {import('next').NextConfig} */
+const isDev = process.env.NODE_ENV !== "production";
+
 const nextConfig = {
   images: {
     remotePatterns: [
@@ -41,7 +43,7 @@ const nextConfig = {
               // bootstrap/inline style saat runtime. Menghapusnya butuh nonce
               // lewat proxy/middleware (di luar cakupan perubahan ini) dan
               // berisiko mematahkan hidrasi.
-              "script-src 'self' 'unsafe-inline' https://app.midtrans.com https://app.sandbox.midtrans.com",
+              `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""} https://app.midtrans.com https://app.sandbox.midtrans.com`,
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: blob: https://*.supabase.co",
               "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.midtrans.com https://api.sandbox.midtrans.com https://app.midtrans.com https://app.sandbox.midtrans.com",

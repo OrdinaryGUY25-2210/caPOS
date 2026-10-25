@@ -119,7 +119,6 @@ export default function OnlineOrdersPage() {
         </div>
         <button
           onClick={() => setShowForm(true)}
-          disabled={isDemo}
           className="flex items-center gap-2 bg-primary text-white text-sm font-medium rounded-xl px-4 py-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Plus size={16} /> Input Pesanan Masuk

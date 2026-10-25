@@ -276,7 +276,6 @@ export default function StockOpnamePage() {
                           type="text"
                           inputMode="numeric"
                           value={row.physicalInput}
-                          disabled={isDemo}
                           onChange={(e) =>
                             updateRow(row.ingredient.id, { physicalInput: e.target.value.replace(/[^0-9]/g, ""), savedAt: null })
                           }
@@ -294,7 +293,6 @@ export default function StockOpnamePage() {
                         {isDirty ? (
                           <select
                             value={row.reason}
-                            disabled={isDemo}
                             onChange={(e) => updateRow(row.ingredient.id, { reason: e.target.value })}
                             className="input-field py-1.5 text-xs disabled:opacity-60"
                           >
@@ -315,7 +313,7 @@ export default function StockOpnamePage() {
                         ) : (
                           <button
                             onClick={() => submitRow(row)}
-                            disabled={isDemo || row.saving || !isManagerOrOwner || (isDirty && !row.reason)}
+                            disabled={row.saving || !isManagerOrOwner || (isDirty && !row.reason)}
                             className="btn-outline text-xs py-1.5 px-2.5 flex items-center gap-1.5 disabled:opacity-40 ml-auto"
                           >
                             {row.saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}

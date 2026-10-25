@@ -141,7 +141,7 @@ export default function QrTablesPage() {
         </div>
         <button
           onClick={addTable}
-          disabled={isDemo || saving || !newTableNumber.trim()}
+          disabled={saving || !newTableNumber.trim()}
           className="flex items-center gap-2 bg-primary text-white text-sm font-medium rounded-xl px-4 py-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {saving ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Tambah Meja

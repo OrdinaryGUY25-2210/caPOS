@@ -315,7 +315,7 @@ export default function MenuPage() {
             {tier === "free" && <> — {menu.length}/{FREE_TIER_LIMITS.maxMenu} menu terpakai (paket {TIER_LABEL.free})</>}
           </p>
         </div>
-        <button onClick={openNew} disabled={isDemo} className="btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+        <button onClick={openNew} className="btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
           {atMenuLimit ? <Lock size={16} /> : <Plus size={16} />} Tambah Menu
         </button>
       </div>
@@ -367,7 +367,6 @@ export default function MenuPage() {
 
             <button
               onClick={() => toggleAvailability(product)}
-              disabled={isDemo}
               className={cx(
                 "mt-2 w-full text-xs font-medium py-1.5 rounded-lg transition-colors",
                 product.is_available ? "bg-primary-light text-primary-dark" : "bg-neutral-100 text-neutral-400"

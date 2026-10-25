@@ -188,7 +188,7 @@ export default function VariantsPage() {
               <p className="text-xs text-neutral-400">Harga dasar (tanpa varian): {formatRupiah(selectedProduct.price)}</p>
             </div>
             {canWrite && (
-              <button onClick={() => setEditing("new")} disabled={isDemo} className="btn-primary flex items-center gap-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+              <button onClick={() => setEditing("new")} className="btn-primary flex items-center gap-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
                 <Plus size={16} /> Tambah Varian
               </button>
             )}
@@ -228,7 +228,7 @@ export default function VariantsPage() {
                         )}
                       </td>
                       <td className="p-3">
-                        <button onClick={() => toggleAvailable(v)} disabled={!canWrite || isDemo} className="flex items-center gap-1">
+                        <button onClick={() => toggleAvailable(v)} disabled={!canWrite} className="flex items-center gap-1">
                           {v.is_available ? (
                             <CheckCircle2 size={16} className="text-primary-dark" />
                           ) : (

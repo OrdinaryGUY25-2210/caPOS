@@ -284,7 +284,7 @@ export default function IngredientsPage() {
           </p>
         </div>
         {canWrite && (
-          <button onClick={() => setEditing("new")} disabled={isDemo} className="btn-primary flex items-center gap-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+          <button onClick={() => setEditing("new")} className="btn-primary flex items-center gap-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
             <Plus size={16} /> Tambah Bahan
           </button>
         )}
