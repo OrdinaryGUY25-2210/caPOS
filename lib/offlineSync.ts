@@ -47,6 +47,8 @@ const PERMANENT_REJECTION_PATTERNS = [
   "INVALID_VOUCHER",
   "VOUCHER_EXPIRED",
   "CUSTOMER_NOT_FOUND",
+  "ROW-LEVEL SECURITY",
+  "CABANG TIDAK VALID",
 ];
 
 function isPermanentRejection(message: string): boolean {
