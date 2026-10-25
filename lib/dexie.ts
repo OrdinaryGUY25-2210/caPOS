@@ -196,6 +196,16 @@ export async function syncPendingProductOps(handlers: {
   upload: (blob: Blob, tenantId: string) => Promise<string | null>;
   insert: (payload: PendingProductOp["payload"] & { tenant_id: string }) => Promise<string | null>;
   update: (productId: string, payload: PendingProductOp["payload"]) => Promise<boolean>;
+  createWithRecipe: (payload: {
+    product_id: string;
+    tenant_id: string;
+    branch_id: string;
+    name: string;
+    category: string;
+    price: number;
+    stock_mode: string;
+    items: { ingredient_id: string; quantity: number; unit: string }[];
+  }) => Promise<string | null>;
 }): Promise<{ idMap: Map<string, string> }> {
   const pending = await db.pendingProductOps.where("synced").equals(0).sortBy("created_at");
   // Map dari id sementara ("local-...") -> id asli Postgres, dikembalikan

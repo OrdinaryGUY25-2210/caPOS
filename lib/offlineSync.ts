@@ -235,6 +235,25 @@ export async function runBackgroundSync() {
         }
         return data.id as string;
       },
+      createWithRecipe: async (payload) => {
+        const { data, error } = await supabase.rpc("create_menu_with_recipe", {
+          p_product_id: payload.product_id,
+          p_tenant_id: payload.tenant_id,
+          p_branch_id: payload.branch_id,
+          p_name: payload.name,
+          p_category: payload.category,
+          p_price: payload.price,
+          p_stock_mode: payload.stock_mode,
+          p_items: payload.items,
+        });
+        if (error) {
+          console.error("Sync tambah menu + resep gagal (akan dicoba lagi nanti):", error.message);
+          hadFailure = true;
+          lastErrorMessage = `Tambah menu + resep: ${error.message}`;
+          return null;
+        }
+        return data as string;
+      },
       update: async (productId, payload) => {
         const { error } = await supabase.from("products").update(payload).eq("id", productId);
         if (error) {
