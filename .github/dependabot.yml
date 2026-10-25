@@ -10,9 +10,6 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - "dependencies"
-    commit-message:
-      prefix: "chore"
-      include: "scope"
     groups:
       minor-and-patch:
         update-types:
@@ -21,5 +18,11 @@ updates:
     ignore:
       - dependency-name: "eslint"
         update-types: ["version-update:semver-major"]
+      - dependency-name: "eslint-config-next"
+        update-types: ["version-update:semver-major"]
       - dependency-name: "lucide-react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
