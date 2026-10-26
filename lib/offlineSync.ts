@@ -247,6 +247,10 @@ export async function runBackgroundSync() {
           p_items: payload.items,
         });
         if (error) {
+          if (isPermanentRejection(error.message)) {
+            console.warn("Menu+resep ditolak permanen, dibuang dari antrean:", error.message);
+            return "PERMANENT_REJECTION";
+          }
           console.error("Sync tambah menu + resep gagal (akan dicoba lagi nanti):", error.message);
           hadFailure = true;
           lastErrorMessage = `Tambah menu + resep: ${error.message}`;

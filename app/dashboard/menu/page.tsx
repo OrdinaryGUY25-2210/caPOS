@@ -16,6 +16,7 @@ import { Skeleton, SkeletonCardGrid } from "@/components/Skeleton";
 import { tenantHasNoActivity } from "@/lib/demoMode";
 import DemoBadge from "@/components/demo/DemoBadge";
 import { DEMO_PRODUCTS } from "@/lib/demoData";
+import { useBranch, ALL_BRANCHES } from "@/lib/branchContext";
 
 const CATEGORIES = ["Kopi", "Non-Kopi", "Makanan", "Dessert"];
 
@@ -33,6 +34,11 @@ export default function MenuPage() {
   // + perubahan yang masih tertunda, bukan data server yang terverifikasi.
   const [isOffline, setIsOffline] = useState(false);
   const [isDemo, setIsDemo] = useState(false);
+
+  // Cabang aktif. Kalau user memilih "Semua Cabang", nilainya null,
+  // karena HPP menu butuh harga bahan dari satu cabang tertentu.
+  const { selectedBranchId } = useBranch();
+  const branchId = selectedBranchId === ALL_BRANCHES ? null : selectedBranchId;
 
   async function loadMenu() {
     setLoading(true);
@@ -110,7 +116,7 @@ export default function MenuPage() {
 
     const byId = new Map<string, Product>(cached.map((c) => [c.id, c as Product]));
     for (const op of pendingOps) {
-      if (op.op === "insert") {
+      if (op.op === "insert" || op.op === "create_with_recipe") {
         const base = byId.get(op.product_id);
         byId.set(op.product_id, {
           id: op.product_id,
@@ -151,8 +157,11 @@ export default function MenuPage() {
   const atMenuLimit = tier === "free" && menu.length >= FREE_TIER_LIMITS.maxMenu;
 
   async function queueProductOp(op: {
-    op: "insert" | "update" | "toggle_availability";
+    op: "insert" | "update" | "toggle_availability" | "create_with_recipe";
     product_id: string;
+    branch_id?: string;
+    stock_mode?: string;
+    items?: { ingredient_id: string; quantity: number; unit: string }[];
     payload: Partial<Pick<Product, "name" | "price" | "category" | "image_url" | "is_available">>;
     image_blob?: Blob;
   }) {
@@ -161,6 +170,9 @@ export default function MenuPage() {
       tenant_id: tenantId,
       op: op.op,
       product_id: op.product_id,
+      branch_id: op.branch_id,
+      stock_mode: op.stock_mode,
+      items: op.items,
       payload: op.payload,
       image_blob: op.image_blob,
       synced: 0,
@@ -221,15 +233,35 @@ export default function MenuPage() {
     // begitu koneksi kembali (lihat SubscriptionCutoffGate).
     if (!navigator.onLine) {
       const isNew = !p.id;
-      const localId = isNew ? `local-${crypto.randomUUID()}` : p.id;
       const payload = { name: p.name, price: p.price, category: p.category, image_url: p.image_url };
+      let localId = p.id;
 
-      await queueProductOp({
-        op: isNew ? "insert" : "update",
-        product_id: localId,
-        payload,
-        image_blob: imageBlob,
-      });
+      if (isNew) {
+        // Menu baru dengan resep: id dibuat di browser (UUID asli, bukan
+        // "local-..."), jadi RPC create_menu_with_recipe aman diulang.
+        if (!branchId) {
+          alert("Pilih cabang tertentu dulu untuk menambah menu.");
+          setSaving(false);
+          return;
+        }
+        localId = crypto.randomUUID();
+        await queueProductOp({
+          op: "create_with_recipe",
+          product_id: localId,
+          branch_id: branchId,
+          stock_mode: "recipe",
+          items: [], // sementara kosong, form bahan menyusul
+          payload,
+          image_blob: imageBlob,
+        });
+      } else {
+        await queueProductOp({
+          op: "update",
+          product_id: localId,
+          payload,
+          image_blob: imageBlob,
+        });
+      }
 
       const optimistic: Product = {
         id: localId,

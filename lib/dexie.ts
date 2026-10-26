@@ -233,7 +233,11 @@ export async function syncPendingProductOps(handlers: {
     }
 
     if (op.op === "create_with_recipe") {
-      if (!op.branch_id || !op.stock_mode || !op.items) continue;
+      if (!op.branch_id || !op.stock_mode || !op.items) {
+        console.warn("Operasi create_with_recipe tidak lengkap, dibuang dari antrean:", op.product_id);
+        if (op.local_id) await db.pendingProductOps.update(op.local_id, { synced: 1 });
+        continue;
+      }
       const newId = await handlers.createWithRecipe({
         product_id: op.product_id,
         tenant_id: op.tenant_id,
@@ -244,7 +248,11 @@ export async function syncPendingProductOps(handlers: {
         stock_mode: op.stock_mode,
         items: op.items,
       });
-      if (!newId) continue; // gagal — tetap di antrian, dicoba lagi nanti
+      if (newId === "PERMANENT_REJECTION") {
+        if (op.local_id) await db.pendingProductOps.update(op.local_id, { synced: 1 });
+        continue;
+      }
+      if (!newId) continue; // gagal sementara — tetap di antrian, dicoba lagi nanti
       realProductId = newId;
     } else if (op.op === "insert") {
       const newId = await handlers.insert({ ...payload, tenant_id: op.tenant_id });
