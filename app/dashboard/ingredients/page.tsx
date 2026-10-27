@@ -173,6 +173,7 @@ export default function IngredientsPage() {
           purchase_unit: payload.purchase_unit,
           inventory_unit: payload.inventory_unit,
           purchase_to_inventory_ratio: payload.purchase_to_inventory_ratio ?? null,
+          last_purchase_price: payload.last_purchase_price ?? null,
           low_stock_threshold: payload.low_stock_threshold ?? 0,
           status: payload.status ?? "active",
           is_86: payload.is_86 ?? false,
@@ -186,6 +187,7 @@ export default function IngredientsPage() {
         purchase_unit: payload.purchase_unit,
         inventory_unit: payload.inventory_unit,
         purchase_to_inventory_ratio: payload.purchase_to_inventory_ratio ?? null,
+        last_purchase_price: payload.last_purchase_price ?? null,
         low_stock_threshold: payload.low_stock_threshold ?? 0,
         status: "active",
         is_86: false,
@@ -477,6 +479,7 @@ function IngredientModal({
   const [inventoryUnit, setInventoryUnit] = useState(ingredient?.inventory_unit ?? units[0]?.code ?? "");
   const [ratioInput, setRatioInput] = useState(ingredient?.purchase_to_inventory_ratio ? String(ingredient.purchase_to_inventory_ratio) : "");
   const [thresholdInput, setThresholdInput] = useState(String(ingredient?.low_stock_threshold ?? 0));
+  const [priceInput, setPriceInput] = useState(ingredient?.last_purchase_price ? String(ingredient.last_purchase_price) : "");
 
   const canSubmit = name.trim() && purchaseUnit && inventoryUnit;
 
@@ -495,6 +498,7 @@ function IngredientModal({
               purchase_unit: purchaseUnit,
               inventory_unit: inventoryUnit,
               purchase_to_inventory_ratio: ratioInput ? Number(ratioInput) : null,
+              last_purchase_price: priceInput ? Number(priceInput) : null,
               low_stock_threshold: thresholdInput === "" ? 0 : Number(thresholdInput),
               status: ingredient?.status,
               is_86: ingredient?.is_86,
@@ -550,6 +554,23 @@ function IngredientModal({
         <p className="text-xs text-neutral-400 mt-1">
           Isi HANYA kalau rasio beli↔stok bahan ini beda dari konversi unit standar (mis. supplier tertentu jual &quot;1 box = 24 pcs&quot;).
           Kalau kosong, sistem pakai tabel konversi unit yang sudah ada.
+        </p>
+      </div>
+      <div>
+        <label className="text-sm font-medium text-neutral-700 mb-1 block">
+          Harga beli terakhir per {units.find((u) => u.code === purchaseUnit)?.name ?? "unit beli"} (opsional)
+        </label>
+        <input
+          type="text"
+          inputMode="numeric"
+          value={formatNumberWithDots(priceInput)}
+          onChange={(e) => setPriceInput(stripNumberDots(e.target.value))}
+          placeholder="Contoh: 50.000"
+          className="input-field"
+        />
+        <p className="text-xs text-neutral-400 mt-1">
+          Dipakai sebagai HPP sementara supaya HPP menu tidak Rp 0 sebelum ada penerimaan barang (GRN).
+          Setelah GRN pertama, HPP otomatis memakai rata-rata harga beli sebenarnya.
         </p>
       </div>
       <div>
