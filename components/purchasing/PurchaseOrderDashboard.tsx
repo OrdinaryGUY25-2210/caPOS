@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   createPurchaseOrder,
+  deletePurchaseOrder,
   getSuppliers,
   createGoodsReceipt,
   getIngredientsForPurchasing,
@@ -65,6 +66,9 @@ export function PurchaseOrderDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [isDemo, setIsDemo] = useState(false);
+  const [submittingPO, setSubmittingPO] = useState(false);
+  const [submittingGRN, setSubmittingGRN] = useState(false);
+  const [deletingPoId, setDeletingPoId] = useState<string | null>(null);
 
   const [poFormData, setPoFormData] = useState({
     supplier_id: '',
@@ -184,6 +188,38 @@ export function PurchaseOrderDashboard() {
     }));
   };
 
+  /** Ubah error teknis dari database jadi petunjuk yang bisa langsung dikerjakan. */
+  const friendlyError = (msg: string) => {
+    if (msg.includes('Konversi unit')) {
+      return (
+        msg +
+        '. Buka menu Bahan Baku → edit bahan tersebut → isi "Rasio Konversi Manual" ' +
+        '(mis. 1 bungkus = 250 gram → isi 250), lalu simpan dan ulangi penerimaan barang.'
+      );
+    }
+    return msg;
+  };
+
+  const handleDeletePO = async (po: any) => {
+    if (isDemo) {
+      setError('Ini data contoh (demo), tidak bisa dihapus.');
+      return;
+    }
+    if (!window.confirm(`Hapus ${po.po_number}? PO Draft yang dihapus tidak bisa dikembalikan.`)) return;
+    setError(null);
+    setSuccess(null);
+    setDeletingPoId(po.id);
+    const result = await deletePurchaseOrder(po.id);
+    setDeletingPoId(null);
+    if (result.error) {
+      setError(result.error);
+      return;
+    }
+    setSuccess(`${po.po_number} berhasil dihapus`);
+    if (expandedPo === po.id) setExpandedPo(null);
+    loadHistory();
+  };
+
   // =========== PO Form Handlers ===========
   const handleAddPOItem = () => {
     if (!newLineItem.ingredient_id || newLineItem.qty_ordered <= 0 || newLineItem.unit_price <= 0) {
@@ -214,6 +250,7 @@ export function PurchaseOrderDashboard() {
 
   const handleSubmitPO = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingPO) return; // cegah klik ganda → PO ter-generate dua kali
     setError(null);
     setSuccess(null);
 
@@ -232,6 +269,7 @@ export function PurchaseOrderDashboard() {
       return;
     }
 
+    setSubmittingPO(true);
     try {
       const result = await createPurchaseOrder({
         supplier_id: poFormData.supplier_id,
@@ -242,7 +280,7 @@ export function PurchaseOrderDashboard() {
       });
 
       if (result.error) {
-        setError(result.error);
+        setError(friendlyError(result.error));
       } else if (result.data) {
         setSuccess(`PO berhasil dibuat: ${result.data.po_number}`);
         setShowPOForm(false);
@@ -251,6 +289,8 @@ export function PurchaseOrderDashboard() {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Gagal membuat PO.');
+    } finally {
+      setSubmittingPO(false);
     }
   };
 
@@ -305,6 +345,7 @@ export function PurchaseOrderDashboard() {
 
   const handleSubmitGrn = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingGRN) return;
     setError(null);
     setSuccess(null);
 
@@ -318,6 +359,7 @@ export function PurchaseOrderDashboard() {
       return;
     }
 
+    setSubmittingGRN(true);
     try {
       const result = await createGoodsReceipt({
         po_number: grnFormData.po_number.trim(),
@@ -326,7 +368,7 @@ export function PurchaseOrderDashboard() {
       });
 
       if (result.error) {
-        setError(result.error);
+        setError(friendlyError(result.error));
       } else if (result.data) {
         setSuccess(`GRN berhasil dibuat: ${result.data.grn_number}`);
         setShowGRNForm(false);
@@ -338,7 +380,9 @@ export function PurchaseOrderDashboard() {
         loadHistory();
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Gagal menyimpan GRN.');
+      setError(err instanceof Error ? friendlyError(err.message) : 'Gagal menyimpan GRN.');
+    } finally {
+      setSubmittingGRN(false);
     }
   };
 
@@ -363,13 +407,13 @@ export function PurchaseOrderDashboard() {
         </div>
         <div className="flex gap-2">
           <button
-            onClick={() => setShowPOForm(true)}
+            onClick={() => { setError(null); setSuccess(null); setShowPOForm(true); }}
             className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             + Buat PO
           </button>
           <button
-            onClick={() => setShowGRNForm(true)}
+            onClick={() => { setError(null); setSuccess(null); setShowGRNForm(true); }}
             className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             + Terima Barang (GRN)
@@ -440,13 +484,22 @@ export function PurchaseOrderDashboard() {
                         </span>
                       </td>
                       <td className="p-3 text-right">{fmtRp(po.total_amount)}</td>
-                      <td className="p-3 text-right">
+                      <td className="p-3 text-right whitespace-nowrap">
                         <button
                           className="text-blue-600 text-xs hover:underline"
                           onClick={() => setExpandedPo(expandedPo === po.id ? null : po.id)}
                         >
                           {expandedPo === po.id ? 'Tutup' : 'Lihat item'}
                         </button>
+                        {po.status === 'DRAFT' && (
+                          <button
+                            className="ml-3 text-red-600 text-xs hover:underline disabled:opacity-50"
+                            disabled={deletingPoId === po.id}
+                            onClick={() => handleDeletePO(po)}
+                          >
+                            {deletingPoId === po.id ? 'Menghapus...' : 'Hapus'}
+                          </button>
+                        )}
                       </td>
                     </tr>
                     {expandedPo === po.id && (
@@ -733,9 +786,10 @@ export function PurchaseOrderDashboard() {
             <div className="flex gap-3 pt-4 border-t">
               <button
                 type="submit"
-                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                disabled={submittingPO}
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Buat PO
+                {submittingPO ? 'Menyimpan...' : 'Buat PO'}
               </button>
               <button
                 type="button"
@@ -928,9 +982,10 @@ export function PurchaseOrderDashboard() {
             <div className="flex gap-3 pt-4 border-t">
               <button
                 type="submit"
-                className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                disabled={submittingGRN}
+                className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Simpan GRN & Update Stok
+                {submittingGRN ? 'Menyimpan...' : 'Simpan GRN & Update Stok'}
               </button>
               <button
                 type="button"
