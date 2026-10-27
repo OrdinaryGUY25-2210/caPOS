@@ -26,6 +26,8 @@ interface ProductStock extends Product {
   track_stock: boolean;
   stock_qty: number;
   low_stock_threshold: number;
+  /** 'recipe' = made-to-order: stok ikut bahan baku, HPP dari resep (tidak boleh dilacak manual). */
+  stock_mode?: string | null;
 }
 
 interface MovementRow {
@@ -93,7 +95,34 @@ export default function StockPage() {
       stockMap.set(row.product_id, (stockMap.get(row.product_id) ?? 0) + Number(row.stock_qty));
     }
 
-    const freshProducts = ((prodData as ProductStock[]) ?? []).map((p) => ({ ...p, stock_qty: stockMap.get(p.id) ?? 0 }));
+    const baseProducts = ((prodData as ProductStock[]) ?? []).map((p) => ({ ...p, stock_qty: stockMap.get(p.id) ?? 0 }));
+
+    // Menu berresep: HPP dihitung dari resep aktif (bukan products.cost_price yang
+    // bisa basi/manual). Resep per-varian diabaikan di sini; kalau menu tidak punya
+    // resep umum, nilai cost_price yang ada tetap dipakai.
+    const recipeProductIds = baseProducts.filter((p) => p.stock_mode === "recipe").map((p) => p.id);
+    const recipeCostMap = new Map<string, number>();
+    if (recipeProductIds.length > 0) {
+      const { data: recipeRows } = await supabase
+        .from("recipes")
+        .select("id, product_id")
+        .eq("tenant_id", profile.tenant_id)
+        .eq("is_active", true)
+        .is("variant_id", null)
+        .in("product_id", recipeProductIds);
+      await Promise.all(
+        ((recipeRows as { id: string; product_id: string }[]) ?? []).map(async (r) => {
+          const { data: cost } = await supabase.rpc("calculate_recipe_cost", {
+            p_recipe_id: r.id,
+            p_branch_id: isConsolidated ? null : selectedBranchId,
+          });
+          recipeCostMap.set(r.product_id, Number(cost ?? 0));
+        })
+      );
+    }
+    const freshProducts = baseProducts.map((p) =>
+      recipeCostMap.has(p.id) ? { ...p, cost_price: recipeCostMap.get(p.id)! } : p
+    );
     const freshMovements: MovementRow[] = (moveData ?? []).map((m: any) => ({
       id: m.id,
       type: m.type,
@@ -140,6 +169,11 @@ export default function StockPage() {
   }, [products]);
 
   async function saveSettings(p: ProductStock) {
+    // Menu berresep tidak punya pengaturan manual (dikunci di database).
+    if (p.stock_mode === "recipe") {
+      setEditing(null);
+      return;
+    }
     setSaving(true);
     const supabase = createClient();
     const { error } = await supabase
@@ -285,14 +319,21 @@ export default function StockPage() {
                 <tr key={p.id}>
                   <td className="p-3 font-medium text-neutral-900">{p.name}</td>
                   <td className="p-3">{formatRupiah(p.price)}</td>
-                  <td className="p-3">{formatRupiah(p.cost_price)}</td>
+                  <td className="p-3">
+                    {formatRupiah(p.cost_price)}
+                    {p.stock_mode === "recipe" && (
+                      <span className="block text-[11px] text-neutral-400">dari resep</span>
+                    )}
+                  </td>
                   <td className="p-3">
                     <span className={cx(margin < 20 ? "text-urgent" : "text-primary-dark", "font-semibold")}>
                       {margin}%
                     </span>
                   </td>
                   <td className="p-3">
-                    {p.track_stock ? (
+                    {p.stock_mode === "recipe" ? (
+                      <span className="text-neutral-500 text-xs">Ikut stok bahan baku</span>
+                    ) : p.track_stock ? (
                       <span className={low ? "badge-urgent" : "badge-active"}>{p.stock_qty}</span>
                     ) : (
                       <span className="text-neutral-400 text-xs">Tidak dilacak</span>
@@ -392,6 +433,48 @@ function StockSettingsModal({
   const [costInput, setCostInput] = useState(product.cost_price > 0 ? String(product.cost_price) : "");
   const [trackStock, setTrackStock] = useState(product.track_stock);
   const [thresholdInput, setThresholdInput] = useState(String(product.low_stock_threshold));
+
+  // Menu berresep (made-to-order): stok ikut bahan baku & HPP dari resep.
+  // Tidak ada yang bisa diatur manual di sini — sengaja dikunci di database
+  // (RECIPE_PRODUCT_STOCK_LOCKED), jadi form dibuat read-only, bukan dibiarkan gagal saat Simpan.
+  if (product.stock_mode === "recipe") {
+    return (
+      <Modal
+        title={`HPP & Stok — ${product.name}`}
+        onClose={onClose}
+        footer={
+          <button onClick={onClose} className="btn-outline w-full">
+            Tutup
+          </button>
+        }
+      >
+        <div>
+          <p className="text-sm font-medium text-neutral-700">HPP per porsi (dihitung dari resep)</p>
+          <p className="text-2xl font-bold text-neutral-900 mt-1">{formatRupiah(product.cost_price)}</p>
+          <p className="text-xs text-neutral-400 mt-1">
+            Harga jual saat ini: {formatRupiah(product.price)}
+          </p>
+        </div>
+        <div className="rounded-xl bg-neutral-50 p-3 text-sm text-neutral-600 space-y-2">
+          <p>
+            Menu ini punya resep aktif, jadi <strong>stoknya otomatis mengikuti stok bahan baku</strong> dan
+            tidak dilacak manual.
+          </p>
+          <p>
+            Ubah komposisi di <a href="/dashboard/recipes" className="text-primary-dark underline">Resep &amp; HPP</a>.
+            Isi atau tambah stok bahan lewat Purchase Order → Terima Barang, atau{" "}
+            <a href="/dashboard/stock-opname" className="text-primary-dark underline">Stok Opname</a>.
+          </p>
+          {product.cost_price === 0 && (
+            <p className="text-amber-700">
+              HPP masih Rp 0: isi &quot;Harga beli terakhir&quot; di halaman Bahan Baku, atau terima barang
+              lewat GRN supaya harga bahan terhitung.
+            </p>
+          )}
+        </div>
+      </Modal>
+    );
+  }
 
   return (
     <Modal
