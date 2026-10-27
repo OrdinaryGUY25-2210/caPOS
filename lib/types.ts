@@ -627,6 +627,8 @@ export interface Ingredient {
   purchase_unit: string;
   inventory_unit: string;
   purchase_to_inventory_ratio: number | null;
+  /** Harga beli terakhir per unit beli (mis. per bungkus). Dipakai sebagai HPP sementara sebelum ada GRN. */
+  last_purchase_price?: number | null;
   low_stock_threshold: number;
   status: IngredientStatus;
   is_86: boolean;
