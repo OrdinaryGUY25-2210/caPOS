@@ -11,6 +11,7 @@ import { getTier, FREE_TIER_LIMITS, TIER_LABEL, type Tier } from "@/lib/tier";
 import { db } from "@/lib/dexie";
 import { SYNC_COMPLETE_EVENT } from "@/lib/offlineSync";
 import Modal from "@/components/Modal";
+import NewMenuWizard from "@/components/menu/NewMenuWizard";
 import type { Product } from "@/lib/types";
 import { Skeleton, SkeletonCardGrid } from "@/components/Skeleton";
 import { tenantHasNoActivity } from "@/lib/demoMode";
@@ -26,6 +27,7 @@ export default function MenuPage() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Product | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [showWizard, setShowWizard] = useState(false);
   const [saving, setSaving] = useState(false);
   const [limitNotice, setLimitNotice] = useState<string | null>(null);
   // OFFLINE MODE — true kalau load terakhir gagal karena tidak ada
@@ -197,6 +199,12 @@ export default function MenuPage() {
       setLimitNotice(
         `Paket ${TIER_LABEL.free} maksimal ${FREE_TIER_LIMITS.maxMenu} menu. Upgrade ke Pro untuk menu unlimited.`
       );
+      return;
+    }
+    // Online → wizard satu alur (menu + bahan + HPP). Offline → form lama,
+    // karena wizard butuh server (bahan baku & resep tidak ada di antrean offline).
+    if (navigator.onLine) {
+      setShowWizard(true);
       return;
     }
     setEditing({
@@ -382,6 +390,18 @@ export default function MenuPage() {
           </p>
         )}
       </div>
+
+      {showWizard && tenantId && (
+        <NewMenuWizard
+          tenantId={tenantId}
+          existingCategories={Array.from(new Set(menu.map((m) => m.category).filter(Boolean)))}
+          onClose={() => setShowWizard(false)}
+          onSaved={loadMenu}
+          onLimitReached={() =>
+            setLimitNotice(`Paket ${TIER_LABEL.free} maksimal ${FREE_TIER_LIMITS.maxMenu} menu. Upgrade ke Pro untuk menu unlimited.`)
+          }
+        />
+      )}
 
       {showForm && editing && (
         <ProductForm
