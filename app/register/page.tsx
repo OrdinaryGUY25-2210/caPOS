@@ -22,6 +22,11 @@ export default function RegisterPage() {
   const [registeredEmail, setRegisteredEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  // Persetujuan syarat & kebijakan privasi (UU PDP No. 27/2022 ps. 20).
+  // Wajib dicentang sendiri — tidak boleh pre-checked — supaya persetujuan
+  // tercatat sebagai tindakan aktif pemilik akun.
+  const [agree, setAgree] = useState(false);
+
   // --- OTP state ---
   const [otp, setOtp] = useState("");
   const [otpError, setOtpError] = useState<string | null>(null);
@@ -38,6 +43,13 @@ export default function RegisterPage() {
     // satu-satunya lapisan keamanan.
     if (form.password !== form.confirmPassword) {
       setError("Konfirmasi password tidak cocok dengan password di atas.");
+      return;
+    }
+
+    if (!agree) {
+      setError(
+        "Centang persetujuan Kebijakan Privasi dan Syarat & Ketentuan sebelum mendaftar."
+      );
       return;
     }
 
@@ -251,6 +263,36 @@ export default function RegisterPage() {
                 Pakai kode referral dapat diskon 2% untuk pembayaran pertama Anda.
               </p>
             </div>
+
+            <label className="flex items-start gap-2.5 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                required
+                checked={agree}
+                onChange={(e) => setAgree(e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 rounded border-neutral-300 text-primary focus:ring-primary"
+              />
+              <span className="text-xs leading-relaxed text-neutral-600">
+                Saya menyetujui{" "}
+                <Link
+                  href="/syarat-ketentuan"
+                  target="_blank"
+                  className="text-primary font-medium hover:underline"
+                >
+                  Syarat &amp; Ketentuan
+                </Link>{" "}
+                dan{" "}
+                <Link
+                  href="/kebijakan-privasi"
+                  target="_blank"
+                  className="text-primary font-medium hover:underline"
+                >
+                  Kebijakan Privasi
+                </Link>
+                , termasuk pemrosesan data pribadi saya dan data pelanggan kafe
+                saya untuk keperluan layanan caPOS.
+              </span>
+            </label>
 
             <button type="submit" disabled={loading} className="btn-primary w-full flex items-center justify-center gap-2">
               {loading && <Loader2 className="animate-spin" size={16} />}
