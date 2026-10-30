@@ -57,7 +57,7 @@ export default function SelfOrderClient({
    * DYNAMIC yang menang — sesuai maksud PRD "mutually exclusive". */
   qrisMode?: "DYNAMIC" | "STATIC";
   /** migration_022 — Storage Audio Notifikasi (PRD §4C), dibaca dari
-   * branches.sound_*. Diputar di layar ini saat QRIS Dinamis pelanggan 
+   * branches.sound_*. Diputar di layar ini saat QRIS Dinamis pelanggan
    * sendiri terkonfirmasi lunas (bukan untuk alur QRIS Statis — di situ
    * "lunas" baru terjadi setelah staf verifikasi manual di kasir/dashboard). */
   soundSettings?: { enabled: boolean; tone: string; volume: number };
