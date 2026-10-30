@@ -232,54 +232,6 @@ export async function createPurchaseOrder(formData: {
   }
 }
 
-/**
- * Hapus PO yang masih berstatus DRAFT (mis. PO duplikat). PO yang sudah
- * dikirim/diterima TIDAK boleh dihapus supaya riwayat stok & HPP tetap utuh.
- * Item PO ikut terhapus otomatis (po_items.po_id ON DELETE CASCADE).
- */
-export async function deletePurchaseOrder(poId: string) {
-  try {
-    const supabase = await createClient();
-    const { profile } = await getServerProfile();
-
-    if (!profile?.tenant_id) {
-      return { error: 'Tenant tidak ditemukan' };
-    }
-    if (!poId) {
-      return { error: 'ID PO tidak valid' };
-    }
-
-    const { data: po, error: findError } = await supabase
-      .from('purchase_orders')
-      .select('id, po_number, status')
-      .eq('id', poId)
-      .eq('tenant_id', profile.tenant_id)
-      .maybeSingle();
-
-    if (findError) throw findError;
-    if (!po) {
-      return { error: 'PO tidak ditemukan' };
-    }
-    if (po.status !== 'DRAFT') {
-      return { error: `Hanya PO berstatus Draft yang bisa dihapus (${po.po_number} berstatus ${po.status}).` };
-    }
-
-    const { error: delError } = await supabase
-      .from('purchase_orders')
-      .delete()
-      .eq('id', poId)
-      .eq('tenant_id', profile.tenant_id)
-      .eq('status', 'DRAFT');
-
-    if (delError) throw delError;
-
-    revalidatePath('/dashboard/purchasing/purchase-orders');
-    return { success: true, po_number: po.po_number };
-  } catch (error) {
-    console.error('Error deleting PO:', error);
-    return { error: toErrorMessage(error, 'Gagal menghapus PO.') };
-  }
-}
 export async function createGoodsReceipt(formData: {
   /** Nomor PO seperti diketik user di form, mis. "PO-2026-017" — BUKAN uuid id. */
   po_number: string;
