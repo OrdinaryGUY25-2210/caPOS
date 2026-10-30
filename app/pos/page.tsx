@@ -543,10 +543,6 @@ export default function PosPage() {
   }
 
   function addToCart(product: StockAwareProduct) {
-    if (isDemo) {
-      showStockNotice("Ini contoh data. Tambahkan menu asli dulu sebelum menjual.");
-      return;
-    }
     if (!product.is_available) {
       showStockNotice(`"${product.name}" sedang Sold Out.`);
       return;
