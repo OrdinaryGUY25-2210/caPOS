@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus, Loader2, Tag, Ticket, ListChecks } from "lucide-react";
+import { Plus, Loader2, Tag, Ticket, ListChecks, Building2 } from "lucide-react";
 import { PromotionBuilder } from "@/components/crm/CustomerLoyaltyModal";
 import { getPromotions, togglePromotionActive } from "@/app/actions/purchasing-loyalty-actions";
+import { useBranch, ALL_BRANCHES } from "@/lib/branchContext";
 
 interface VoucherRow {
   id: string;
@@ -29,6 +30,7 @@ interface PromoRow {
   start_date: string;
   end_date: string | null;
   is_active: boolean;
+  branch_id?: string | null;
   vouchers?: VoucherRow[];
   promotion_rules?: RuleRow[];
 }
@@ -59,6 +61,7 @@ const typeLabel: Record<string, string> = {
 };
 
 export default function PromotionsPage() {
+  const { selectedBranchId } = useBranch();
   const [promos, setPromos] = useState<PromoRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showBuilder, setShowBuilder] = useState(false);
@@ -94,11 +97,13 @@ export default function PromotionsPage() {
         <div className="flex justify-center py-10 text-neutral-400">
           <Loader2 className="animate-spin" />
         </div>
-      ) : promos.length === 0 ? (
+      ) : promos.filter((p) => selectedBranchId === ALL_BRANCHES || !p.branch_id || p.branch_id === selectedBranchId).length === 0 ? (
         <p className="text-sm text-neutral-400 text-center py-10">Belum ada promosi.</p>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
-          {promos.map((p) => (
+          {promos
+            .filter((p) => selectedBranchId === ALL_BRANCHES || !p.branch_id || p.branch_id === selectedBranchId)
+            .map((p) => (
             <div key={p.id} className="bg-white rounded-2xl border border-neutral-200 p-4">
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-2">
@@ -122,7 +127,11 @@ export default function PromotionsPage() {
                   {p.is_active ? "Aktif" : "Nonaktif"}
                 </button>
               </div>
-              <p className="text-xs text-neutral-400 mt-3">
+              <p className="text-xs text-neutral-400 mt-3 flex items-center gap-1">
+                <Building2 size={12} />
+                {p.branch_id ? "Berlaku untuk cabang tertentu" : "Berlaku untuk semua cabang"}
+              </p>
+              <p className="text-xs text-neutral-400 mt-1">
                 {p.start_date}
                 {p.end_date ? ` s/d ${p.end_date}` : " (tanpa batas akhir)"}
               </p>
