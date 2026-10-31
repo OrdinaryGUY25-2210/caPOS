@@ -753,7 +753,8 @@ export async function createVoucher(formData: {
 
 export async function validateAndApplyVoucher(
   voucherCode: string,
-  transactionAmount: number
+  transactionAmount: number,
+  branchId?: string | null
 ) {
   try {
     const supabase = await createClient();
@@ -786,10 +787,26 @@ export async function validateAndApplyVoucher(
     }
 
     // Check minimum purchase
-    if (transactionAmount < voucher.min_purchase_amount) {
+    if (transactionAmount < (voucher.min_purchase_amount || 0)) {
       return {
-        error: `Pembelian minimal Rp${voucher.min_purchase_amount} diperlukan`,
+        error: `Pembelian minimal Rp${voucher.min_purchase_amount || 0} diperlukan`,
       };
+    }
+
+    // Check branch scope
+    if (branchId) {
+      const { data: voucherBranches, error: vbError } = await supabase
+        .from('voucher_branches')
+        .select('branch_id')
+        .eq('voucher_id', voucher.id);
+
+      if (!vbError && voucherBranches && voucherBranches.length > 0) {
+        const allowed = voucherBranches.some((vb: any) => vb.branch_id === branchId);
+        if (!allowed) {
+          return { error: 'Voucher tidak berlaku untuk cabang ini' };
+        }
+      }
+      // If no entries in voucher_branches, voucher applies to all branches (backward compatible)
     }
 
     // Calculate discount
