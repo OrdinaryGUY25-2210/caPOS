@@ -695,7 +695,7 @@ export default function PosPage() {
       setVoucherDiscountPreview(0);
       return;
     }
-    const result = await validateAndApplyVoucher(voucherCode.trim().toUpperCase(), subtotal);
+    const result = await validateAndApplyVoucher(voucherCode.trim().toUpperCase(), subtotal, session?.branchId);
     if (result.error || !result.data) {
       setVoucherError(result.error ?? "Voucher tidak valid");
       setVoucherDiscountPreview(0);
