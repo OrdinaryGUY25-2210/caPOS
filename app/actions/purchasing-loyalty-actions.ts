@@ -1072,3 +1072,55 @@ export async function togglePromotionActive(promotionId: string, isActive: boole
     return { error: String(error) };
   }
 }
+
+// =========================================================
+// PURCHASE ORDER — Hapus PO Draft
+// =========================================================
+
+export async function deletePurchaseOrder(poId: string) {
+  try {
+    const supabase = await createClient();
+    const { profile } = await getServerProfile();
+
+    if (!profile?.tenant_id) {
+      return { error: 'Tenant tidak ditemukan' };
+    }
+
+    // Hanya PO berstatus DRAFT yang boleh dihapus, agar riwayat stok & HPP tetap utuh.
+    const { data: po, error: fetchError } = await supabase
+      .from('purchase_orders')
+      .select('id, status')
+      .eq('id', poId)
+      .eq('tenant_id', profile.tenant_id)
+      .single();
+
+    if (fetchError || !po) {
+      return { error: 'Purchase order tidak ditemukan' };
+    }
+
+    if (po.status !== 'DRAFT') {
+      return { error: 'Hanya PO berstatus Draft yang bisa dihapus' };
+    }
+
+    const { error: itemsError } = await supabase
+      .from('po_items')
+      .delete()
+      .eq('po_id', poId);
+
+    if (itemsError) throw itemsError;
+
+    const { error } = await supabase
+      .from('purchase_orders')
+      .delete()
+      .eq('id', poId)
+      .eq('tenant_id', profile.tenant_id);
+
+    if (error) throw error;
+
+    revalidatePath('/dashboard/purchasing/purchase-orders');
+    return { success: true };
+  } catch (error) {
+    console.error('Error deleting PO:', error);
+    return { error: toErrorMessage(error, 'Gagal menghapus PO.') };
+  }
+}
