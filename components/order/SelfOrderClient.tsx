@@ -36,6 +36,7 @@ export default function SelfOrderClient({
   tableCapacity,
   products,
   tenantId,
+  branchId,
   staticQrisUrl,
   qrisMode = "DYNAMIC",
   soundSettings,
@@ -48,6 +49,7 @@ export default function SelfOrderClient({
   /** Migrasi 020 — dipakai murni sebagai nama topik broadcast realtime
    * `products-<tenant_id>`, bukan untuk query apa pun ke tabel. */
   tenantId?: string;
+  branchId?: string;
   /** URL publik QRIS statis milik owner (Storage bucket "menu-images",
    * dicek di server component page.tsx). Null kalau owner belum unggah. */
   staticQrisUrl?: string | null;
