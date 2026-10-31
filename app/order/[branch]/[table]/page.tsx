@@ -62,6 +62,7 @@ export default async function SelfOrderPage({
       // `products-<tenant_id>` untuk notifikasi Sold Out/Menu 86 instan,
       // BUKAN untuk query apa pun langsung ke tabel dari klien publik ini.
       tenantId={pageData.branch.tenant_id}
+      branchId={pageData.branch.id}
       // migration_022 — PRD "QRIS Self-Service & Storage Audio": diambil
       // langsung dari kolom `branches` lewat RPC, bukan lagi dari
       // storage.list() heuristik (lihat riwayat git untuk versi lama;
