@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Receipt as ReceiptIcon, Lock, User, RotateCcw } from "lucide-react";
+import { Receipt as ReceiptIcon, Lock, User, RotateCcw, Filter } from "lucide-react";
 import Link from "next/link";
 import { formatRupiah } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
@@ -22,10 +22,16 @@ interface TxRow {
   created_at: string;
   cashier_name: string | null;
   branch_name: string | null;
+  branch_id: string | null;
   // Badge refund (BARU) — diisi lewat query terpisah ke tabel refunds
   // setelah daftar transaksi termuat (lihat di bawah).
   refundStatus: "PENDING_APPROVAL" | "COMPLETED" | null;
   refundedAmount: number;
+}
+
+interface BranchOption {
+  id: string;
+  name: string;
 }
 
 export default function TransactionsPage() {
@@ -35,6 +41,23 @@ export default function TransactionsPage() {
   const [loading, setLoading] = useState(true);
   const [refundTarget, setRefundTarget] = useState<TxRow | null>(null);
   const [isDemo, setIsDemo] = useState(false);
+  const [branches, setBranches] = useState<BranchOption[]>([]);
+  const [branchFilter, setBranchFilter] = useState<string>(selectedBranchId);
+
+  useEffect(() => {
+    setBranchFilter(selectedBranchId);
+  }, [selectedBranchId]);
+
+  async function loadBranches(profileTenantId: string) {
+    const supabase = createClient();
+    const { data } = await supabase
+      .from("branches")
+      .select("id, name")
+      .eq("tenant_id", profileTenantId)
+      .eq("is_active", true)
+      .order("name");
+    setBranches((data as BranchOption[]) || []);
+  }
 
   async function loadTransactions() {
     setLoading(true);
@@ -42,6 +65,10 @@ export default function TransactionsPage() {
     if (!profile) {
       setLoading(false);
       return;
+    }
+
+    if (branches.length === 0) {
+      await loadBranches(profile.tenant_id);
     }
 
       const supabase = createClient();
@@ -56,14 +83,15 @@ export default function TransactionsPage() {
 
       let query = supabase
         .from("transactions")
-        .select("id, invoice_number, total_amount, payment_method, created_at, profiles(full_name), branches(name)")
+        .select("id, invoice_number, total_amount, payment_method, created_at, branch_id, profiles(full_name), branches(name)")
         .eq("tenant_id", profile.tenant_id)
         .order("created_at", { ascending: false });
 
       // Filter cabang: "Semua Cabang" (Laporan Konsolidasi) tidak difilter;
       // manager/kasir otomatis terkunci ke cabang mereka lewat context.
-      if (selectedBranchId !== ALL_BRANCHES) {
-        query = query.eq("branch_id", selectedBranchId);
+      const effectiveFilter = branchFilter;
+      if (effectiveFilter && effectiveFilter !== ALL_BRANCHES) {
+        query = query.eq("branch_id", effectiveFilter);
       }
 
       // Tier Free hanya bisa lihat N hari terakhir — dibatasi di query
@@ -86,6 +114,7 @@ export default function TransactionsPage() {
         created_at: t.created_at,
         cashier_name: t.profiles?.full_name ?? null,
         branch_name: t.branches?.name ?? null,
+        branch_id: t.branch_id ?? null,
         refundStatus: null,
         refundedAmount: 0,
       }));
@@ -128,7 +157,7 @@ export default function TransactionsPage() {
   useEffect(() => {
     loadTransactions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedBranchId]);
+  }, [branchFilter]);
 
   if (loading) {
     return (
@@ -156,11 +185,30 @@ export default function TransactionsPage() {
               : "Riwayat lengkap transaksi kafe Anda"}
           </p>
         </div>
-        {tier === "free" && (
-          <Link href="/dashboard/subscription" className="btn-outline flex items-center gap-1.5 text-sm">
-            <Lock size={14} /> Upgrade untuk riwayat lengkap
-          </Link>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          {(canSwitchBranch || branches.length > 0) && (
+            <div className="flex items-center gap-2">
+              <Filter size={14} className="text-neutral-400" />
+              <select
+                value={branchFilter}
+                onChange={(e) => setBranchFilter(e.target.value)}
+                className="px-3 py-2 border border-neutral-200 rounded-lg text-sm"
+              >
+                <option value={ALL_BRANCHES}>Semua Cabang</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          {tier === "free" && (
+            <Link href="/dashboard/subscription" className="btn-outline flex items-center gap-1.5 text-sm">
+              <Lock size={14} /> Upgrade untuk riwayat lengkap
+            </Link>
+          )}
+        </div>
       </div>
 
       <div className="card divide-y divide-neutral-100">
@@ -175,7 +223,7 @@ export default function TransactionsPage() {
                 <p className="text-xs text-neutral-400 flex items-center gap-1">
                   <User size={11} />
                   {t.cashier_name ?? "Kasir"} · {new Date(t.created_at).toLocaleString("id-ID")}
-                  {canSwitchBranch && selectedBranchId === ALL_BRANCHES && t.branch_name && <> · {t.branch_name}</>}
+                  {(branchFilter === ALL_BRANCHES || canSwitchBranch) && t.branch_name && <> · {t.branch_name}</>}
                 </p>
               </div>
             </div>
