@@ -545,6 +545,7 @@ export interface QrOrderPageData {
   /** `tenant_id` (Migrasi 020) dipakai murni sebagai nama topik broadcast
    * realtime `products-<tenant_id>` — bukan untuk query apa pun di klien. */
   branch?: {
+    id: string;
     name: string;
     slug: string;
     address: string | null;
