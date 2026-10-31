@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { CheckCircle2, XCircle, Info, X } from "lucide-react";
-
+ 
 /**
  * Phase 2A.3 §11 (Tier 1 infra) — pengganti `alert()` browser mentah, yang
  * sebelumnya dipakai di 21 file (`app/pos`, `app/kitchen`, `app/admin`,
