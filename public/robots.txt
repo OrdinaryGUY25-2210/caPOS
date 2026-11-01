@@ -1,0 +1,8 @@
+# capos.alditriantama.com (aplikasi)
+# JANGAN Disallow halaman yang diberi noindex, karena Google harus bisa
+# membuka halaman itu untuk membaca tag noindex-nya.
+User-agent: *
+Allow: /
+Disallow: /api/
+
+Sitemap: https://capos.alditriantama.com/sitemap.xml

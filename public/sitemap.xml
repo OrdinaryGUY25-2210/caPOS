@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- EDIT: hanya masukkan halaman publik (login/daftar). Jangan masukkan halaman dashboard. -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://capos.alditriantama.com/</loc>
+    <lastmod>2026-11-01</lastmod>
+    <priority>0.5</priority>
+  </url>
+  <url>
+    <loc>https://capos.alditriantama.com/login</loc>
+    <lastmod>2026-11-01</lastmod>
+    <priority>0.5</priority>
+  <url>
+    <loc>https://capos.alditriantama.com/register</loc>
+    <lastmod>2026-11-01</lastmod>
+    <priority>0.5</priority>
+  </url>
+</urlset>
