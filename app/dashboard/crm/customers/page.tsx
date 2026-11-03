@@ -9,7 +9,7 @@
  * dashboard. Halaman ini melengkapi bagian itu — daftar, cari, dan
  * tambah pelanggan baru — memakai server actions yang sudah ada
  * (getCustomers/createCustomer) plus getCustomers yang ditambahkan saat
- * penggabungan.
+ * penggabungan. 
  */
 
 import { useEffect, useState } from "react";
