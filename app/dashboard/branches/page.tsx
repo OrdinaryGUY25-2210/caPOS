@@ -1,5 +1,5 @@
 "use client";
-
+ 
 import { useEffect, useState } from "react";
 import { Building2, Plus, MapPin, Loader2, Lock, CheckCircle2, XCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
