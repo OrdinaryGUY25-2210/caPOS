@@ -1,5 +1,5 @@
 "use client";
-
+ 
 import { useEffect, useState } from "react";
 import { Gift, Copy, Check, Users } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
