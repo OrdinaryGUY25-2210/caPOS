@@ -545,7 +545,6 @@ export interface QrOrderPageData {
   /** `tenant_id` (Migrasi 020) dipakai murni sebagai nama topik broadcast
    * realtime `products-<tenant_id>` — bukan untuk query apa pun di klien. */
   branch?: {
-    id: string;
     name: string;
     slug: string;
     address: string | null;
@@ -745,4 +744,14 @@ export interface RecipeConsumptionLog {
   unit: string;
   cost_snapshot: number;
   created_at: string;
+}
+
+/** migration_026 — menu yang disembunyikan per cabang. Tidak ada baris = dijual di cabang itu. */
+export interface BranchProductAvailability {
+  id: string;
+  tenant_id: string;
+  branch_id: string;
+  product_id: string;
+  is_available: boolean;
+  updated_at: string;
 }
