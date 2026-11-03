@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, Pencil, ImagePlus, Loader2, Lock, WifiOff } from "lucide-react";
+import { Plus, Pencil, ImagePlus, Loader2, Lock, WifiOff, Store } from "lucide-react";
 import { formatRupiah, formatNumberWithDots, stripNumberDots, cx } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
@@ -12,6 +12,8 @@ import { db } from "@/lib/dexie";
 import { SYNC_COMPLETE_EVENT } from "@/lib/offlineSync";
 import Modal from "@/components/Modal";
 import NewMenuWizard from "@/components/menu/NewMenuWizard";
+import BranchAvailabilityModal from "@/components/menu/BranchAvailabilityModal";
+import { useBranch } from "@/lib/branchContext";
 import type { Product } from "@/lib/types";
 import { Skeleton, SkeletonCardGrid } from "@/components/Skeleton";
 import { tenantHasNoActivity } from "@/lib/demoMode";
@@ -28,6 +30,9 @@ export default function MenuPage() {
   const [editing, setEditing] = useState<Product | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
+  const [availabilityFor, setAvailabilityFor] = useState<Product | null>(null);
+  const { branches } = useBranch();
+  const activeBranchCount = branches.filter((b) => b.is_active).length;
   const [saving, setSaving] = useState(false);
   const [limitNotice, setLimitNotice] = useState<string | null>(null);
   // OFFLINE MODE — true kalau load terakhir gagal karena tidak ada
@@ -382,6 +387,16 @@ export default function MenuPage() {
             >
               {product.is_available ? "Tersedia" : "Habis / Nonaktif"}
             </button>
+
+            {/* Hanya relevan kalau punya lebih dari 1 cabang. Belum bisa untuk menu yang belum sinkron. */}
+            {!isDemo && activeBranchCount > 1 && !product.id.startsWith("local-") && (
+              <button
+                onClick={() => setAvailabilityFor(product)}
+                className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-lg border border-neutral-200 py-1.5 text-xs font-medium text-neutral-600 hover:bg-neutral-50"
+              >
+                <Store size={12} /> Dijual di cabang
+              </button>
+            )}
           </div>
         ))}
         {menu.length === 0 && (
@@ -390,6 +405,14 @@ export default function MenuPage() {
           </p>
         )}
       </div>
+
+      {availabilityFor && tenantId && (
+        <BranchAvailabilityModal
+          tenantId={tenantId}
+          product={{ id: availabilityFor.id, name: availabilityFor.name }}
+          onClose={() => setAvailabilityFor(null)}
+        />
+      )}
 
       {showWizard && tenantId && (
         <NewMenuWizard
