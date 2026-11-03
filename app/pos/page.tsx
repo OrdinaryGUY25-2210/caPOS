@@ -361,6 +361,19 @@ export default function PosPage() {
                 ? { ...p, stock_qty: stockMap.get(p.id)?.qty ?? 0, low_stock_threshold: stockMap.get(p.id)?.threshold ?? p.low_stock_threshold }
                 : p
             );
+
+            // Menu yang DISEMBUNYIKAN di cabang ini (migration_026) tidak ditampilkan
+            // sama sekali — beda dari "Habis" yang tetap tampil abu-abu. Tidak ada
+            // baris = dijual. Kalau tabel belum ada / query gagal, tidak menyaring apa pun.
+            const { data: hiddenRows } = await supabase
+              .from("branch_product_availability")
+              .select("product_id")
+              .eq("branch_id", effectiveBranchId)
+              .eq("is_available", false);
+            if (hiddenRows && hiddenRows.length > 0) {
+              const hidden = new Set(hiddenRows.map((r: { product_id: string }) => r.product_id));
+              merged = merged.filter((p) => !hidden.has(p.id));
+            }
           }
           setProducts(merged);
           // Hapus cache lama milik tenant ini SAJA (bukan .clear() yang
@@ -543,6 +556,10 @@ export default function PosPage() {
   }
 
   function addToCart(product: StockAwareProduct) {
+    if (isDemo) {
+      showStockNotice("Ini contoh data. Tambahkan menu asli dulu sebelum menjual.");
+      return;
+    }
     if (!product.is_available) {
       showStockNotice(`"${product.name}" sedang Sold Out.`);
       return;
@@ -695,7 +712,7 @@ export default function PosPage() {
       setVoucherDiscountPreview(0);
       return;
     }
-    const result = await validateAndApplyVoucher(voucherCode.trim().toUpperCase(), subtotal, session?.branchId);
+    const result = await validateAndApplyVoucher(voucherCode.trim().toUpperCase(), subtotal);
     if (result.error || !result.data) {
       setVoucherError(result.error ?? "Voucher tidak valid");
       setVoucherDiscountPreview(0);
