@@ -268,7 +268,9 @@ export default function StockPage() {
       {isConsolidated && canSwitchBranch && (
         <div className="rounded-xl bg-neutral-100 text-neutral-600 text-sm px-4 py-3">
           Menampilkan stok <strong>gabungan semua cabang</strong> (read-only). Pilih 1 cabang di kanan atas
-          untuk restock atau opname stok cabang tertentu.
+          untuk restock atau opname stok cabang tertentu. HPP menu berresep di tampilan gabungan mengikuti
+          harga bahan <strong>Cabang Utama</strong>; HPP tiap cabang bisa berbeda, jadi pilih 1 cabang untuk melihat
+          HPP cabang itu.
         </div>
       )}
 
