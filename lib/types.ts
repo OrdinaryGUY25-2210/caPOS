@@ -545,6 +545,11 @@ export interface QrOrderPageData {
   /** `tenant_id` (Migrasi 020) dipakai murni sebagai nama topik broadcast
    * realtime `products-<tenant_id>` — bukan untuk query apa pun di klien. */
   branch?: {
+    /** BARU — uuid cabang, dikirim RPC `get_qr_order_page` dan dipakai
+     * app/order/[branch]/[table]/page.tsx untuk meneruskan `branchId` ke
+     * SelfOrderClient (validasi voucher per cabang). Opsional supaya tetap
+     * kompatibel kalau RPC versi lama (belum mengirim field ini) masih aktif. */
+    id?: string;
     name: string;
     slug: string;
     address: string | null;
