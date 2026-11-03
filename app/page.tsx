@@ -10,3 +10,4 @@ export default function RootPage() {
   redirect("/login");
 } 
  
+ 
