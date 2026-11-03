@@ -1,5 +1,5 @@
 "use client";
-
+ 
 import { PurchaseOrderDashboard } from "@/components/purchasing/PurchaseOrderDashboard";
 
 export default function PurchaseOrdersPage() {
