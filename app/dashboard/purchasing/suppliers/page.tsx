@@ -1,7 +1,7 @@
 "use client";
 
 import { SupplierManagement } from "@/components/purchasing/SupplierManagement";
-
+ 
 export default function SuppliersPage() {
   return (
     <div className="p-4 md:p-6">
