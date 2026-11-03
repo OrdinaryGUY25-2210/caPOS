@@ -1,5 +1,5 @@
 "use client";
-
+ 
 import { useEffect, useState } from "react";
 import { Plus, Loader2, Tag, Ticket, ListChecks, Building2 } from "lucide-react";
 import { PromotionBuilder } from "@/components/crm/CustomerLoyaltyModal";
