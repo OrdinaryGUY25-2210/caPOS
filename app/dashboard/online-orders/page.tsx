@@ -200,9 +200,25 @@ function OnlineOrderFormModal({ branchId, onClose, onSaved }: { branchId: string
       setTenantId(profile.tenant_id);
       const supabase = createClient();
       const { data } = await supabase.from("products").select("*").eq("tenant_id", profile.tenant_id).eq("is_available", true).order("name");
-      setProducts((data as Product[]) ?? []);
+      let list = (data as Product[]) ?? [];
+
+      // Menu yang DISEMBUNYIKAN di cabang ini (migration_026, "Dijual di cabang") tidak
+      // ditawarkan di input pesanan online cabang ini. Tidak ada baris = dijual. Kalau tabel
+      // belum ada / query gagal, tidak menyaring apa pun. Penyaringan hanya di tampilan:
+      // pesanan yang sudah diterima dari aplikasi pihak ketiga tetap bisa dicatat via
+      // menu lain / dengan menjadikan menunya dijual di cabang ini lebih dulu.
+      const { data: hiddenRows } = await supabase
+        .from("branch_product_availability")
+        .select("product_id")
+        .eq("branch_id", branchId)
+        .eq("is_available", false);
+      if (hiddenRows && hiddenRows.length > 0) {
+        const hidden = new Set(hiddenRows.map((r: { product_id: string }) => r.product_id));
+        list = list.filter((p) => !hidden.has(p.id));
+      }
+      setProducts(list);
     })();
-  }, []);
+  }, [branchId]);
 
   function addItem(p: Product) {
     setCart((prev) => {
