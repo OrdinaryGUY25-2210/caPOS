@@ -139,6 +139,9 @@ export interface TransactionItem {
   product_id: string;
   qty: number;
   subtotal: number;
+  /** WP-01 — HPP per 1 unit saat transaksi terjadi. NULL = data lama (laporan menandai "estimasi"). */
+  cost_price_snapshot?: number | null;
+  hpp_source?: "recipe" | "branch" | "wac" | "product" | "estimate" | null;
 }
 
 export interface CartItem extends Product {
@@ -759,4 +762,58 @@ export interface BranchProductAvailability {
   product_id: string;
   is_available: boolean;
   updated_at: string;
+}
+
+/** WP-02 — HPP menu per cabang (override). Tidak ada baris = pakai products.cost_price. */
+export interface ProductBranchCost {
+  tenant_id: string;
+  branch_id: string;
+  product_id: string;
+  cost_price: number;
+  updated_at: string;
+}
+
+/** Mode Export PDF Lengkap (rencana bagian 6). */
+export type ExportMode = "ringkasan" | "laba" | "semua_data";
+
+/** Bentuk hasil RPC get_profit_report (supabase/20251104_profit_report_rpc.sql). */
+export interface ProfitReport {
+  generated_at: string;
+  tier: "pro" | "supreme";
+  branch_id: string | null;
+  from: string;
+  to: string;
+  tz: string;
+  summary: {
+    omzet: number;
+    subtotal: number;
+    diskon: number;
+    transaksi: number;
+    item_terjual: number;
+    hpp: number;
+    refund: number;
+    susut: number;
+    komisi: number;
+    opex: number;
+    opex_tersedia: boolean;
+    hpp_lines_actual: number;
+    hpp_lines_estimate: number;
+  };
+  daily: { tanggal: string; transaksi: number; omzet: number; hpp: number }[];
+  daily_by_branch: { tanggal: string; branch_id: string | null; cabang: string; transaksi: number; omzet: number }[];
+  by_payment: { metode: string; transaksi: number; omzet: number }[];
+  by_category: { kategori: string; qty: number; omzet: number; hpp: number }[];
+  top_menu: { menu: string; qty: number; omzet: number; hpp: number }[];
+  top_profit_menu: { menu: string; qty: number; omzet: number; hpp: number; laba: number }[];
+  by_branch: {
+    branch_id: string;
+    branch_name: string;
+    omzet: number;
+    transaksi: number;
+    hpp: number;
+    refund: number;
+    susut: number;
+    komisi: number;
+    opex: number;
+  }[];
 }

@@ -185,31 +185,28 @@ export default function NewMenuWizard({ tenantId, existingCategories, onClose, o
 
     let errMsg: string | null = null;
     if (hasRecipe) {
-      const { error } = await supabase.rpc("create_menu_with_recipe", {
+      // WP-08 / F08 — signature RPC di repo: (..., p_price, p_stock_mode, p_items). Sebelumnya
+      // wizard mengirim p_image_url dan TIDAK mengirim p_stock_mode sehingga menu bisa gagal
+      // tersimpan / tanpa mode stok. Kirim p_stock_mode = 'recipe'; foto disimpan terpisah.
+      const baseArgs = {
         p_product_id: productId,
         p_tenant_id: tenantId,
         p_branch_id: branchId,
         p_name: name.trim(),
         p_category: category.trim() || "Kopi",
         p_price: price,
-        p_stock_mode: "recipe",
-        p_items: lines.map((l) => ({
-          ingredient_id: l.ing.id,
-          quantity: l.qty,
-          unit: l.ing.inventory_unit,
-        })),
-      });
-      errMsg = error?.message ?? null;
-
-      // RPC create_menu_with_recipe tidak menerima gambar; simpan terpisah
-      // setelah menu berhasil dibuat supaya signature lama tetap kompatibel.
-      if (!errMsg && imageUrl) {
-        const { error: imgErr } = await supabase
-          .from("products")
-          .update({ image_url: imageUrl })
-          .eq("id", productId);
-        if (imgErr) errMsg = imgErr.message;
+        p_items: lines.map((l) => ({ ingredient_id: l.ing.id, quantity: l.qty })),
+      };
+      let { error } = await supabase.rpc("create_menu_with_recipe", { ...baseArgs, p_stock_mode: "recipe" });
+      if (error && (error.code === "PGRST202" || /Could not find the function/i.test(error.message))) {
+        // Database yang sudah memakai versi RPC lama dengan p_image_url (tanpa p_stock_mode).
+        const retry = await supabase.rpc("create_menu_with_recipe", { ...baseArgs, p_image_url: imageUrl });
+        error = retry.error;
+      } else if (!error && imageUrl) {
+        const { error: imgErr } = await supabase.from("products").update({ image_url: imageUrl }).eq("id", productId);
+        if (imgErr) console.error("Foto menu gagal disimpan:", imgErr.message);
       }
+      errMsg = error?.message ?? null;
     } else {
       const { error } = await supabase.from("products").insert({
         id: productId,

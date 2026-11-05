@@ -1,146 +1,111 @@
 /**
- * lib/metrics.ts — definisi tunggal metrik laporan caPOS.
+ * WP-07 — Single Source of Truth metrik keuangan caPOS.
  *
- * Dipakai oleh halaman Laporan & Omzet, Laporan PDF, dan Export Excel supaya
- * angka tidak pernah berbeda antar halaman untuk periode & cabang yang sama.
+ * Semua halaman (Laporan & Omzet, Laporan PDF, analitik) memakai fungsi di
+ * sini. Rumusnya SAMA dengan get_profit_report() di
+ * supabase/20251104_profit_report_rpc.sql — kalau satu diubah, ubah keduanya.
  *
- * Definisi resmi:
- *   Omzet          = Σ transactions.total_amount
- *   Subtotal       = Σ transactions.subtotal_amount (fallback total_amount)
- *   Diskon         = Σ transactions.discount_amount
- *   HPP            = Σ (qty × unit cost) memakai resolusi lib/hpp.ts
- *   Laba Kotor     = Omzet − HPP
- *   Susut Stok     = Σ stock_opnames.total_loss_value
- *                    + Σ stock_opname_logs.loss_value (legacy)
- *                    + Σ waste_logs.total_loss_amount
- *                    + Σ ingredient_waste_logs.total_loss_amount
- *   Komisi Channel = Σ orders.channel_commission_amount
- *   OPEX           = Σ expenses.amount (status disetujui, bila modul aktif)
- *   Laba Bersih    = Laba Kotor − Susut − Komisi − OPEX
+ *   Omzet        = Σ transactions.total_amount
+ *   Laba Kotor   = Omzet − Refund − HPP
+ *   Laba Bersih  = Laba Kotor − Susut Stok − Komisi Channel − Biaya Operasional
+ *   Margin Kotor = Laba Kotor ÷ Omzet × 100
+ *   AOV          = Omzet ÷ jumlah transaksi
+ *
+ * Refund: tabel refunds TIDAK mengubah baris transactions, jadi omzet tetap
+ * kotor dan refund COMPLETED dikurangkan sebagai baris tersendiri.
  */
+import type { ProfitReport } from "@/lib/types";
 
-import {
-  buildBranchCostMap,
-  buildProductCostMap,
-  resolveItemCost,
-  toNumber,
-  type CostBranchRow,
-  type CostItemRow,
-  type CostProductRow,
-} from "@/lib/hpp";
-
-export interface MetricArgs {
-  transactions: any[];
-  items: CostItemRow[];
-  products: CostProductRow[];
-  branchCosts?: CostBranchRow[];
-  branchId?: string | null;
-  stockOpnameLogs?: any[];
-  stockOpnames?: any[];
-  wasteLogs?: any[];
-  ingredientWasteLogs?: any[];
-  orders?: any[];
-  expenses?: any[];
-  includeOpex?: boolean;
+export interface MetricInputs {
+  omzet: number;
+  diskon?: number;
+  hpp: number;
+  refund?: number;
+  susut?: number;
+  komisi?: number;
+  opex?: number;
+  transaksi: number;
+  itemTerjual?: number;
 }
 
-export interface ReportMetrics {
+export interface Metrics {
   omzet: number;
-  subtotal: number;
   diskon: number;
   hpp: number;
+  refund: number;
   labaKotor: number;
   susutStok: number;
-  komisiChannel: number;
-  opex: number;
+  komisi: number;
+  biayaOperasional: number;
   labaBersih: number;
-  marginKotorPct: number;
+  marginKotor: number;
+  marginBersih: number;
+  transaksi: number;
   aov: number;
-  totalTransaksi: number;
   itemTerjual: number;
-  hppEstimasiItem: number;
-  totalItem: number;
-  hppAktual: boolean;
 }
 
-export function computeMetrics(args: MetricArgs): ReportMetrics {
-  const productCostMap = buildProductCostMap(args.products ?? []);
-  const branchCostMap = buildBranchCostMap(args.branchCosts ?? []);
-  const branchId = args.branchId ?? null;
+const n = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
-  const omzet = (args.transactions ?? []).reduce((s, t) => s + toNumber(t.total_amount), 0);
-  const subtotal = (args.transactions ?? []).reduce(
-    (s, t) => s + toNumber(t.subtotal_amount ?? t.total_amount),
-    0
-  );
-  const diskon = (args.transactions ?? []).reduce((s, t) => s + toNumber(t.discount_amount), 0);
-
-  let hpp = 0;
-  let itemTerjual = 0;
-  let hppEstimasiItem = 0;
-  const txBranch = new Map<string, string | null>();
-  for (const t of args.transactions ?? []) {
-    if (t?.id) txBranch.set(t.id, t.branch_id ?? null);
-  }
-  for (const item of args.items ?? []) {
-    // Konsolidasi: pakai cabang transaksi item agar HPP khusus cabang tetap
-    // terpakai saat snapshot belum ada.
-    const itemBranch =
-      branchId ?? (item.transaction_id ? txBranch.get(item.transaction_id) ?? null : null);
-    const resolved = resolveItemCost(item, productCostMap, branchCostMap, itemBranch);
-    hpp += resolved.totalCost;
-    itemTerjual += toNumber(item.qty);
-    if (resolved.source === "estimate") hppEstimasiItem += 1;
-  }
-
-  const susutOpname = (args.stockOpnameLogs ?? []).reduce((s, r) => s + toNumber(r.loss_value), 0);
-  const susutOpnameHeader = (args.stockOpnames ?? []).reduce(
-    (s, r) => s + toNumber(r.total_loss_value),
-    0
-  );
-  const susutWaste = (args.wasteLogs ?? []).reduce((s, r) => s + toNumber(r.total_loss_amount), 0);
-  const susutWasteBahan = (args.ingredientWasteLogs ?? []).reduce(
-    (s, r) => s + toNumber(r.total_loss_amount ?? r.loss_value),
-    0
-  );
-  const susutStok = susutOpname + susutOpnameHeader + susutWaste + susutWasteBahan;
-
-  const komisiChannel = (args.orders ?? []).reduce(
-    (s, o) => s + toNumber(o.channel_commission_amount),
-    0
-  );
-
-  const opex = args.includeOpex
-    ? (args.expenses ?? [])
-        .filter((e) => {
-          if (e.voided_at) return false;
-          const status = String(e.status ?? "APPROVED").toUpperCase();
-          return status === "APPROVED" || status === "PAID";
-        })
-        .reduce((s, e) => s + toNumber(e.amount), 0)
-    : 0;
-
-  const labaKotor = omzet - hpp;
-  const labaBersih = labaKotor - susutStok - komisiChannel - opex;
-  const totalTransaksi = (args.transactions ?? []).length;
-  const totalItem = (args.items ?? []).reduce((s, i) => s + toNumber(i.qty), 0);
-
+export function computeMetrics(i: MetricInputs): Metrics {
+  const omzet = n(i.omzet);
+  const hpp = n(i.hpp);
+  const refund = n(i.refund);
+  const susut = n(i.susut);
+  const komisi = n(i.komisi);
+  const opex = n(i.opex);
+  const transaksi = n(i.transaksi);
+  const labaKotor = omzet - refund - hpp;
+  const labaBersih = labaKotor - susut - komisi - opex;
   return {
     omzet,
-    subtotal,
-    diskon,
+    diskon: n(i.diskon),
     hpp,
+    refund,
     labaKotor,
-    susutStok,
-    komisiChannel,
-    opex,
+    susutStok: susut,
+    komisi,
+    biayaOperasional: opex,
     labaBersih,
-    marginKotorPct: omzet > 0 ? (labaKotor / omzet) * 100 : 0,
-    aov: totalTransaksi > 0 ? omzet / totalTransaksi : 0,
-    totalTransaksi,
-    itemTerjual,
-    hppEstimasiItem,
-    totalItem,
-    hppAktual: (args.items ?? []).length > 0 && hppEstimasiItem === 0,
+    marginKotor: omzet > 0 ? (labaKotor / omzet) * 100 : 0,
+    marginBersih: omzet > 0 ? (labaBersih / omzet) * 100 : 0,
+    transaksi,
+    aov: transaksi > 0 ? Math.round(omzet / transaksi) : 0,
+    itemTerjual: n(i.itemTerjual),
+  };
+}
+
+export function metricsFromReport(r: ProfitReport): Metrics {
+  const s = r.summary;
+  return computeMetrics({
+    omzet: s.omzet, diskon: s.diskon, hpp: s.hpp, refund: s.refund, susut: s.susut,
+    komisi: s.komisi, opex: s.opex, transaksi: s.transaksi, itemTerjual: s.item_terjual,
+  });
+}
+
+export type HppQuality = {
+  level: "aktual" | "sebagian" | "estimasi";
+  label: string;
+  note: string;
+};
+
+/** Badge kualitas HPP yang wajib tampil di setiap laporan. */
+export function hppQuality(actualLines: number, estimateLines: number): HppQuality {
+  const total = actualLines + estimateLines;
+  if (total === 0 || estimateLines === 0) {
+    return { level: "aktual", label: "HPP Aktual", note: "Seluruh HPP memakai snapshot saat transaksi terjadi." };
+  }
+  if (actualLines === 0) {
+    return {
+      level: "estimasi",
+      label: "HPP Estimasi",
+      note: "HPP dihitung ulang dari harga bahan/menu hari ini (transaksi sebelum fitur snapshot HPP).",
+    };
+  }
+  const pct = Math.round((estimateLines / total) * 100);
+  return {
+    level: "sebagian",
+    label: "HPP Sebagian Estimasi",
+    note: `${pct}% baris item memakai HPP hari ini karena transaksinya terjadi sebelum fitur snapshot HPP.`,
   };
 }

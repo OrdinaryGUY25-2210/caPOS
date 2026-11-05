@@ -1,11 +1,11 @@
 "use client";
 
+import { useBranch, ALL_BRANCHES } from "@/lib/branchContext";
 import { useEffect, useMemo, useState } from "react";
 import { ChefHat, Plus, Trash2, Loader2, CheckCircle2, XCircle, Calculator } from "lucide-react";
 import { formatRupiah, cx } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
-import { useBranch, ALL_BRANCHES } from "@/lib/branchContext";
 import { isManagerOrOwner } from "@/lib/role";
 import type { Product, ProductVariant, Recipe, RecipeItem, Ingredient } from "@/lib/types";
 import { Skeleton, SkeletonList } from "@/components/Skeleton";
@@ -25,7 +25,7 @@ import { DEMO_RECIPES, DEMO_RECIPE_ITEMS, DEMO_PRODUCTS, DEMO_INGREDIENTS } from
 type RecipeItemDraft = { id?: string; ingredient_id: string; quantity: string; unit: string; wastage_percentage: string; notes: string };
 
 export default function RecipesPage() {
-  const { selectedBranchId } = useBranch();
+  const { selectedBranchId, selectedBranch } = useBranch();
   const [products, setProducts] = useState<Product[]>([]);
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
@@ -43,6 +43,11 @@ export default function RecipesPage() {
   const [calculating, setCalculating] = useState(false);
   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
   const [isDemo, setIsDemo] = useState(false);
+
+  // Angka preview milik cabang sebelumnya tidak boleh tersisa setelah ganti cabang.
+  useEffect(() => {
+    setCostPreview(null);
+  }, [selectedBranchId]);
 
   const canWrite = isManagerOrOwner(role);
 
@@ -258,6 +263,7 @@ export default function RecipesPage() {
     if (!activeRecipe) return;
     setCalculating(true);
     const supabase = createClient();
+    // WP-03 / F04: hitung dengan harga bahan CABANG yang dipilih (bukan selalu cabang utama).
     const { data, error } = await supabase.rpc("calculate_recipe_cost", {
       p_recipe_id: activeRecipe.id,
       p_branch_id: selectedBranchId === ALL_BRANCHES ? null : selectedBranchId,
@@ -440,7 +446,9 @@ export default function RecipesPage() {
                 {costPreview !== null && (
                   <div className="flex items-center gap-1 text-sm">
                     <CheckCircle2 size={16} className="text-primary-dark" />
-                    <span className="text-neutral-600">Total HPP resep:</span>
+                    <span className="text-neutral-600">
+                      Total HPP resep ({selectedBranchId === ALL_BRANCHES ? "cabang utama" : selectedBranch?.name ?? "cabang"}):
+                    </span>
                     <span className="font-bold text-neutral-900">{formatRupiah(costPreview)}</span>
                     <span className="text-neutral-400">
                       ({formatRupiah(costPreview / Math.max(1, Number(yieldQty || 1)))} / porsi)

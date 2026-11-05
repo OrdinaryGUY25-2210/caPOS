@@ -43,10 +43,11 @@ export default function MenuEngineeringPage() {
 }
 
 function MenuEngineeringContent() {
-  const { selectedBranchId } = useBranch();
   const [rows, setRows] = useState<MenuEngineeringRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [isDemo, setIsDemo] = useState(false);
+  const { selectedBranchId, selectedBranch } = useBranch();
+  const branchLabel = selectedBranchId === ALL_BRANCHES ? "Semua Cabang" : selectedBranch?.name ?? "-";
 
   useEffect(() => {
     load();
@@ -99,7 +100,7 @@ function MenuEngineeringContent() {
 
   return (
     <div className="max-w-5xl mx-auto">
-      <h1 className="text-xl font-bold text-neutral-900">Menu Engineering Matrix</h1>
+      <h1 className="text-xl font-bold text-neutral-900">Menu Engineering Matrix <span className="text-base font-normal text-neutral-500">— {branchLabel}</span></h1>
       {isDemo && <DemoBadge />}
       <p className="text-sm text-neutral-500 mt-1 mb-6">
         Kuadran popularitas (volume terjual) vs profitabilitas (margin HPP) — dibandingkan rata-rata seluruh menu.

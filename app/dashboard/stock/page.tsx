@@ -1,5 +1,6 @@
 "use client";
  
+import { isMissingBranchCostTable, saveBranchCost, clearBranchCost } from "@/lib/hpp";
 import { useEffect, useMemo, useState } from "react";
 import { PackageSearch, PackagePlus, AlertTriangle, Loader2, Pencil, History } from "lucide-react";
 import { formatRupiah, formatNumberWithDots, stripNumberDots, cx } from "@/lib/utils";
@@ -60,6 +61,8 @@ export default function StockPage() {
   // "Semua Cabang" (Laporan Konsolidasi) -> stok ditampilkan gabungan
   // (read-only); restock/HPP tetap butuh 1 cabang spesifik dipilih.
   const isConsolidated = selectedBranchId === ALL_BRANCHES;
+  // WP-02/03: nilai inventori = Σ per cabang (stok × HPP cabang itu); null = pakai rumus lama (mode demo).
+  const [inventoryTotal, setInventoryTotal] = useState<number | null>(null);
 
   async function loadAll() {
     setLoading(true);
@@ -70,7 +73,7 @@ export default function StockPage() {
     }
 
     const supabase = createClient();
-    const [{ data: prodData }, { data: stockRows }, movementQuery, { data: branchCostRows }] = await Promise.all([
+    const [{ data: prodData }, { data: stockRows }, movementQuery] = await Promise.all([
       supabase.from("products").select("*").eq("tenant_id", profile.tenant_id).order("name", { ascending: true }),
       supabase.from("branch_stock").select("product_id, branch_id, stock_qty").eq("tenant_id", profile.tenant_id),
       (() => {
@@ -83,14 +86,6 @@ export default function StockPage() {
         if (!isConsolidated) q = q.eq("branch_id", selectedBranchId);
         return q;
       })(),
-      // HPP khusus cabang (opsional; tabel dibuat oleh migrasi 20251104).
-      isConsolidated
-        ? Promise.resolve({ data: [] as { product_id: string; cost_price: number }[] })
-        : supabase
-            .from("product_branch_cost")
-            .select("product_id, cost_price")
-            .eq("tenant_id", profile.tenant_id)
-            .eq("branch_id", selectedBranchId),
     ]);
     const { data: moveData } = movementQuery;
 
@@ -105,55 +100,68 @@ export default function StockPage() {
 
     const baseProducts = ((prodData as ProductStock[]) ?? []).map((p) => ({ ...p, stock_qty: stockMap.get(p.id) ?? 0 }));
 
-    // Menu berresep: HPP dihitung dari resep aktif (bukan products.cost_price yang
-    // bisa basi/manual). Resep per-varian diabaikan di sini; kalau menu tidak punya
-    // resep umum, nilai cost_price yang ada tetap dipakai.
+    // WP-02 — override HPP per cabang (product_branch_cost). Tabel belum ada = abaikan (pakai default).
+    const overrideMap = new Map<string, number>();
+    {
+      const { data: pbc, error: pbcErr } = await supabase
+        .from("product_branch_cost")
+        .select("branch_id, product_id, cost_price")
+        .eq("tenant_id", profile.tenant_id);
+      if (pbcErr && !isMissingBranchCostTable(pbcErr)) console.error("HPP cabang gagal dimuat:", pbcErr.message);
+      for (const r of (pbc as { branch_id: string; product_id: string; cost_price: number }[]) ?? []) {
+        overrideMap.set(`${r.branch_id}:${r.product_id}`, Number(r.cost_price));
+      }
+    }
+
+    // Cabang yang dihitung: 1 cabang terpilih, atau SEMUA cabang yang punya stok (konsolidasi).
+    const stockBranchIds = Array.from(new Set(((stockRows as { branch_id: string }[]) ?? []).map((r) => r.branch_id)));
+    const costBranches = isConsolidated ? stockBranchIds : [selectedBranchId];
+    const mainBranchId = branches.find((b) => b.is_main)?.id ?? costBranches[0] ?? null;
+    const displayBranchId = isConsolidated ? mainBranchId : selectedBranchId;
+
+    // Menu berresep: HPP per porsi = biaya resep aktif (harga bahan CABANG itu) / yield.
     const recipeProductIds = baseProducts.filter((p) => p.stock_mode === "recipe").map((p) => p.id);
-    const recipeCostMap = new Map<string, number>();
-    if (recipeProductIds.length > 0) {
+    const recipeCostBy = new Map<string, number>(); // `${branch}:${product}` -> HPP per porsi
+    if (recipeProductIds.length > 0 && costBranches.length > 0) {
       const { data: recipeRows } = await supabase
         .from("recipes")
-        .select("id, product_id")
+        .select("id, product_id, yield_quantity")
         .eq("tenant_id", profile.tenant_id)
         .eq("is_active", true)
         .is("variant_id", null)
         .in("product_id", recipeProductIds);
+      const pairs = ((recipeRows as { id: string; product_id: string; yield_quantity: number }[]) ?? []).flatMap((r) =>
+        costBranches.map((b) => ({ r, b }))
+      );
       await Promise.all(
-        ((recipeRows as { id: string; product_id: string }[]) ?? []).map(async (r) => {
-          // Konsolidasi: hitung HPP resep untuk SETIAP cabang lalu ambil
-          // rata-rata dari cabang yang punya harga bahan. Jangan pakai null
-          // (yang berarti "cabang utama") supaya tidak menyesatkan.
-          const branchIds = isConsolidated
-            ? (branches.length ? branches.map((b) => b.id) : [null])
-            : [selectedBranchId];
-          const costs = await Promise.all(
-            branchIds.map(async (bid) => {
-              const { data: cost } = await supabase.rpc("calculate_recipe_cost", {
-                p_recipe_id: r.id,
-                p_branch_id: bid,
-              });
-              return Number(cost ?? 0);
-            })
-          );
-          const positive = costs.filter((c) => c > 0);
-          recipeCostMap.set(
-            r.product_id,
-            positive.length ? positive.reduce((s, c) => s + c, 0) / positive.length : 0
-          );
+        pairs.map(async ({ r, b }) => {
+          const { data: cost } = await supabase.rpc("calculate_recipe_cost", { p_recipe_id: r.id, p_branch_id: b });
+          recipeCostBy.set(`${b}:${r.product_id}`, Number(cost ?? 0) / Math.max(1, Number(r.yield_quantity || 1)));
         })
       );
     }
-    const branchCostMap = new Map<string, number>();
-    for (const row of (branchCostRows as { product_id: string; cost_price: number }[]) ?? []) {
-      branchCostMap.set(row.product_id, Number(row.cost_price));
-    }
-    // Prioritas HPP: override cabang → HPP resep → HPP default produk.
-    const freshProducts = baseProducts.map((p) => {
-      if (!isConsolidated && branchCostMap.has(p.id)) {
-        return { ...p, cost_price: branchCostMap.get(p.id)! };
+
+    // Urutan sama dengan trigger snapshot di DB: resep (>0) → override cabang → HPP default menu.
+    const costAt = (p: ProductStock, branch: string | null) => {
+      if (!branch) return Number(p.cost_price);
+      const rc = recipeCostBy.get(`${branch}:${p.id}`);
+      if (rc !== undefined && rc > 0) return rc;
+      const ov = overrideMap.get(`${branch}:${p.id}`);
+      return ov !== undefined ? ov : Number(p.cost_price);
+    };
+
+    const freshProducts = baseProducts.map((p) => ({ ...p, cost_price: costAt(p as ProductStock, displayBranchId) }));
+    {
+      const prodById = new Map(baseProducts.map((p) => [p.id, p as ProductStock]));
+      let total = 0;
+      for (const row of (stockRows as { product_id: string; branch_id: string; stock_qty: number }[]) ?? []) {
+        if (!isConsolidated && row.branch_id !== selectedBranchId) continue;
+        const p = prodById.get(row.product_id);
+        if (!p || !p.track_stock) continue;
+        total += Number(row.stock_qty) * costAt(p, row.branch_id);
       }
-      return recipeCostMap.has(p.id) ? { ...p, cost_price: recipeCostMap.get(p.id)! } : p;
-    });
+      setInventoryTotal(total);
+    }
     const freshMovements: MovementRow[] = (moveData ?? []).map((m: any) => ({
       id: m.id,
       type: m.type,
@@ -169,6 +177,7 @@ export default function StockPage() {
     const showDemo = freshProducts.length === 0 && noActivity;
     setIsDemo(showDemo);
     if (showDemo) {
+      setInventoryTotal(null);
       setProducts(DEMO_PRODUCTS_WITH_STOCK as ProductStock[]);
       setMovements(DEMO_STOCK_MOVEMENTS as MovementRow[]);
     }
@@ -186,8 +195,8 @@ export default function StockPage() {
     [tracked]
   );
   const inventoryValue = useMemo(
-    () => tracked.reduce((s, p) => s + p.stock_qty * p.cost_price, 0),
-    [tracked]
+    () => inventoryTotal ?? tracked.reduce((s, p) => s + p.stock_qty * p.cost_price, 0),
+    [tracked, inventoryTotal]
   );
   const avgMargin = useMemo(() => {
     const withPrice = products.filter((p) => p.price > 0);
@@ -207,55 +216,38 @@ export default function StockPage() {
     }
     setSaving(true);
     const supabase = createClient();
-    const branchScoped = !isConsolidated;
-
-    // HPP default tenant hanya diubah saat "Semua Cabang" dipilih. Saat satu
-    // cabang aktif, HPP disimpan sebagai override cabang agar cabang lain
-    // tidak ikut berubah.
-    const productUpdate: Record<string, unknown> = {
-      track_stock: p.track_stock,
-      low_stock_threshold: p.low_stock_threshold,
-    };
-    if (!branchScoped) productUpdate.cost_price = p.cost_price;
-
-    const { error } = await supabase.from("products").update(productUpdate).eq("id", p.id);
+    // WP-02: saat 1 cabang dipilih, HPP disimpan sebagai override cabang itu (product_branch_cost);
+    // kosongkan HPP (0) untuk kembali memakai HPP default tenant. Mode "Semua Cabang" menulis default tenant.
+    let costToDefault = true;
+    if (!isConsolidated) {
+      const { profile } = await getCurrentProfile();
+      if (profile) {
+        const res =
+          Number(p.cost_price) > 0
+            ? await saveBranchCost(supabase, { tenantId: profile.tenant_id, branchId: selectedBranchId, productId: p.id, costPrice: Number(p.cost_price) })
+            : await clearBranchCost(supabase, selectedBranchId, p.id);
+        if (!res.error) costToDefault = false;
+        else if (!isMissingBranchCostTable(res.error)) {
+          setSaving(false);
+          alert("Gagal menyimpan HPP cabang: " + res.error.message);
+          return;
+        }
+        // tabel belum ada (migrasi belum dijalankan) → jatuh ke perilaku lama di bawah
+      }
+    }
+    const { error } = await supabase
+      .from("products")
+      .update({
+        ...(costToDefault ? { cost_price: p.cost_price } : {}),
+        track_stock: p.track_stock,
+        low_stock_threshold: p.low_stock_threshold,
+      })
+      .eq("id", p.id);
+    setSaving(false);
     if (error) {
-      setSaving(false);
       alert("Gagal menyimpan: " + error.message);
       return;
     }
-
-    if (branchScoped) {
-      const { error: costError } =
-        p.cost_price > 0
-          ? await supabase.from("product_branch_cost").upsert(
-              {
-                tenant_id: p.tenant_id,
-                branch_id: selectedBranchId,
-                product_id: p.id,
-                cost_price: p.cost_price,
-              },
-              { onConflict: "branch_id,product_id" }
-            )
-          : await supabase
-              .from("product_branch_cost")
-              .delete()
-              .eq("branch_id", selectedBranchId)
-              .eq("product_id", p.id);
-
-      if (costError) {
-        setSaving(false);
-        alert(
-          "Pengaturan stok tersimpan, tetapi HPP cabang gagal disimpan: " +
-            costError.message +
-            "\n\nPastikan migrasi supabase/20251104_product_branch_cost.sql sudah dijalankan."
-        );
-        loadAll();
-        return;
-      }
-    }
-
-    setSaving(false);
     setEditing(null);
     loadAll();
   }
@@ -326,12 +318,6 @@ export default function StockPage() {
             Atur HPP (harga pokok) tiap menu, aktifkan pelacakan stok bahan, dan pantau stok menipis
             {canSwitchBranch && !isConsolidated && selectedBranch ? ` — cabang ${selectedBranch.name}.` : "."}
           </p>
-          {!isConsolidated && (
-            <p className="text-xs text-neutral-400 mt-1">
-              HPP yang diubah di sini berlaku untuk cabang ini saja. Pilih &quot;Semua Cabang&quot; untuk
-              mengubah HPP default tenant.
-            </p>
-          )}
         </div>
         <button onClick={() => setShowHistory(true)} className="btn-outline flex items-center gap-1.5 text-sm">
           <History size={14} /> Riwayat Pergerakan

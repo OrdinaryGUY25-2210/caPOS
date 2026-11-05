@@ -11,20 +11,39 @@ import { tenantHasNoActivity } from '@/lib/demoMode';
 import { useBranch, ALL_BRANCHES } from '@/lib/branchContext';
 import { DEMO_PRODUCT_PROFITABILITY, DEMO_PEAK_HOURS, DEMO_WASTE_LOGS } from '@/lib/demoData';
 
+/** WP-05 — cabang aktif untuk analitik: undefined = semua cabang (konsolidasi). */
+function useAnalyticsBranch() {
+  const { selectedBranchId, selectedBranch } = useBranch();
+  const branchArg = selectedBranchId === ALL_BRANCHES ? undefined : selectedBranchId;
+  const label = selectedBranchId === ALL_BRANCHES ? 'Semua Cabang' : selectedBranch?.name ?? '-';
+  return { branchArg, label };
+}
+
+/** View analitik di-group per cabang; saat "Semua Cabang" baris dengan kunci sama harus dijumlahkan. */
+function mergeBy(rows: any[], keyOf: (r: any) => string, sumKeys: string[]) {
+  const map = new Map<string, any>();
+  for (const r of rows) {
+    const k = keyOf(r);
+    const cur = map.get(k);
+    if (!cur) { map.set(k, { ...r }); continue; }
+    for (const f of sumKeys) cur[f] = Number(cur[f] ?? 0) + Number(r[f] ?? 0);
+  }
+  return Array.from(map.values());
+}
+
 // =========================================================
 // PRODUCT PROFITABILITY ANALYTICS
 // =========================================================
 
 export function ProductProfitabilityAnalytics() {
-  const { selectedBranchId } = useBranch();
-  const branchParam = selectedBranchId === ALL_BRANCHES ? undefined : selectedBranchId;
   const [profitData, setProfitData] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [sortBy, setSortBy] = useState<'profit' | 'revenue' | 'margin'>('profit');
+  const { branchArg, label: branchLabel } = useAnalyticsBranch();
 
   useEffect(() => {
     loadProfitabilityData();
-  }, [sortBy, selectedBranchId]);
+  }, [sortBy, branchArg]);
 
   const sortRows = (rows: any[]) => {
     // Sort based on selected option
@@ -40,9 +59,17 @@ export function ProductProfitabilityAnalytics() {
 
   const loadProfitabilityData = async () => {
     setIsLoading(true);
-    const result = await getProductProfitability(branchParam, 20);
+    // Konsolidasi: ambil lebih banyak baris (satu per cabang) lalu jumlahkan per produk.
+    const result = await getProductProfitability(branchArg, branchArg ? 20 : 200);
     if (!result.error) {
-      setProfitData(sortRows(result.data || []));
+      let rows: any[] = result.data || [];
+      if (!branchArg) {
+        rows = mergeBy(rows, (r) => String(r.id), ['sale_count', 'total_qty_sold', 'total_revenue', 'total_cogs', 'gross_profit'])
+          .map((r) => ({ ...r, profit_margin_pct: Number(r.total_revenue) > 0 ? Math.round((Number(r.gross_profit) / Number(r.total_revenue)) * 10000) / 100 : 0 }))
+          .sort((a, b) => Number(b.gross_profit) - Number(a.gross_profit))
+          .slice(0, 20);
+      }
+      setProfitData(sortRows(rows));
     }
     const noActivity = await tenantHasNoActivity();
     if (noActivity) {
@@ -63,7 +90,7 @@ export function ProductProfitabilityAnalytics() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold">Profitabilitas Produk</h2>
-          <p className="text-gray-600 mt-1">Analisis mendalam per menu item</p>
+          <p className="text-gray-600 mt-1">Analisis mendalam per menu item — {branchLabel}</p>
         </div>
         <div>
           <select
@@ -170,20 +197,26 @@ export function ProductProfitabilityAnalytics() {
 // =========================================================
 
 export function PeakHoursAnalytics() {
-  const { selectedBranchId } = useBranch();
-  const branchParam = selectedBranchId === ALL_BRANCHES ? undefined : selectedBranchId;
   const [peakData, setPeakData] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const { branchArg, label: branchLabel } = useAnalyticsBranch();
 
   useEffect(() => {
     loadPeakHoursData();
-  }, [selectedBranchId]);
+  }, [branchArg]);
 
   const loadPeakHoursData = async () => {
     setIsLoading(true);
-    const result = await getPeakHoursAnalytics(branchParam);
+    const result = await getPeakHoursAnalytics(branchArg);
     if (!result.error) {
-      setPeakData(result.data || []);
+      const raw: any[] = (result.data || []).map((r: any) => ({ ...r, transaction_count: Number(r.transaction_count ?? r.total_orders ?? 0) }));
+      setPeakData(
+        branchArg
+          ? raw
+          : mergeBy(raw, (r) => String(r.hour_of_day), ['transaction_count', 'total_orders', 'item_count', 'total_qty', 'total_revenue']).sort(
+              (a, b) => Number(a.hour_of_day) - Number(b.hour_of_day)
+            )
+      );
     }
     const noActivity = await tenantHasNoActivity();
     if (noActivity) {
@@ -198,7 +231,7 @@ export function PeakHoursAnalytics() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h2 className="text-2xl font-bold">Analisis Jam Sibuk (Peak Hours)</h2>
+        <h2 className="text-2xl font-bold">Analisis Jam Sibuk (Peak Hours) <span className="text-base font-normal text-gray-500">— {branchLabel}</span></h2>
         <p className="text-gray-600 mt-1">Distribusi transaksi per jam dalam 30 hari terakhir</p>
       </div>
 
@@ -316,8 +349,6 @@ export function PeakHoursAnalytics() {
 // =========================================================
 
 export function WasteLossReport() {
-  const { selectedBranchId } = useBranch();
-  const branchParam = selectedBranchId === ALL_BRANCHES ? undefined : selectedBranchId;
   const [wasteLogs, setWasteLogs] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -332,13 +363,15 @@ export function WasteLossReport() {
     notes: '',
   });
 
+  const { branchArg: wasteBranch, label: wasteBranchLabel } = useAnalyticsBranch();
+
   useEffect(() => {
     loadWasteLogs();
-  }, [selectedBranchId]);
+  }, [wasteBranch]);
 
   const loadWasteLogs = async () => {
     setIsLoading(true);
-    const result = await getWasteLossReport(branchParam, 30);
+    const result = await getWasteLossReport(wasteBranch, 30);
     if (!result.error) {
       setWasteLogs(result.data?.items || []);
     }
@@ -354,7 +387,7 @@ export function WasteLossReport() {
     setError(null);
 
     try {
-      const result = await recordWasteLoss({ ...formData, branch_id: branchParam });
+      const result = await recordWasteLoss(formData);
       if (result.error) {
         setError(result.error);
       } else {
@@ -388,7 +421,7 @@ export function WasteLossReport() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold">Laporan Kerugian (Waste Loss)</h2>
+          <h2 className="text-2xl font-bold">Laporan Kerugian (Waste Loss) <span className="text-base font-normal text-gray-500">— {wasteBranchLabel}</span></h2>
           <p className="text-gray-600 mt-1">Tracking kerugian dari barang kadaluarsa/rusak</p>
         </div>
         <button

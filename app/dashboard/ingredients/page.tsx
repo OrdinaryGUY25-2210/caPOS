@@ -148,15 +148,12 @@ export default function IngredientsPage() {
   );
   const activeCount = useMemo(() => ingredients.filter((i) => i.status === "active").length, [ingredients]);
   const inventoryValue = useMemo(() => {
+    // WP-03 / F06: nilai inventori = Σ(stok × HPP) PER CABANG. Mode konsolidasi tidak lagi
+    // memakai rata-rata HPP × total stok, jadi total gabungan = penjumlahan angka tiap cabang.
     return ingredients.reduce((sum, ing) => {
       const rows = stockMap.get(ing.id) ?? [];
-      if (isConsolidated) {
-        // Konsolidasi: jumlahkan NILAI per cabang, bukan qty gabungan ×
-        // rata-rata harga (yang bisa mendistorsi angka bila harga beda).
-        return sum + rows.reduce((s, r) => s + Number(r.stock_qty) * Number(r.cost_price), 0);
-      }
-      const { qty } = branchStockFor(ing.id, ing.low_stock_threshold);
-      return sum + qty * costFor(ing.id);
+      const scoped = isConsolidated ? rows : rows.filter((r) => r.branch_id === selectedBranchId);
+      return sum + scoped.reduce((s, r) => s + Number(r.stock_qty) * Number(r.cost_price ?? 0), 0);
     }, 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ingredients, stockMap, selectedBranchId]);

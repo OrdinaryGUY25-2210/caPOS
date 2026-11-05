@@ -11,7 +11,10 @@ import * as XLSX from "xlsx";
 import { formatRupiah } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
-import { getTier, hasSalesHealth, type Tier } from "@/lib/tier";
+import { getTier, hasSalesHealth, canExportPdf, type Tier } from "@/lib/tier";
+import { getProfitReport, logExport, toExportError } from "@/lib/exportApi";
+import { hppQuality, metricsFromReport } from "@/lib/metrics";
+import { slug } from "@/lib/pdf/common";
 import { useBranch, ALL_BRANCHES } from "@/lib/branchContext";
 import { Skeleton, SkeletonStatGrid } from "@/components/Skeleton";
 import { tenantHasNoActivity } from "@/lib/demoMode";
@@ -23,19 +26,8 @@ import {
 const PIE_COLORS = ["#10B981", "#059669", "#34D399", "#6EE7B7", "#94A3B8"];
 const DAY_LABELS = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
 
-/**
- * Tanggal lokal (YYYY-MM-DD). JANGAN pakai toISOString(): di WIB (UTC+7)
- * hasilnya mundur satu hari untuk jam 00:00–06:59 sehingga label & filter
- * laporan bisa meleset sehari.
- */
-function localISODate(d: Date) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
 interface OmzetPoint { day: string; date: string; omzet: number; orders: number }
+interface OmzetBranchRow { date: string; day: string; branch_id: string | null; branch_name: string; omzet: number; orders: number }
 interface PeakPoint { hour: string; orders: number }
 interface BestSellerPoint { name: string; value: number }
 interface RecentTx {
@@ -47,27 +39,6 @@ interface RecentTx {
   branch_name: string | null;
 }
 
-/**
- * Ringkasan keuangan 7 hari (RPC get_profit_report).
- * Null bila migrasi 20251104_profit_report_rpc.sql belum dijalankan — export
- * tetap berjalan dengan data omzet saja.
- */
-interface FinanceSummary {
-  omzet: number;
-  subtotal: number;
-  diskon: number;
-  hpp: number;
-  laba_kotor: number;
-  susut_stok: number;
-  komisi_channel: number;
-  biaya_operasional: number;
-  laba_bersih: number;
-  margin_kotor_pct: number;
-  total_transaksi: number;
-  item_terjual: number;
-  hpp_estimasi_item: number;
-}
-
 export default function ReportsPage() {
   const { selectedBranchId, selectedBranch, canSwitchBranch, branches } = useBranch();
   const [chartModel, setChartModel] = useState<"bar" | "line">("bar");
@@ -77,8 +48,10 @@ export default function ReportsPage() {
   const [isDemo, setIsDemo] = useState(false);
 
   const [omzetData, setOmzetData] = useState<OmzetPoint[]>([]);
-  const [dailyRaw, setDailyRaw] = useState<{ branch_id: string | null; sale_date: string; total_orders: number; total_revenue: number }[]>([]);
-  const [finance, setFinance] = useState<FinanceSummary | null>(null);
+  // Baris omzet PER CABANG per hari — dipakai export agar tiap baris punya label cabang (WP-04).
+  const [omzetRows, setOmzetRows] = useState<OmzetBranchRow[]>([]);
+  const [exporting, setExporting] = useState<null | "excel" | "pdf">(null);
+  const [exportError, setExportError] = useState<string | null>(null);
   const [peakHours, setPeakHours] = useState<PeakPoint[]>([]);
   const [bestSellers, setBestSellers] = useState<BestSellerPoint[]>([]);
   const [healthTrendPct, setHealthTrendPct] = useState<number | null>(null);
@@ -114,7 +87,7 @@ export default function ReportsPage() {
 
       const supabase = createClient();
       const [{ data: sub }, { data: tenant }] = await Promise.all([
-        supabase.from("subscriptions").select("status, plan").eq("tenant_id", profile.tenant_id).single(),
+        supabase.from("subscriptions").select("status, plan, super_trial_ends_at").eq("tenant_id", profile.tenant_id).single(),
         supabase.from("tenants").select("name").eq("id", profile.tenant_id).single(),
       ]);
 
@@ -129,54 +102,18 @@ export default function ReportsPage() {
       const { data: dailyRows } = await (() => {
         let q = supabase
           .from("daily_sales_analytics")
-          .select("sale_date, total_orders, total_revenue")
+          .select("sale_date, branch_id, total_orders, total_revenue")
           .eq("tenant_id", profile.tenant_id)
-          .gte("sale_date", localISODate(sevenDaysAgo));
+          .gte("sale_date", sevenDaysAgo.toISOString().slice(0, 10));
         if (selectedBranchId !== ALL_BRANCHES) q = q.eq("branch_id", selectedBranchId);
         return q;
       })();
-
-      setDailyRaw((dailyRows as any[]) ?? []);
-
-      // Ringkasan keuangan resmi (omzet, HPP, laba, kerugian) untuk export
-      // halaman ini. RPC ini opsional: bila migrasi belum dijalankan, export
-      // tetap berfungsi dengan data omzet saja.
-      try {
-        const { data: financeRows } = await supabase.rpc("get_profit_report", {
-          p_tenant_id: profile.tenant_id,
-          p_branch_id: selectedBranchId === ALL_BRANCHES ? null : selectedBranchId,
-          p_from: sevenDaysAgo.toISOString(),
-          p_to: new Date().toISOString(),
-        });
-        const row = Array.isArray(financeRows) ? financeRows[0] : financeRows;
-        setFinance(
-          row
-            ? {
-                omzet: Number(row.omzet ?? 0),
-                subtotal: Number(row.subtotal ?? 0),
-                diskon: Number(row.diskon ?? 0),
-                hpp: Number(row.hpp ?? 0),
-                laba_kotor: Number(row.laba_kotor ?? 0),
-                susut_stok: Number(row.susut_stok ?? 0),
-                komisi_channel: Number(row.komisi_channel ?? 0),
-                biaya_operasional: Number(row.biaya_operasional ?? 0),
-                laba_bersih: Number(row.laba_bersih ?? 0),
-                margin_kotor_pct: Number(row.margin_kotor_pct ?? 0),
-                total_transaksi: Number(row.total_transaksi ?? 0),
-                item_terjual: Number(row.item_terjual ?? 0),
-                hpp_estimasi_item: Number(row.hpp_estimasi_item ?? 0),
-              }
-            : null
-        );
-      } catch {
-        setFinance(null);
-      }
 
       const filledDays: OmzetPoint[] = [];
       for (let i = 6; i >= 0; i--) {
         const d = new Date();
         d.setDate(d.getDate() - i);
-        const dateStr = localISODate(d);
+        const dateStr = d.toISOString().slice(0, 10);
         // Kalau "Semua Cabang" dipilih, daily_sales_analytics mengembalikan
         // SATU baris PER CABANG untuk tanggal yang sama (view di-group by
         // tenant_id, branch_id, sale_date sejak migration_011) — jadi harus
@@ -190,6 +127,23 @@ export default function ReportsPage() {
         });
       }
       setOmzetData(filledDays);
+      {
+        const nameOf = new Map(branches.map((b) => [b.id, b.name]));
+        setOmzetRows(
+          filledDays.flatMap((d) =>
+            ((dailyRows ?? []) as any[])
+              .filter((r) => r.sale_date === d.date)
+              .map((r) => ({
+                date: d.date,
+                day: d.day,
+                branch_id: r.branch_id ?? null,
+                branch_name: nameOf.get(r.branch_id) ?? "Tanpa Cabang",
+                omzet: Number(r.total_revenue),
+                orders: Number(r.total_orders),
+              }))
+          )
+        );
+      }
 
       const last3 = filledDays.slice(-3).reduce((s, d) => s + d.omzet, 0);
       const prev3 = filledDays.slice(-6, -3).reduce((s, d) => s + d.omzet, 0);
@@ -316,172 +270,141 @@ export default function ReportsPage() {
   }, [selectedBranchId]);
 
   const branchLabel = selectedBranchId === ALL_BRANCHES ? "Semua Cabang" : selectedBranch?.name ?? "Cabang";
-  const branchNameById = new Map(branches.map((b) => [b.id, b.name]));
+  const exportWindow = () => {
+    const from = new Date();
+    from.setDate(from.getDate() - 6);
+    from.setHours(0, 0, 0, 0);
+    return { from, to: new Date() };
+  };
+  const dateTag = () => new Date().toISOString().slice(0, 10);
 
-  function csvCell(value: string | number): string {
-    const s = String(value ?? "");
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  }
-
-  function exportCSV() {
-    const header = "Tanggal,Cabang,Hari,Omzet (Rp),Jumlah Transaksi\n";
-    let rows: string;
-
-    if (selectedBranchId === ALL_BRANCHES && dailyRaw.length) {
-      rows = [...dailyRaw]
-        .sort((a, b) =>
-          a.sale_date === b.sale_date
-            ? String(a.branch_id ?? "").localeCompare(String(b.branch_id ?? ""))
-            : a.sale_date.localeCompare(b.sale_date)
-        )
-        .map((r) => {
-          const day = DAY_LABELS[new Date(`${r.sale_date}T00:00:00`).getDay()] ?? "-";
-          const name = r.branch_id ? branchNameById.get(r.branch_id) ?? "Tanpa Cabang" : "Tanpa Cabang";
-          return [
-            csvCell(r.sale_date),
-            csvCell(name),
-            csvCell(day),
-            Number(r.total_revenue ?? 0),
-            Number(r.total_orders ?? 0),
-          ].join(",");
-        })
-        .join("\n");
-    } else {
-      rows = omzetData
-        .map((d) => [csvCell(d.date), csvCell(branchLabel), csvCell(d.day), d.omzet, d.orders].join(","))
-        .join("\n");
-    }
-
-    const totalRow = `\nTotal,,,${totalOmzet},${totalOrders}`;
-    const csv = "\uFEFF" + header + rows + totalRow;
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  function download(blob: Blob, name: string) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    const slug = branchLabel.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "cabang";
-    a.download = `laporan-keuangan-omzet-${slug}-${localISODate(new Date())}.csv`;
+    a.download = name;
     a.click();
     URL.revokeObjectURL(url);
   }
 
-  function exportExcel() {
-    const wb = XLSX.utils.book_new();
+  /** CSV (semua paket): omzet harian per cabang. Hanya omzet — tanpa menu/jam ramai. */
+  function exportCSV() {
+    const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
+    const header = "Tanggal,Hari,Cabang,Omzet (Rp),Jumlah Transaksi\n";
+    const body = (omzetRows.length
+      ? omzetRows
+      : omzetData.map((d) => ({ date: d.date, day: d.day, branch_name: branchLabel, omzet: d.omzet, orders: d.orders }))
+    )
+      .map((d) => [d.date, d.day, esc(d.branch_name), d.omzet, d.orders].join(","))
+      .join("\n");
+    const csv = "\uFEFF" + header + body + `\nTotal,,${esc(branchLabel)},${totalOmzet},${totalOrders}`;
+    const name = `laporan-omzet-capos-${slug(branchLabel)}-${dateTag()}.csv`;
+    download(new Blob([csv], { type: "text/csv;charset=utf-8;" }), name);
+    if (!isDemo) {
+      const w = exportWindow();
+      void logExport({ mode: "omzet_csv", branchId: selectedBranchId === ALL_BRANCHES ? null : selectedBranchId, from: w.from, to: w.to, fileName: name });
+    }
+  }
 
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - 6);
-    const startLabel = localISODate(startDate);
-    const endLabel = localISODate(endDate);
+  /** Excel (Pro/Supreme): laporan keuangan + omzet saja. Angka dari get_profit_report() = sama dengan PDF. */
+  async function exportExcel() {
+    setExportError(null);
+    setExporting("excel");
+    try {
+      const w = exportWindow();
+      const branchId = selectedBranchId === ALL_BRANCHES ? null : selectedBranchId;
+      const report = await getProfitReport({ branchId, from: w.from, to: w.to });
+      const m = metricsFromReport(report);
+      const q = hppQuality(report.summary.hpp_lines_actual, report.summary.hpp_lines_estimate);
+      const wb = XLSX.utils.book_new();
 
-    const summaryRows = [
-      [`Laporan Keuangan & Omzet — ${cafeName}`],
-      [`Cabang: ${branchLabel}`],
-      [`Diekspor: ${new Date().toLocaleString("id-ID")}`],
-      [],
-      ["Total Omzet (7 hari)", totalOmzet],
-      ["Total Transaksi", totalOrders],
-      ["Rata-rata / Transaksi", totalOrders > 0 ? Math.round(totalOmzet / totalOrders) : 0],
-      ...(finance
-        ? [
-            ["HPP (COGS)", finance.hpp],
-            ["Laba Kotor", finance.laba_kotor],
-            ["Kerugian / Susut Stok", finance.susut_stok],
-            ["Komisi Channel", finance.komisi_channel],
-            ["Biaya Operasional", finance.biaya_operasional],
-            ["Laba Bersih", finance.laba_bersih],
-            ["Margin Kotor (%)", finance.margin_kotor_pct],
-          ]
-        : []),
-    ];
-    const summarySheet = XLSX.utils.aoa_to_sheet(summaryRows);
-    summarySheet["!cols"] = [{ wch: 30 }, { wch: 24 }];
-    XLSX.utils.book_append_sheet(wb, summarySheet, "Ringkasan");
-
-    if (finance) {
-      const financeRows: (string | number)[][] = [
-        ["Laporan Keuangan", `${startLabel} s/d ${endLabel}`],
-        ["Cabang", branchLabel],
-        ["Diekspor", new Date().toLocaleString("id-ID")],
+      const summaryRows: (string | number)[][] = [
+        [`Laporan Keuangan & Omzet - ${cafeName}`],
+        [`Cabang: ${branchLabel}`],
+        [`Periode: ${w.from.toISOString().slice(0, 10)} s/d ${w.to.toISOString().slice(0, 10)}`],
+        [`Diekspor: ${new Date().toLocaleString("id-ID")}`],
         [],
-        ["Metrik", "Nilai"],
-        ["Omzet", finance.omzet],
-        ["Subtotal sebelum diskon", finance.subtotal],
-        ["Diskon", finance.diskon],
-        ["HPP (COGS)", finance.hpp],
-        ["Laba Kotor", finance.laba_kotor],
-        ["Kerugian / Susut Stok", finance.susut_stok],
-        ["Komisi Channel", finance.komisi_channel],
-        ["Biaya Operasional", finance.biaya_operasional],
-        ["Laba Bersih", finance.laba_bersih],
-        ["Margin Kotor (%)", finance.margin_kotor_pct],
-        ["Jumlah Transaksi", finance.total_transaksi],
-        ["Item Terjual", finance.item_terjual],
-        [
-          "Status HPP",
-          finance.hpp_estimasi_item > 0
-            ? `Estimasi (${finance.hpp_estimasi_item} item tanpa snapshot)`
-            : "Aktual",
-        ],
+        ["Omzet", m.omzet],
+        ["Diskon", m.diskon],
+        ["Jumlah Transaksi", m.transaksi],
+        ["Rata-rata / Transaksi", m.aov],
+        ["Refund", m.refund],
+        ["HPP", m.hpp],
+        ["Laba Kotor", m.labaKotor],
+        ["Susut Stok", m.susutStok],
+        ["Komisi Channel", m.komisi],
+        [report.summary.opex_tersedia ? "Biaya Operasional" : "Biaya Operasional (belum dipakai)", m.biayaOperasional],
+        ["Laba Bersih", m.labaBersih],
+        ["Margin Kotor (%)", Math.round(m.marginKotor * 10) / 10],
+        [],
+        [q.label, q.note],
       ];
-      const financeSheet = XLSX.utils.aoa_to_sheet(financeRows);
-      financeSheet["!cols"] = [{ wch: 30 }, { wch: 44 }];
-      XLSX.utils.book_append_sheet(wb, financeSheet, "Laporan Keuangan");
-    }
+      const summarySheet = XLSX.utils.aoa_to_sheet(summaryRows);
+      summarySheet["!cols"] = [{ wch: 32 }, { wch: 22 }];
+      XLSX.utils.book_append_sheet(wb, summarySheet, "Ringkasan Keuangan");
 
-    const isConsolidated = selectedBranchId === ALL_BRANCHES;
+      const omzetSheet = XLSX.utils.json_to_sheet(
+        report.daily_by_branch.map((d) => ({ Tanggal: d.tanggal, Cabang: d.cabang, "Omzet (Rp)": d.omzet, "Jumlah Transaksi": d.transaksi }))
+      );
+      omzetSheet["!cols"] = [{ wch: 12 }, { wch: 22 }, { wch: 16 }, { wch: 16 }];
+      XLSX.utils.book_append_sheet(wb, omzetSheet, "Omzet Harian");
 
-    const omzetRows = isConsolidated && dailyRaw.length
-      ? [...dailyRaw]
-          .sort((a, b) =>
-            a.sale_date === b.sale_date
-              ? String(a.branch_id ?? "").localeCompare(String(b.branch_id ?? ""))
-              : a.sale_date.localeCompare(b.sale_date)
-          )
-          .map((r) => ({
-            Tanggal: r.sale_date,
-            Cabang: r.branch_id ? branchNameById.get(r.branch_id) ?? "Tanpa Cabang" : "Tanpa Cabang",
-            "Omzet (Rp)": Number(r.total_revenue ?? 0),
-            "Jumlah Transaksi": Number(r.total_orders ?? 0),
+      const labaSheet = XLSX.utils.json_to_sheet(
+        report.daily.map((d) => ({ Tanggal: d.tanggal, "Omzet (Rp)": d.omzet, "HPP (Rp)": d.hpp, "Laba Kotor (Rp)": Number(d.omzet) - Number(d.hpp) }))
+      );
+      labaSheet["!cols"] = [{ wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 18 }];
+      XLSX.utils.book_append_sheet(wb, labaSheet, "Laba Harian");
+
+      if (selectedBranchId === ALL_BRANCHES && report.by_branch.length > 0) {
+        const recap = XLSX.utils.json_to_sheet(
+          report.by_branch.map((b) => ({
+            Cabang: b.branch_name,
+            "Jumlah Transaksi": b.transaksi,
+            "Omzet (Rp)": b.omzet,
+            "HPP (Rp)": b.hpp,
+            "Laba Kotor (Rp)": Number(b.omzet) - Number(b.refund) - Number(b.hpp),
+            "Susut (Rp)": b.susut,
+            "Komisi (Rp)": b.komisi,
+            "Biaya Operasional (Rp)": b.opex,
           }))
-      : omzetData.map((d) => ({
-          Tanggal: d.date,
-          Cabang: branchLabel,
-          Hari: d.day,
-          "Omzet (Rp)": d.omzet,
-          "Jumlah Transaksi": d.orders,
-        }));
-
-    const omzetSheet = XLSX.utils.json_to_sheet(omzetRows);
-    omzetSheet["!cols"] = [{ wch: 12 }, { wch: 22 }, { wch: 10 }, { wch: 16 }, { wch: 16 }];
-    XLSX.utils.book_append_sheet(wb, omzetSheet, "Omzet Harian");
-
-    if (isConsolidated) {
-      const recapMap = new Map<string, { name: string; omzet: number; orders: number }>();
-      for (const r of dailyRaw) {
-        const key = r.branch_id ?? "tanpa-cabang";
-        const e = recapMap.get(key) ?? {
-          name: r.branch_id ? branchNameById.get(r.branch_id) ?? `Cabang ${String(r.branch_id).slice(0, 8)}` : "Tanpa Cabang",
-          omzet: 0,
-          orders: 0,
-        };
-        e.omzet += Number(r.total_revenue ?? 0);
-        e.orders += Number(r.total_orders ?? 0);
-        recapMap.set(key, e);
+        );
+        recap["!cols"] = [{ wch: 22 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 22 }];
+        XLSX.utils.book_append_sheet(wb, recap, "Rekap per Cabang");
       }
-      const recapRows = Array.from(recapMap.values())
-        .sort((a, b) => b.omzet - a.omzet)
-        .map((b) => ({ Cabang: b.name, "Omzet (Rp)": b.omzet, "Jumlah Transaksi": b.orders }));
-      recapRows.push({ Cabang: "TOTAL", "Omzet (Rp)": totalOmzet, "Jumlah Transaksi": totalOrders });
-      const recapSheet = XLSX.utils.json_to_sheet(recapRows);
-      recapSheet["!cols"] = [{ wch: 26 }, { wch: 18 }, { wch: 18 }];
-      XLSX.utils.book_append_sheet(wb, recapSheet, "Rekap per Cabang");
-    }
 
-    // Sesuai keputusan: halaman Laporan & Omzet hanya mengekspor laporan
-    // keuangan + omzet. Data menu/stok/analitik lengkap ada di halaman
-    // Laporan & Export (PDF + Excel) agar tidak menduplikasi dua tempat.
-    const slug = branchLabel.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "cabang";
-    XLSX.writeFile(wb, `laporan-keuangan-omzet-${slug}-${localISODate(new Date())}.xlsx`);
+      const name = `laporan-capos-${slug(branchLabel)}-${dateTag()}.xlsx`;
+      XLSX.writeFile(wb, name);
+      void logExport({ mode: "omzet_excel", branchId, from: w.from, to: w.to, rowCount: report.summary.transaksi, fileName: name });
+    } catch (e) {
+      setExportError(toExportError(e).message);
+    } finally {
+      setExporting(null);
+    }
+  }
+
+  /** PDF (Pro/Supreme): laporan keuangan "Hanya Keuntungan". Free Trial tidak punya tombol ini. */
+  async function exportPdf() {
+    setExportError(null);
+    setExporting("pdf");
+    try {
+      const w = exportWindow();
+      const branchId = selectedBranchId === ALL_BRANCHES ? null : selectedBranchId;
+      const report = await getProfitReport({ branchId, from: w.from, to: w.to });
+      const { buildProfitPdf } = await import("@/lib/pdf/profitPdf");
+      const fileName = `capos-laba-${slug(branchLabel)}-${w.to.toISOString().slice(0, 10).replace(/-/g, "")}.pdf`;
+      const doc = await buildProfitPdf(report, {
+        cafeName,
+        branchLabel,
+        periodLabel: `${w.from.toISOString().slice(0, 10)} s/d ${w.to.toISOString().slice(0, 10)}`,
+        fileName,
+      });
+      doc.save(fileName);
+      void logExport({ mode: "laba", branchId, from: w.from, to: w.to, rowCount: report.summary.transaksi, fileName });
+    } catch (e) {
+      setExportError(toExportError(e).message);
+    } finally {
+      setExporting(null);
+    }
   }
 
   if (loading) {
@@ -515,32 +438,38 @@ export default function ReportsPage() {
             </span>
           </div>
           <p className="text-sm text-neutral-500">
-            Ringkasan performa penjualan kafe Anda — 7 hari terakhir
+            Ringkasan performa penjualan kafe Anda — 7 hari terakhir. Export di halaman ini hanya laporan keuangan & omzet; laporan lengkap ada di menu Laporan PDF
             {canSwitchBranch && (selectedBranchId === ALL_BRANCHES ? " (Semua Cabang)" : selectedBranch ? ` — ${selectedBranch.name}` : "")}
           </p>
         </div>
         <div className="flex items-center gap-2">
           {canExportExcel ? (
             <>
-              <button onClick={exportExcel} className="btn-outline flex items-center gap-1.5 text-sm" title="Excel: laporan keuangan (omzet, HPP, laba, kerugian) + omzet harian + rekap per cabang">
-                <Download size={14} /> Export Excel
+              <button onClick={exportExcel} disabled={!!exporting} className="btn-outline flex items-center gap-1.5 text-sm" title="Excel laporan keuangan & omzet: Ringkasan Keuangan, Omzet Harian per Cabang, Laba Harian (+ Rekap per Cabang)">
+                <Download size={14} /> {exporting === "excel" ? "Membuat Excel..." : "Excel Keuangan & Omzet"}
               </button>
-              <button onClick={() => window.print()} className="btn-outline flex items-center gap-1.5 text-sm">
-                <Printer size={14} /> PDF
-              </button>
+              {canExportPdf(tier) && (
+                <button onClick={exportPdf} disabled={!!exporting} className="btn-outline flex items-center gap-1.5 text-sm" title="PDF laporan keuangan (laba rugi). Laporan lengkap semua data ada di menu Laporan PDF.">
+                  <Printer size={14} /> {exporting === "pdf" ? "Membuat PDF..." : "PDF Keuangan"}
+                </button>
+              )}
             </>
           ) : (
             <>
-              <button onClick={exportCSV} className="btn-outline flex items-center gap-1.5 text-sm" title="CSV sederhana: rekap omzet harian">
+              <button onClick={exportCSV} className="btn-outline flex items-center gap-1.5 text-sm" title="CSV: omzet harian per cabang">
                 <Download size={14} /> Export CSV
               </button>
-              <Link href="/dashboard/subscription" className="text-xs text-primary hover:underline whitespace-nowrap">
-                Upgrade untuk Export Excel
+              <Link href="/dashboard/subscription" className="text-xs text-primary hover:underline whitespace-nowrap" title="Free Trial tidak bisa export PDF dalam bentuk apa pun">
+                Export PDF & Excel: upgrade ke Pro
               </Link>
             </>
           )}
         </div>
       </div>
+
+      {exportError && (
+        <div className="card p-3 text-sm text-red-700 bg-red-50 border-red-200">{exportError}</div>
+      )}
 
       {!hasData && (
         <div className="card p-5 bg-primary-light/40 border-primary/20 text-sm text-neutral-700">
@@ -692,10 +621,10 @@ export default function ReportsPage() {
             <Sparkles className="text-primary-dark" size={22} />
           </div>
           <div>
-            <p className="font-semibold text-neutral-900">Jam Ramai, Menu Terlaris & Export Lengkap ada di Supreme</p>
+            <p className="font-semibold text-neutral-900">Jam Ramai & Menu Terlaris ada di Supreme</p>
             <p className="text-sm text-neutral-500 mt-1 max-w-md mx-auto">
               Upgrade ke paket Supreme (Tahunan) untuk buka analisis jam ramai, menu terlaris,
-              serta export laporan multi-sheet ke Excel dan PDF.
+              serta analitik lanjutan lainnya.
             </p>
           </div>
           <Link href="/dashboard/subscription" className="btn-primary inline-block">

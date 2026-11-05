@@ -79,7 +79,7 @@ const NAV_GROUPS: { label: string; items: { href: string; label: string; icon: a
     label: "Ringkasan",
     items: [
       { href: "/dashboard", label: "Laporan & Omzet", icon: BarChart3 },
-      { href: "/dashboard/laporan-pdf", label: "Laporan & Export", icon: FileText },
+      { href: "/dashboard/laporan-pdf", label: "Laporan PDF", icon: FileText },
       { href: "/dashboard/target", label: "Target Bulanan", icon: Target },
       { href: "/dashboard/transactions", label: "Riwayat Transaksi", icon: Receipt },
       { href: "/dashboard/cancellations", label: "Log Pembatalan", icon: History },

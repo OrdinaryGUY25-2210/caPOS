@@ -25,7 +25,7 @@ const TOUR_STEPS: Step[] = [
   },
   // Ringkasan
   { target: "nav:/dashboard", title: "Laporan & Omzet", description: "Ringkasan performa kafe: omzet, jumlah transaksi, dan grafik tren pada periode terpilih." },
-  { target: "nav:/dashboard/laporan-pdf", title: "Laporan PDF Otomatis", description: "Buat dan unduh laporan penjualan berformat PDF sesuai rentang tanggal." },
+  { target: "nav:/dashboard/laporan-pdf", title: "Laporan PDF", description: "Buat dan unduh laporan penjualan berformat PDF sesuai rentang tanggal." },
   { target: "nav:/dashboard/target", title: "Target Bulanan", description: "Tetapkan target omzet bulanan dan pantau tingkat pencapaiannya." },
   { target: "nav:/dashboard/transactions", title: "Riwayat Transaksi", description: "Daftar semua transaksi: cari, lihat detail, dan cetak ulang struk." },
   { target: "nav:/dashboard/cancellations", title: "Log Pembatalan", description: "Catatan transaksi yang dibatalkan (void) beserta alasannya." },

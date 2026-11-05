@@ -1,98 +1,63 @@
 /**
- * lib/hpp.ts — resolusi HPP per baris transaksi.
+ * WP-02 — HPP menu per cabang.
  *
- * Urutan fallback (sama dengan dokumen RENCANA_PERBAIKAN):
- *   1. transaction_items.cost_price_snapshot  (paling akurat, diisi trigger)
- *   2. product_branch_cost.cost_price         (HPP khusus cabang)
- *   3. products.cost_price                    (default tenant)
- *   4. 0                                      (belum diisi → ditandai estimasi)
- *
- * Catatan: fungsi ini murni (tanpa akses jaringan) supaya bisa dipakai
- * halaman laporan, export PDF, dan export Excel dengan hasil yang identik.
+ * products.cost_price tetap menjadi default untuk seluruh tenant.
+ * product_branch_cost (supabase/20251104_product_branch_cost.sql) menyimpan
+ * override per cabang. Urutan baca (sama dengan get_product_cost() di DB):
+ *   override cabang  →  products.cost_price  →  0
  */
+import type { SupabaseClient } from "@supabase/supabase-js";
 
-export type CostSource = "snapshot" | "branch" | "product" | "estimate";
+export const HPP_SOURCE_LABEL: Record<string, string> = {
+  recipe: "Resep",
+  branch: "HPP cabang",
+  wac: "Rata-rata tertimbang",
+  product: "HPP default menu",
+  estimate: "Estimasi",
+};
 
-export interface CostProductRow {
-  id: string;
-  cost_price?: number | null;
+/** true bila error berasal dari migrasi 20251104_product_branch_cost.sql yang belum dijalankan. */
+export function isMissingBranchCostTable(error: { message?: string; code?: string } | null | undefined) {
+  if (!error) return false;
+  return error.code === "42P01" || error.code === "PGRST205" || /product_branch_cost/.test(error.message ?? "");
 }
 
-export interface CostBranchRow {
-  product_id: string;
-  branch_id: string;
-  cost_price: number;
-}
-
-export interface CostItemRow {
-  qty: number | string;
-  product_id?: string | null;
-  transaction_id?: string | null;
-  cost_price_snapshot?: number | string | null;
-  hpp_source?: string | null;
-  products?: { name?: string | null; cost_price?: number | string | null } | null;
-}
-
-export interface ResolvedCost {
-  unitCost: number;
-  totalCost: number;
-  source: CostSource;
-}
-
-export function toNumber(value: unknown): number {
-  const n = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(n) ? n : 0;
-}
-
-/** Map productId → cost default tenant. */
-export function buildProductCostMap(products: CostProductRow[]): Map<string, number> {
-  const map = new Map<string, number>();
-  for (const p of products) map.set(p.id, toNumber(p.cost_price));
-  return map;
-}
-
-/** Map `${branchId}:${productId}` → cost khusus cabang. */
-export function buildBranchCostMap(rows: CostBranchRow[]): Map<string, number> {
-  const map = new Map<string, number>();
-  for (const r of rows) map.set(`${r.branch_id}:${r.product_id}`, toNumber(r.cost_price));
-  return map;
-}
-
-/**
- * Resolusi biaya satu item transaksi. `branchId = null` berarti laporan
- * konsolidasi: pakai snapshot dulu, lalu HPP produk default tenant (karena
- * satu item memang milik satu cabang, snapshot tetap yang paling benar).
- */
-export function resolveItemCost(
-  item: CostItemRow,
-  productCostMap: Map<string, number>,
-  branchCostMap: Map<string, number>,
-  branchId: string | null
-): ResolvedCost {
-  const qty = toNumber(item.qty);
-  const snapshot = item.cost_price_snapshot;
-  const snapshotNumber = toNumber(snapshot);
-  // Snapshot > 0 selalu menang. Snapshot 0 hanya dianggap final bila sumbernya
-  // bukan 'estimate' (mis. item gratis yang memang Rp0); kalau estimasi,
-  // coba fallback HPP cabang/produk dulu.
-  const snapshotFinal =
-    snapshot !== null &&
-    snapshot !== undefined &&
-    (snapshotNumber > 0 || (item.hpp_source !== null && item.hpp_source !== undefined && item.hpp_source !== "estimate"));
-  if (snapshotFinal) {
-    return { unitCost: snapshotNumber, totalCost: snapshotNumber * qty, source: "snapshot" };
+/** Ambil semua override HPP untuk satu cabang → Map(product_id → cost_price). */
+export async function loadBranchCosts(
+  supabase: SupabaseClient,
+  tenantId: string,
+  branchId: string
+): Promise<Map<string, number>> {
+  const { data, error } = await supabase
+    .from("product_branch_cost")
+    .select("product_id, cost_price")
+    .eq("tenant_id", tenantId)
+    .eq("branch_id", branchId);
+  if (error) {
+    if (isMissingBranchCostTable(error)) return new Map(); // migrasi belum jalan → pakai default
+    throw error;
   }
+  return new Map((data ?? []).map((r: any) => [r.product_id as string, Number(r.cost_price)]));
+}
 
-  const productId = item.product_id ?? "";
-  const branchCost = branchId ? branchCostMap.get(`${branchId}:${productId}`) : undefined;
-  if (branchCost !== undefined && branchCost > 0) {
-    return { unitCost: branchCost, totalCost: branchCost * qty, source: "branch" };
-  }
+/** Simpan HPP khusus satu cabang. */
+export async function saveBranchCost(
+  supabase: SupabaseClient,
+  args: { tenantId: string; branchId: string; productId: string; costPrice: number }
+) {
+  return supabase.from("product_branch_cost").upsert(
+    {
+      tenant_id: args.tenantId,
+      branch_id: args.branchId,
+      product_id: args.productId,
+      cost_price: Math.max(0, args.costPrice),
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "branch_id,product_id" }
+  );
+}
 
-  const product = productCostMap.get(productId) ?? toNumber(item.products?.cost_price);
-  if (product > 0) {
-    return { unitCost: product, totalCost: product * qty, source: "product" };
-  }
-
-  return { unitCost: 0, totalCost: 0, source: "estimate" };
+/** Hapus override → cabang itu kembali memakai default tenant. */
+export async function clearBranchCost(supabase: SupabaseClient, branchId: string, productId: string) {
+  return supabase.from("product_branch_cost").delete().eq("branch_id", branchId).eq("product_id", productId);
 }

@@ -53,7 +53,7 @@ export default function PremiumFeatureLock({
       }
       const { data: sub } = await createClient()
         .from("subscriptions")
-        .select("status, plan")
+        .select("status, plan, super_trial_ends_at")
         .eq("tenant_id", profile.tenant_id)
         .single();
       setTier(getTier(sub));
