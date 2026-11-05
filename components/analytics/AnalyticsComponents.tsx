@@ -8,6 +8,7 @@ import {
   recordWasteLoss,
 } from '@/app/actions/purchasing-loyalty-actions';
 import { tenantHasNoActivity } from '@/lib/demoMode';
+import { useBranch, ALL_BRANCHES } from '@/lib/branchContext';
 import { DEMO_PRODUCT_PROFITABILITY, DEMO_PEAK_HOURS, DEMO_WASTE_LOGS } from '@/lib/demoData';
 
 // =========================================================
@@ -15,13 +16,15 @@ import { DEMO_PRODUCT_PROFITABILITY, DEMO_PEAK_HOURS, DEMO_WASTE_LOGS } from '@/
 // =========================================================
 
 export function ProductProfitabilityAnalytics() {
+  const { selectedBranchId } = useBranch();
+  const branchParam = selectedBranchId === ALL_BRANCHES ? undefined : selectedBranchId;
   const [profitData, setProfitData] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [sortBy, setSortBy] = useState<'profit' | 'revenue' | 'margin'>('profit');
 
   useEffect(() => {
     loadProfitabilityData();
-  }, [sortBy]);
+  }, [sortBy, selectedBranchId]);
 
   const sortRows = (rows: any[]) => {
     // Sort based on selected option
@@ -37,7 +40,7 @@ export function ProductProfitabilityAnalytics() {
 
   const loadProfitabilityData = async () => {
     setIsLoading(true);
-    const result = await getProductProfitability(undefined, 20);
+    const result = await getProductProfitability(branchParam, 20);
     if (!result.error) {
       setProfitData(sortRows(result.data || []));
     }
@@ -167,16 +170,18 @@ export function ProductProfitabilityAnalytics() {
 // =========================================================
 
 export function PeakHoursAnalytics() {
+  const { selectedBranchId } = useBranch();
+  const branchParam = selectedBranchId === ALL_BRANCHES ? undefined : selectedBranchId;
   const [peakData, setPeakData] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     loadPeakHoursData();
-  }, []);
+  }, [selectedBranchId]);
 
   const loadPeakHoursData = async () => {
     setIsLoading(true);
-    const result = await getPeakHoursAnalytics();
+    const result = await getPeakHoursAnalytics(branchParam);
     if (!result.error) {
       setPeakData(result.data || []);
     }
@@ -311,6 +316,8 @@ export function PeakHoursAnalytics() {
 // =========================================================
 
 export function WasteLossReport() {
+  const { selectedBranchId } = useBranch();
+  const branchParam = selectedBranchId === ALL_BRANCHES ? undefined : selectedBranchId;
   const [wasteLogs, setWasteLogs] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -327,11 +334,11 @@ export function WasteLossReport() {
 
   useEffect(() => {
     loadWasteLogs();
-  }, []);
+  }, [selectedBranchId]);
 
   const loadWasteLogs = async () => {
     setIsLoading(true);
-    const result = await getWasteLossReport(undefined, 30);
+    const result = await getWasteLossReport(branchParam, 30);
     if (!result.error) {
       setWasteLogs(result.data?.items || []);
     }
@@ -347,7 +354,7 @@ export function WasteLossReport() {
     setError(null);
 
     try {
-      const result = await recordWasteLoss(formData);
+      const result = await recordWasteLoss({ ...formData, branch_id: branchParam });
       if (result.error) {
         setError(result.error);
       } else {

@@ -5,6 +5,7 @@ import { ChefHat, Plus, Trash2, Loader2, CheckCircle2, XCircle, Calculator } fro
 import { formatRupiah, cx } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
+import { useBranch, ALL_BRANCHES } from "@/lib/branchContext";
 import { isManagerOrOwner } from "@/lib/role";
 import type { Product, ProductVariant, Recipe, RecipeItem, Ingredient } from "@/lib/types";
 import { Skeleton, SkeletonList } from "@/components/Skeleton";
@@ -24,6 +25,7 @@ import { DEMO_RECIPES, DEMO_RECIPE_ITEMS, DEMO_PRODUCTS, DEMO_INGREDIENTS } from
 type RecipeItemDraft = { id?: string; ingredient_id: string; quantity: string; unit: string; wastage_percentage: string; notes: string };
 
 export default function RecipesPage() {
+  const { selectedBranchId } = useBranch();
   const [products, setProducts] = useState<Product[]>([]);
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
@@ -256,7 +258,10 @@ export default function RecipesPage() {
     if (!activeRecipe) return;
     setCalculating(true);
     const supabase = createClient();
-    const { data, error } = await supabase.rpc("calculate_recipe_cost", { p_recipe_id: activeRecipe.id });
+    const { data, error } = await supabase.rpc("calculate_recipe_cost", {
+      p_recipe_id: activeRecipe.id,
+      p_branch_id: selectedBranchId === ALL_BRANCHES ? null : selectedBranchId,
+    });
     setCalculating(false);
     if (error) {
       alert("Gagal menghitung HPP: " + error.message);

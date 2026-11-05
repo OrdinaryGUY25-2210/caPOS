@@ -47,7 +47,7 @@ const TYPE_LABEL: Record<string, string> = {
 };
 
 export default function StockPage() {
-  const { selectedBranchId, selectedBranch, canSwitchBranch } = useBranch();
+  const { selectedBranchId, selectedBranch, canSwitchBranch, branches } = useBranch();
   const [products, setProducts] = useState<ProductStock[]>([]);
   const [movements, setMovements] = useState<MovementRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -70,7 +70,7 @@ export default function StockPage() {
     }
 
     const supabase = createClient();
-    const [{ data: prodData }, { data: stockRows }, movementQuery] = await Promise.all([
+    const [{ data: prodData }, { data: stockRows }, movementQuery, { data: branchCostRows }] = await Promise.all([
       supabase.from("products").select("*").eq("tenant_id", profile.tenant_id).order("name", { ascending: true }),
       supabase.from("branch_stock").select("product_id, branch_id, stock_qty").eq("tenant_id", profile.tenant_id),
       (() => {
@@ -83,6 +83,14 @@ export default function StockPage() {
         if (!isConsolidated) q = q.eq("branch_id", selectedBranchId);
         return q;
       })(),
+      // HPP khusus cabang (opsional; tabel dibuat oleh migrasi 20251104).
+      isConsolidated
+        ? Promise.resolve({ data: [] as { product_id: string; cost_price: number }[] })
+        : supabase
+            .from("product_branch_cost")
+            .select("product_id, cost_price")
+            .eq("tenant_id", profile.tenant_id)
+            .eq("branch_id", selectedBranchId),
     ]);
     const { data: moveData } = movementQuery;
 
@@ -112,17 +120,40 @@ export default function StockPage() {
         .in("product_id", recipeProductIds);
       await Promise.all(
         ((recipeRows as { id: string; product_id: string }[]) ?? []).map(async (r) => {
-          const { data: cost } = await supabase.rpc("calculate_recipe_cost", {
-            p_recipe_id: r.id,
-            p_branch_id: isConsolidated ? null : selectedBranchId,
-          });
-          recipeCostMap.set(r.product_id, Number(cost ?? 0));
+          // Konsolidasi: hitung HPP resep untuk SETIAP cabang lalu ambil
+          // rata-rata dari cabang yang punya harga bahan. Jangan pakai null
+          // (yang berarti "cabang utama") supaya tidak menyesatkan.
+          const branchIds = isConsolidated
+            ? (branches.length ? branches.map((b) => b.id) : [null])
+            : [selectedBranchId];
+          const costs = await Promise.all(
+            branchIds.map(async (bid) => {
+              const { data: cost } = await supabase.rpc("calculate_recipe_cost", {
+                p_recipe_id: r.id,
+                p_branch_id: bid,
+              });
+              return Number(cost ?? 0);
+            })
+          );
+          const positive = costs.filter((c) => c > 0);
+          recipeCostMap.set(
+            r.product_id,
+            positive.length ? positive.reduce((s, c) => s + c, 0) / positive.length : 0
+          );
         })
       );
     }
-    const freshProducts = baseProducts.map((p) =>
-      recipeCostMap.has(p.id) ? { ...p, cost_price: recipeCostMap.get(p.id)! } : p
-    );
+    const branchCostMap = new Map<string, number>();
+    for (const row of (branchCostRows as { product_id: string; cost_price: number }[]) ?? []) {
+      branchCostMap.set(row.product_id, Number(row.cost_price));
+    }
+    // Prioritas HPP: override cabang → HPP resep → HPP default produk.
+    const freshProducts = baseProducts.map((p) => {
+      if (!isConsolidated && branchCostMap.has(p.id)) {
+        return { ...p, cost_price: branchCostMap.get(p.id)! };
+      }
+      return recipeCostMap.has(p.id) ? { ...p, cost_price: recipeCostMap.get(p.id)! } : p;
+    });
     const freshMovements: MovementRow[] = (moveData ?? []).map((m: any) => ({
       id: m.id,
       type: m.type,
@@ -176,19 +207,55 @@ export default function StockPage() {
     }
     setSaving(true);
     const supabase = createClient();
-    const { error } = await supabase
-      .from("products")
-      .update({
-        cost_price: p.cost_price,
-        track_stock: p.track_stock,
-        low_stock_threshold: p.low_stock_threshold,
-      })
-      .eq("id", p.id);
-    setSaving(false);
+    const branchScoped = !isConsolidated;
+
+    // HPP default tenant hanya diubah saat "Semua Cabang" dipilih. Saat satu
+    // cabang aktif, HPP disimpan sebagai override cabang agar cabang lain
+    // tidak ikut berubah.
+    const productUpdate: Record<string, unknown> = {
+      track_stock: p.track_stock,
+      low_stock_threshold: p.low_stock_threshold,
+    };
+    if (!branchScoped) productUpdate.cost_price = p.cost_price;
+
+    const { error } = await supabase.from("products").update(productUpdate).eq("id", p.id);
     if (error) {
+      setSaving(false);
       alert("Gagal menyimpan: " + error.message);
       return;
     }
+
+    if (branchScoped) {
+      const { error: costError } =
+        p.cost_price > 0
+          ? await supabase.from("product_branch_cost").upsert(
+              {
+                tenant_id: p.tenant_id,
+                branch_id: selectedBranchId,
+                product_id: p.id,
+                cost_price: p.cost_price,
+              },
+              { onConflict: "branch_id,product_id" }
+            )
+          : await supabase
+              .from("product_branch_cost")
+              .delete()
+              .eq("branch_id", selectedBranchId)
+              .eq("product_id", p.id);
+
+      if (costError) {
+        setSaving(false);
+        alert(
+          "Pengaturan stok tersimpan, tetapi HPP cabang gagal disimpan: " +
+            costError.message +
+            "\n\nPastikan migrasi supabase/20251104_product_branch_cost.sql sudah dijalankan."
+        );
+        loadAll();
+        return;
+      }
+    }
+
+    setSaving(false);
     setEditing(null);
     loadAll();
   }
@@ -259,6 +326,12 @@ export default function StockPage() {
             Atur HPP (harga pokok) tiap menu, aktifkan pelacakan stok bahan, dan pantau stok menipis
             {canSwitchBranch && !isConsolidated && selectedBranch ? ` — cabang ${selectedBranch.name}.` : "."}
           </p>
+          {!isConsolidated && (
+            <p className="text-xs text-neutral-400 mt-1">
+              HPP yang diubah di sini berlaku untuk cabang ini saja. Pilih &quot;Semua Cabang&quot; untuk
+              mengubah HPP default tenant.
+            </p>
+          )}
         </div>
         <button onClick={() => setShowHistory(true)} className="btn-outline flex items-center gap-1.5 text-sm">
           <History size={14} /> Riwayat Pergerakan

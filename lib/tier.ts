@@ -43,6 +43,16 @@ export function isPremiumReport(tier: Tier) {
   return tier === "supreme";
 }
 
+/**
+ * Mode export "Semua Data" (PDF + Excel lengkap) hanya untuk paket Pro/Supreme
+ * dengan role Owner/Manager. Dipakai halaman Laporan & Export; batas data
+ * sebenarnya tetap dijaga RLS di server.
+ */
+export function canUseFullExport(tier: Tier, role: string | null | undefined): boolean {
+  const allowedRole = role === "owner" || role === "manager" || role === "super_admin";
+  return allowedRole && (tier === "pro" || tier === "supreme");
+}
+
 export function hasSalesHealth(tier: Tier) {
   return tier === "pro" || tier === "supreme";
 }

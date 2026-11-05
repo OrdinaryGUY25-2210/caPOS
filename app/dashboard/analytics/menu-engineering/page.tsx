@@ -5,6 +5,7 @@ import { Loader2 } from "lucide-react";
 import { ResponsiveContainer, ScatterChart, Scatter, XAxis, YAxis, ZAxis, Tooltip, ReferenceLine, Cell } from "recharts";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
+import { useBranch, ALL_BRANCHES } from "@/lib/branchContext";
 import { formatRupiah } from "@/lib/utils";
 import type { MenuEngineeringRow, MenuEngineeringClass } from "@/lib/types";
 import { Skeleton, SkeletonBlock, SkeletonTableRows } from "@/components/Skeleton";
@@ -42,20 +43,24 @@ export default function MenuEngineeringPage() {
 }
 
 function MenuEngineeringContent() {
+  const { selectedBranchId } = useBranch();
   const [rows, setRows] = useState<MenuEngineeringRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [isDemo, setIsDemo] = useState(false);
 
   useEffect(() => {
     load();
-  }, []);
+  }, [selectedBranchId]);
 
   async function load() {
     setLoading(true);
     const { profile } = await getCurrentProfile();
     if (!profile) return;
     const supabase = createClient();
-    const { data } = await supabase.rpc("menu_engineering_report", { p_tenant_id: profile.tenant_id });
+    const { data } = await supabase.rpc("menu_engineering_report", {
+      p_tenant_id: profile.tenant_id,
+      p_branch_id: selectedBranchId === ALL_BRANCHES ? null : selectedBranchId,
+    });
     setRows((data as MenuEngineeringRow[]) ?? []);
 
     const noActivity = await tenantHasNoActivity();

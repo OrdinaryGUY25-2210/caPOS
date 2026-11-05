@@ -1,21 +1,69 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { FileText, Download, Loader2, CalendarRange } from "lucide-react";
-import { formatRupiah, cx } from "@/lib/utils";
+import { useEffect, useMemo, useState } from "react";
+import {
+  FileText,
+  FileSpreadsheet,
+  Download,
+  Loader2,
+  CalendarRange,
+  Lock,
+  TrendingUp,
+  Layers,
+  CheckCircle2,
+  AlertTriangle,
+} from "lucide-react";
+import { cx } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
-import { getTier, HISTORY_DAYS_LIMIT, type Tier } from "@/lib/tier";
+import { getTier, HISTORY_DAYS_LIMIT, canUseFullExport, type Tier } from "@/lib/tier";
 import { useBranch, ALL_BRANCHES } from "@/lib/branchContext";
 import { Skeleton } from "@/components/Skeleton";
 import { tenantHasNoActivity } from "@/lib/demoMode";
 import DemoBadge from "@/components/demo/DemoBadge";
-import { DEMO_REPORT_TX, DEMO_REPORT_ITEMS, DEMO_REPORT_OPNAME } from "@/lib/demoData";
+import { fetchReportData } from "@/lib/export/data";
+import { renderReportPdf, downloadPdf } from "@/lib/export/pdf";
+import { buildWorkbook, downloadWorkbook, excelFilename } from "@/lib/export/excel";
+import type { ExportMode } from "@/lib/export/types";
 
 type RangeKey = "today" | "7" | "month" | "custom";
 
+const MODES: {
+  key: ExportMode;
+  title: string;
+  desc: string;
+  icon: typeof FileText;
+  tone: string;
+}[] = [
+  {
+    key: "ringkasan",
+    title: "Ringkasan",
+    desc: "Omzet, HPP, laba, omzet harian, menu terlaris, pembayaran, dan kasir.",
+    icon: FileText,
+    tone: "border-primary bg-primary/5",
+  },
+  {
+    key: "profit",
+    title: "Hanya Keuntungan",
+    desc: "Laba rugi lengkap, margin per kategori, kontribusi laba menu, dan tren laba.",
+    icon: TrendingUp,
+    tone: "border-emerald-500 bg-emerald-50",
+  },
+  {
+    key: "full",
+    title: "Semua Data",
+    desc: "Seluruh data caPOS: penjualan, produk, stok, purchasing, pelanggan, tim, analitik.",
+    icon: Layers,
+    tone: "border-sky-500 bg-sky-50",
+  },
+];
+
 function toISODate(d: Date) {
-  return d.toISOString().slice(0, 10);
+  // Tanggal lokal, bukan UTC — lihat catatan di app/dashboard/page.tsx.
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 function rangeToDates(range: RangeKey, customStart: string, customEnd: string) {
@@ -43,14 +91,25 @@ export default function LaporanPdfPage() {
   const { selectedBranchId, selectedBranch, canSwitchBranch } = useBranch();
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [progress, setProgress] = useState<{ message: string; pct: number } | null>(null);
+  const [status, setStatus] = useState<{ type: "ok" | "warn"; text: string } | null>(null);
   const [tier, setTier] = useState<Tier>("free");
+  const [role, setRole] = useState<string>("cashier");
   const [cafeName, setCafeName] = useState("Kafe Anda");
+  const [mode, setMode] = useState<ExportMode>("ringkasan");
   const [range, setRange] = useState<RangeKey>("7");
   const [customStart, setCustomStart] = useState(toISODate(new Date()));
   const [customEnd, setCustomEnd] = useState(toISODate(new Date()));
   const [tenantId, setTenantId] = useState<string | null>(null);
   const [minDate, setMinDate] = useState<string | null>(null);
   const [isDemo, setIsDemo] = useState(false);
+
+  const branchName = useMemo(() => {
+    if (selectedBranchId !== ALL_BRANCHES) return selectedBranch?.name ?? "Cabang";
+    return "Semua Cabang";
+  }, [selectedBranchId, selectedBranch]);
+
+  const canExportAllData = canUseFullExport(tier, role);
 
   useEffect(() => {
     (async () => {
@@ -60,6 +119,7 @@ export default function LaporanPdfPage() {
         return;
       }
       setTenantId(profile.tenant_id);
+      setRole(profile.role ?? "cashier");
 
       const supabase = createClient();
       const [{ data: sub }, { data: tenant }] = await Promise.all([
@@ -79,235 +139,106 @@ export default function LaporanPdfPage() {
       }
 
       if (await tenantHasNoActivity()) setIsDemo(true);
-
       setLoading(false);
     })();
   }, []);
 
-  async function generatePdf() {
-    if (!tenantId) return;
+  async function generate() {
+    if (!tenantId || generating) return;
+    if (mode === "full" && !canExportAllData) {
+      setStatus({ type: "warn", text: "Mode Semua Data hanya tersedia untuk Owner/Manager dengan paket Pro atau Supreme." });
+      return;
+    }
+
     setGenerating(true);
+    setStatus(null);
+    setProgress({ message: "Menyiapkan laporan…", pct: 2 });
+
     try {
       const supabase = createClient();
       const { start, end } = rangeToDates(range, customStart, customEnd);
 
-      const [{ data: txRows }, { data: itemRows }, { data: opnameRows }] = await Promise.all([
-        (() => {
-          let q = supabase
-            .from("transactions")
-            .select("id, total_amount, payment_method, created_at, cashier_id, profiles(full_name)")
-            .eq("tenant_id", tenantId)
-            .gte("created_at", start.toISOString())
-            .lte("created_at", end.toISOString())
-            .limit(10000);
-          if (selectedBranchId !== ALL_BRANCHES) q = q.eq("branch_id", selectedBranchId);
-          return q;
-        })(),
-        (() => {
-          let q = supabase
-            .from("transaction_items")
-            .select("qty, subtotal, product_id, products(name, cost_price), transactions!inner(created_at, tenant_id, branch_id)")
-            .eq("transactions.tenant_id", tenantId)
-            .gte("transactions.created_at", start.toISOString())
-            .lte("transactions.created_at", end.toISOString())
-            .limit(10000);
-          if (selectedBranchId !== ALL_BRANCHES) q = q.eq("transactions.branch_id", selectedBranchId);
-          return q;
-        })(),
-        // Kerugian stok opname (migration_011) periode yang sama — dipotong
-        // dari laba kotor supaya "Keuntungan Bersih" di laporan benar-benar
-        // memperhitungkan bahan basi/rusak/selisih, bukan cuma omzet-HPP.
-        (() => {
-          let q = supabase
-            .from("stock_opname_logs")
-            .select("loss_value")
-            .eq("tenant_id", tenantId)
-            .gte("created_at", start.toISOString())
-            .lte("created_at", end.toISOString())
-            .limit(10000);
-          if (selectedBranchId !== ALL_BRANCHES) q = q.eq("branch_id", selectedBranchId);
-          return q;
-        })(),
-      ]);
-
-      const transactions = isDemo ? DEMO_REPORT_TX : (txRows ?? []);
-      const items = isDemo ? DEMO_REPORT_ITEMS : (itemRows ?? []);
-      const totalOpnameLoss = (isDemo ? DEMO_REPORT_OPNAME : (opnameRows ?? [])).reduce((s: number, r: any) => s + Number(r.loss_value), 0);
-
-      // --- Ringkasan ---
-      const totalOmzet = transactions.reduce((s: number, t: any) => s + Number(t.total_amount), 0);
-      const totalOrders = transactions.length;
-      const avgPerOrder = totalOrders > 0 ? Math.round(totalOmzet / totalOrders) : 0;
-      const totalHpp = items.reduce((s: number, it: any) => s + Number(it.qty) * Number(it.products?.cost_price ?? 0), 0);
-      const grossProfit = totalOmzet - totalHpp;
-      const netProfit = grossProfit - totalOpnameLoss;
-
-      // --- Omzet harian ---
-      const dailyMap = new Map<string, { orders: number; revenue: number }>();
-      for (const t of transactions as any[]) {
-        const day = new Date(t.created_at).toISOString().slice(0, 10);
-        const e = dailyMap.get(day) ?? { orders: 0, revenue: 0 };
-        e.orders += 1;
-        e.revenue += Number(t.total_amount);
-        dailyMap.set(day, e);
-      }
-      const dailyRows = Array.from(dailyMap.entries())
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([day, v]) => [day, String(v.orders), formatRupiah(v.revenue)]);
-
-      // --- Menu terlaris ---
-      const productMap = new Map<string, { qty: number; revenue: number }>();
-      for (const it of items as any[]) {
-        const name = it.products?.name ?? "Produk";
-        const e = productMap.get(name) ?? { qty: 0, revenue: 0 };
-        e.qty += Number(it.qty);
-        e.revenue += Number(it.subtotal);
-        productMap.set(name, e);
-      }
-      const topProducts = Array.from(productMap.entries())
-        .sort(([, a], [, b]) => b.qty - a.qty)
-        .slice(0, 10)
-        .map(([name, v]) => [name, String(v.qty), formatRupiah(v.revenue)]);
-
-      // --- Metode pembayaran ---
-      const paymentMap = new Map<string, { count: number; revenue: number }>();
-      for (const t of transactions as any[]) {
-        const method = (t.payment_method ?? "cash").toUpperCase();
-        const e = paymentMap.get(method) ?? { count: 0, revenue: 0 };
-        e.count += 1;
-        e.revenue += Number(t.total_amount);
-        paymentMap.set(method, e);
-      }
-      const paymentRows = Array.from(paymentMap.entries()).map(([method, v]) => [
-        method, String(v.count), formatRupiah(v.revenue),
-      ]);
-
-      // --- Kinerja kasir ---
-      const cashierMap = new Map<string, { orders: number; revenue: number }>();
-      for (const t of transactions as any[]) {
-        const name = t.profiles?.full_name ?? "Kasir";
-        const e = cashierMap.get(name) ?? { orders: 0, revenue: 0 };
-        e.orders += 1;
-        e.revenue += Number(t.total_amount);
-        cashierMap.set(name, e);
-      }
-      const cashierRows = Array.from(cashierMap.entries())
-        .sort(([, a], [, b]) => b.revenue - a.revenue)
-        .map(([name, v]) => [name, String(v.orders), formatRupiah(v.revenue)]);
-
-      const { default: jsPDF } = await import("jspdf");
-      const { default: autoTable } = await import("jspdf-autotable");
-
-      const doc = new jsPDF({ unit: "pt", format: "a4" });
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const margin = 40;
-      let y = 50;
-
-      doc.setFontSize(16);
-      doc.setFont("helvetica", "bold");
-      doc.text(cafeName, margin, y);
-      y += 20;
-      doc.setFontSize(11);
-      doc.setFont("helvetica", "normal");
-      doc.text("Laporan Penjualan Otomatis — caPOS", margin, y);
-      y += 16;
-      doc.setFontSize(9);
-      doc.setTextColor(100);
-      doc.text(
-        `Periode: ${toISODate(start)} s/d ${toISODate(end)}  ·  Dibuat: ${new Date().toLocaleString("id-ID")}` +
-          (canSwitchBranch ? `  ·  Cabang: ${selectedBranchId === ALL_BRANCHES ? "Semua Cabang (Konsolidasi)" : selectedBranch?.name ?? "-"}` : ""),
-        margin, y
-      );
-      doc.setTextColor(0);
-      y += 24;
-
-      autoTable(doc, {
-        startY: y,
-        margin: { left: margin, right: margin },
-        theme: "grid",
-        styles: { fontSize: 9 },
-        head: [["Total Omzet", "Total Transaksi", "Rata-rata/Transaksi", "Laba Kotor", "Kerugian Opname", "Keuntungan Bersih"]],
-        body: [[
-          formatRupiah(totalOmzet), String(totalOrders), formatRupiah(avgPerOrder),
-          formatRupiah(grossProfit), totalOpnameLoss > 0 ? `- ${formatRupiah(totalOpnameLoss)}` : formatRupiah(0), formatRupiah(netProfit),
-        ]],
-        headStyles: { fillColor: [16, 185, 129] },
-      });
-      y = (doc as any).lastAutoTable.finalY + 24;
-
-      doc.setFontSize(11);
-      doc.setFont("helvetica", "bold");
-      doc.text("Omzet Harian", margin, y);
-      y += 6;
-      autoTable(doc, {
-        startY: y,
-        margin: { left: margin, right: margin },
-        styles: { fontSize: 9 },
-        head: [["Tanggal", "Jumlah Transaksi", "Omzet"]],
-        body: dailyRows.length ? dailyRows : [["-", "-", "-"]],
-        headStyles: { fillColor: [16, 185, 129] },
-      });
-      y = (doc as any).lastAutoTable.finalY + 24;
-
-      if (y > 650) { doc.addPage(); y = 50; }
-      doc.setFontSize(11);
-      doc.setFont("helvetica", "bold");
-      doc.text("Menu Terlaris", margin, y);
-      y += 6;
-      autoTable(doc, {
-        startY: y,
-        margin: { left: margin, right: margin },
-        styles: { fontSize: 9 },
-        head: [["Menu", "Terjual (pcs)", "Omzet"]],
-        body: topProducts.length ? topProducts : [["-", "-", "-"]],
-        headStyles: { fillColor: [16, 185, 129] },
-      });
-      y = (doc as any).lastAutoTable.finalY + 24;
-
-      if (y > 650) { doc.addPage(); y = 50; }
-      doc.setFontSize(11);
-      doc.setFont("helvetica", "bold");
-      doc.text("Metode Pembayaran", margin, y);
-      y += 6;
-      autoTable(doc, {
-        startY: y,
-        margin: { left: margin, right: margin },
-        styles: { fontSize: 9 },
-        head: [["Metode", "Jumlah Transaksi", "Total"]],
-        body: paymentRows.length ? paymentRows : [["-", "-", "-"]],
-        headStyles: { fillColor: [16, 185, 129] },
-      });
-      y = (doc as any).lastAutoTable.finalY + 24;
-
-      if (y > 650) { doc.addPage(); y = 50; }
-      doc.setFontSize(11);
-      doc.setFont("helvetica", "bold");
-      doc.text("Kinerja Kasir", margin, y);
-      y += 6;
-      autoTable(doc, {
-        startY: y,
-        margin: { left: margin, right: margin },
-        styles: { fontSize: 9 },
-        head: [["Kasir", "Jumlah Transaksi", "Omzet"]],
-        body: cashierRows.length ? cashierRows : [["-", "-", "-"]],
-        headStyles: { fillColor: [16, 185, 129] },
-      });
-
-      const pageCount = doc.internal.pages.length - 1;
-      for (let i = 1; i <= pageCount; i++) {
-        doc.setPage(i);
-        doc.setFontSize(8);
-        doc.setTextColor(150);
-        doc.text(
-          `Dibuat otomatis oleh caPOS — halaman ${i}/${pageCount}`,
-          pageWidth / 2, doc.internal.pageSize.getHeight() - 20,
-          { align: "center" }
-        );
+      if (end < start) {
+        setGenerating(false);
+        setProgress(null);
+        setStatus({ type: "warn", text: "Tanggal akhir harus sama atau lebih baru dari tanggal mulai." });
+        return;
       }
 
-      doc.save(`laporan-capos-${toISODate(start)}-sd-${toISODate(end)}.pdf`);
+      const limitDays = HISTORY_DAYS_LIMIT[tier];
+      let effectiveStart = start;
+      let clamped = false;
+      if (limitDays) {
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - limitDays);
+        cutoff.setHours(0, 0, 0, 0);
+        if (end < cutoff) {
+          setGenerating(false);
+          setProgress(null);
+          setStatus({
+            type: "warn",
+            text: `Paket ${tier} hanya menyimpan ${limitDays} hari terakhir. Pilih periode yang berakhir setelah ${toISODate(cutoff)}.`,
+          });
+          return;
+        }
+        if (start < cutoff) {
+          effectiveStart = cutoff;
+          clamped = true;
+        }
+      }
+
+      const data = await fetchReportData(supabase, {
+        tenantId,
+        branchId: selectedBranchId === ALL_BRANCHES ? null : selectedBranchId,
+        branchName,
+        cafeName,
+        startISO: effectiveStart.toISOString(),
+        endISO: end.toISOString(),
+        startLabel: toISODate(effectiveStart),
+        endLabel: toISODate(end),
+        tier,
+        role,
+        mode,
+        onProgress: (message, pct) => setProgress({ message, pct: Math.min(pct, 98) }),
+      });
+
+      setProgress({ message: "Merender PDF…", pct: 92 });
+      const { doc, filename } = await renderReportPdf(data);
+      downloadPdf(doc, filename);
+
+      if (mode === "full") {
+        setProgress({ message: "Menyiapkan Excel lengkap…", pct: 96 });
+        const wb = buildWorkbook(data);
+        downloadWorkbook(wb, excelFilename(data));
+      }
+
+      try {
+        await supabase.from("export_logs").insert({
+          tenant_id: tenantId,
+          branch_id: selectedBranchId === ALL_BRANCHES ? null : selectedBranchId,
+          user_id: (await getCurrentProfile()).profile?.id ?? null,
+          mode,
+          period_start: toISODate(effectiveStart),
+          period_end: toISODate(end),
+          row_count: data.raw.transactions.length,
+          status: "SUCCESS",
+        });
+      } catch {
+        // Tabel export_logs mungkin belum dimigrasikan — export tetap jalan.
+      }
+
+      setProgress({ message: "Selesai", pct: 100 });
+      const parts = [mode === "full" ? "PDF + Excel" : "PDF", `${data.raw.transactions.length} transaksi`];
+      if (clamped) parts.push(`periode dipotong ke ${limitDays} hari sesuai paket ${tier}`);
+      if (data.warnings.length) parts.push(`${data.warnings.length} catatan`);
+      setStatus({
+        type: clamped || data.warnings.length ? "warn" : "ok",
+        text: `Berhasil membuat ${parts.join(" · ")}.`,
+      });
+      setTimeout(() => setProgress(null), 1500);
     } catch (err: any) {
-      alert("Gagal membuat PDF: " + (err?.message ?? "Terjadi kesalahan"));
+      setProgress(null);
+      setStatus({ type: "warn", text: `Gagal membuat laporan: ${err?.message ?? "kesalahan tidak diketahui"}` });
     } finally {
       setGenerating(false);
     }
@@ -333,15 +264,52 @@ export default function LaporanPdfPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-bold text-neutral-900">Laporan PDF Otomatis</h1>
+        <h1 className="text-xl font-bold text-neutral-900">Laporan &amp; Export PDF</h1>
         {isDemo && <DemoBadge />}
         <p className="text-sm text-neutral-500">
-          Satu klik: rekap omzet, laba kotor (HPP), kerugian stok opname, keuntungan bersih, menu terlaris,
-          metode pembayaran, dan kinerja kasir langsung jadi file PDF rapi.
-          {canSwitchBranch && ` Sesuai cabang yang dipilih di navbar (${selectedBranchId === ALL_BRANCHES ? "Semua Cabang" : selectedBranch?.name ?? "-"}).`}
+          Pilih jenis laporan, cabang, dan periode. Ringkasan dan Hanya Keuntungan menghasilkan PDF;
+          Semua Data menghasilkan PDF ringkas plus Excel lengkap.
+          {canSwitchBranch && ` Cabang aktif: ${branchName}.`}
         </p>
       </div>
 
+      {/* Mode */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        {MODES.map((m) => {
+          const Icon = m.icon;
+          const locked = m.key === "full" && !canExportAllData;
+          const active = mode === m.key;
+          return (
+            <button
+              key={m.key}
+              type="button"
+              onClick={() => {
+                if (locked) return;
+                setMode(m.key);
+                setStatus(null);
+              }}
+              disabled={locked}
+              className={cx(
+                "text-left rounded-xl border p-4 transition",
+                active ? `${m.tone} shadow-sm` : "border-neutral-200 bg-white hover:border-neutral-300",
+                locked && "opacity-60 cursor-not-allowed"
+              )}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 font-semibold text-neutral-900">
+                  <Icon size={16} className="text-primary-dark" />
+                  {m.title}
+                </div>
+                {locked ? <Lock size={14} className="text-neutral-400" /> : active ? <CheckCircle2 size={16} className="text-primary-dark" /> : null}
+              </div>
+              <p className="text-xs text-neutral-500 mt-2 leading-relaxed">{m.desc}</p>
+              {locked && <p className="text-[11px] text-amber-600 mt-2">Perlu paket Pro/Supreme + role Owner/Manager.</p>}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Filter */}
       <div className="card p-5 space-y-4">
         <div>
           <label className="text-sm font-medium text-neutral-700 mb-2 block">Pilih Periode</label>
@@ -393,28 +361,67 @@ export default function LaporanPdfPage() {
 
         {minDate && (
           <p className="text-xs text-neutral-400">
-            Paket Free Trial hanya bisa membuat laporan mulai {minDate}. Upgrade untuk riwayat lebih panjang.
+            Paket {tier === "free" ? "Free Trial" : tier === "pro" ? "Pro" : "Supreme"} hanya bisa membuat laporan mulai {minDate}.
+            Periode lebih panjang otomatis dipotong.
           </p>
         )}
 
-        <button
-          onClick={generatePdf}
-          disabled={generating}
-          className="btn-primary flex items-center gap-2"
-        >
-          {generating ? <Loader2 className="animate-spin" size={16} /> : <Download size={16} />}
-          {generating ? "Membuat PDF..." : "Buat & Unduh Laporan PDF"}
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <button onClick={generate} disabled={generating} className="btn-primary flex items-center gap-2">
+            {generating ? <Loader2 className="animate-spin" size={16} /> : <Download size={16} />}
+            {generating ? "Membuat laporan…" : mode === "full" ? "Unduh PDF + Excel" : "Buat & Unduh PDF"}
+          </button>
+          {mode === "full" && (
+            <span className="text-xs text-neutral-500 flex items-center gap-1">
+              <FileSpreadsheet size={14} /> Excel berisi seluruh baris; PDF memuat ringkasan + sampel.
+            </span>
+          )}
+        </div>
+
+        {progress && (
+          <div className="space-y-1">
+            <div className="h-2 bg-neutral-100 rounded-full overflow-hidden">
+              <div className="h-full bg-primary transition-all" style={{ width: `${progress.pct}%` }} />
+            </div>
+            <p className="text-xs text-neutral-500">{progress.message}</p>
+          </div>
+        )}
+
+        {status && (
+          <div
+            className={cx(
+              "flex items-start gap-2 text-xs rounded-lg p-3",
+              status.type === "ok" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
+            )}
+          >
+            {status.type === "ok" ? <CheckCircle2 size={14} className="mt-0.5" /> : <AlertTriangle size={14} className="mt-0.5" />}
+            <span>{status.text}</span>
+          </div>
+        )}
       </div>
 
+      {/* Info */}
       <div className="card p-4 flex items-start gap-3 bg-neutral-50">
         <FileText className="text-neutral-400 shrink-0 mt-0.5" size={18} />
-        <p className="text-xs text-neutral-500">
-          Laporan berisi: ringkasan omzet, laba kotor (berdasarkan HPP di halaman Stok & HPP), kerugian dari
-          Stok Opname (bahan basi/rusak/selisih), keuntungan bersih, rincian omzet harian, menu terlaris,
-          metode pembayaran, dan kinerja tiap kasir pada periode yang dipilih.
-          Kolom laba kotor akan menampilkan 0 kalau HPP menu belum diisi di halaman Stok & HPP.
-        </p>
+        <div className="text-xs text-neutral-500 space-y-1">
+          <p>
+            <strong>Ringkasan</strong> memuat omzet, HPP, laba kotor/bersih, <strong>rincian kerugian</strong>
+            (stok opname, waste produk, waste bahan), omzet harian, menu terlaris, pembayaran, dan kasir.
+          </p>
+          <p>
+            <strong>Hanya Keuntungan</strong> memuat laporan laba rugi, margin per kategori, kontribusi laba
+            per menu, tren laba harian, detail kerugian, dan perbandingan cabang.
+          </p>
+          <p>
+            <strong>Semua Data</strong> memuat seluruh domain caPOS: omzet, kerugian, penjualan, produk,
+            resep, stok, purchasing, pelanggan, tim, dan analitik. Data sensitif (PIN, kunci pembayaran,
+            respons mentah gateway) tidak pernah disertakan; telepon/email pelanggan dimask.
+          </p>
+          <p className="text-neutral-400">
+            HPP memakai snapshot transaksi → HPP cabang → HPP produk. Bila sebagian item belum punya
+            snapshot, laporan menandainya sebagai estimasi.
+          </p>
+        </div>
       </div>
     </div>
   );

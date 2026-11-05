@@ -192,10 +192,24 @@ export default function NewMenuWizard({ tenantId, existingCategories, onClose, o
         p_name: name.trim(),
         p_category: category.trim() || "Kopi",
         p_price: price,
-        p_items: lines.map((l) => ({ ingredient_id: l.ing.id, quantity: l.qty })),
-        p_image_url: imageUrl,
+        p_stock_mode: "recipe",
+        p_items: lines.map((l) => ({
+          ingredient_id: l.ing.id,
+          quantity: l.qty,
+          unit: l.ing.inventory_unit,
+        })),
       });
       errMsg = error?.message ?? null;
+
+      // RPC create_menu_with_recipe tidak menerima gambar; simpan terpisah
+      // setelah menu berhasil dibuat supaya signature lama tetap kompatibel.
+      if (!errMsg && imageUrl) {
+        const { error: imgErr } = await supabase
+          .from("products")
+          .update({ image_url: imageUrl })
+          .eq("id", productId);
+        if (imgErr) errMsg = imgErr.message;
+      }
     } else {
       const { error } = await supabase.from("products").insert({
         id: productId,

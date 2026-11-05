@@ -149,6 +149,12 @@ export default function IngredientsPage() {
   const activeCount = useMemo(() => ingredients.filter((i) => i.status === "active").length, [ingredients]);
   const inventoryValue = useMemo(() => {
     return ingredients.reduce((sum, ing) => {
+      const rows = stockMap.get(ing.id) ?? [];
+      if (isConsolidated) {
+        // Konsolidasi: jumlahkan NILAI per cabang, bukan qty gabungan ×
+        // rata-rata harga (yang bisa mendistorsi angka bila harga beda).
+        return sum + rows.reduce((s, r) => s + Number(r.stock_qty) * Number(r.cost_price), 0);
+      }
       const { qty } = branchStockFor(ing.id, ing.low_stock_threshold);
       return sum + qty * costFor(ing.id);
     }, 0);
