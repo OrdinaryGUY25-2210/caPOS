@@ -12,6 +12,109 @@ function serviceClient() {
   );
 }
 
+type SupabaseSvc = ReturnType<typeof serviceClient>;
+
+/**
+ * migration_023 — kunci dedupe notifikasi. Status + status_code + fraud
+ * + gross_amount ikut masuk supaya notifikasi berbeda untuk order yang
+ * sama (mis. pending -> settlement) tetap diproses, sementara retry
+ * notifikasi yang PERSIS sama tidak diulang (penting: webhook langganan
+ * memperpanjang masa aktif setiap kali diproses).
+ */
+function webhookEventKey(body: Record<string, unknown>): string {
+  return [
+    String(body.order_id ?? ""),
+    String(body.transaction_status ?? ""),
+    String(body.status_code ?? ""),
+    String(body.fraud_status ?? ""),
+    String(body.gross_amount ?? ""),
+  ].join("|");
+}
+
+/**
+ * Klaim event webhook. Mengembalikan null kalau tabel dedupe tidak bisa
+ * diakses (migrasi belum dijalankan) — pemanggil tetap memproses supaya
+ * pembayaran tidak pernah tertahan gara-gara tabel audit.
+ */
+async function claimWebhookEvent(
+  svc: SupabaseSvc,
+  body: Record<string, unknown>
+): Promise<{ id: string; alreadyProcessed: boolean } | null> {
+  const eventKey = webhookEventKey(body);
+
+  const { data: existing, error: findError } = await svc
+    .from("midtrans_webhook_events")
+    .select("id, processed")
+    .eq("event_key", eventKey)
+    .maybeSingle();
+
+  if (findError) {
+    console.error("midtrans_webhook_events lookup gagal (dilewati):", findError.message);
+    return null;
+  }
+  if (existing) {
+    return { id: existing.id as string, alreadyProcessed: !!existing.processed };
+  }
+
+  const { data: created, error: insertError } = await svc
+    .from("midtrans_webhook_events")
+    .insert({
+      event_key: eventKey,
+      event_type: (body.notification_type as string) ?? (body.transaction_status as string) ?? null,
+      order_id: (body.order_id as string) ?? null,
+      transaction_status: (body.transaction_status as string) ?? null,
+      status_code: (body.status_code as string) ?? null,
+      gross_amount:
+        body.gross_amount !== undefined && body.gross_amount !== null && Number.isFinite(Number(body.gross_amount))
+          ? Number(body.gross_amount)
+          : null,
+      payload: body,
+    })
+    .select("id, processed")
+    .single();
+
+  if (insertError) {
+    // Race: request lain menyisipkan event yang sama lebih dulu.
+    if ((insertError as { code?: string }).code === "23505") {
+      const { data: raced } = await svc
+        .from("midtrans_webhook_events")
+        .select("id, processed")
+        .eq("event_key", eventKey)
+        .maybeSingle();
+      if (raced) return { id: raced.id as string, alreadyProcessed: !!raced.processed };
+    }
+    console.error("midtrans_webhook_events insert gagal (dilewati):", insertError.message);
+    return null;
+  }
+
+  return { id: created.id as string, alreadyProcessed: !!created.processed };
+}
+
+async function markWebhookEvent(
+  svc: SupabaseSvc,
+  claim: { id: string } | null,
+  processed: boolean,
+  errorMessage: string | null = null
+) {
+  if (!claim) return;
+  const { error } = await svc
+    .from("midtrans_webhook_events")
+    .update({
+      processed,
+      processed_at: new Date().toISOString(),
+      error_message: errorMessage,
+    })
+    .eq("id", claim.id);
+  if (error) console.error("midtrans_webhook_events update gagal:", error.message);
+}
+
+/** Bandingkan nominal yang kita simpan dengan gross_amount dari Midtrans. */
+function amountMatches(expected: unknown, grossAmount: unknown): boolean {
+  const a = Number(expected);
+  const b = Number(grossAmount);
+  return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= 0.01;
+}
+
 /**
  * Endpoint ini dipanggil LANGSUNG oleh server Midtrans (bukan oleh
  * browser user), jadi tidak ada sesi login di sini — otentikasinya lewat
@@ -106,6 +209,25 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "OK (order_id tidak dikenali, notifikasi diabaikan)" });
   }
 
+  // migration_023 — JANGAN pernah mempercayai nominal dari notifikasi.
+  // Signature hanya membuktikan pengirimnya Midtrans, bukan bahwa nominal
+  // yang diklaim sama dengan tagihan yang kita simpan.
+  if (!amountMatches(payment.amount, gross_amount)) {
+    console.error(
+      "Midtrans webhook: gross_amount tidak cocok dengan payments.amount",
+      { order_id, gross_amount, expected: payment.amount }
+    );
+    const mismatchClaim = await claimWebhookEvent(svc, body);
+    await markWebhookEvent(svc, mismatchClaim, true, "AMOUNT_MISMATCH");
+    return NextResponse.json({ message: "OK (nominal tidak cocok, status tidak diubah)" });
+  }
+
+  const claim = await claimWebhookEvent(svc, body);
+  if (claim?.alreadyProcessed) {
+    return NextResponse.json({ message: "OK (sudah diproses)" });
+  }
+
+  const wasPaid = payment.status === "paid";
   let newStatus: "pending" | "paid" | "failed" = payment.status;
 
   if (transaction_status === "capture" || transaction_status === "settlement") {
@@ -118,40 +240,94 @@ export async function POST(request: Request) {
     newStatus = "failed";
   }
 
-  await svc
+  // Notifikasi bisa datang tidak berurutan (settlement dulu, baru retry
+  // "pending" yang tertinggal). Status `paid` bersifat FINAL: jangan pernah
+  // menurunkannya ke pending/failed hanya karena notifikasi lama/terlambat,
+  // supaya pembayaran sah tidak "hilang" dari laporan.
+  if (payment.status === "paid") {
+    newStatus = "paid";
+  }
+
+  const { error: updateError } = await svc
     .from("payments")
     .update({ status: newStatus, raw_response: body, updated_at: new Date().toISOString() })
     .eq("order_id", order_id);
 
-  // Baru perpanjang langganan kalau statusnya benar-benar 'paid' — jangan
-  // pernah perpanjang di status lain, walau transaction_status terlihat
-  // "positif" (mis. masih 'pending' untuk metode transfer bank).
+  if (updateError) {
+    await markWebhookEvent(svc, claim, false, "PAYMENT_UPDATE_FAILED: " + updateError.message);
+    return NextResponse.json({ message: "Gagal memperbarui status pembayaran." }, { status: 500 });
+  }
+
+  // Perpanjang langganan HANYA SEKALI per baris `payments`. Penanda
+  // `subscription_granted_at` membuat proses ini tahan retry: kalau
+  // percobaan pertama sempat mengubah payment.status menjadi 'paid' tetapi
+  // gagal saat update langganan, notifikasi retry tetap bisa melanjutkan
+  // perpanjangan (kalau hanya mengandalkan "sebelumnya belum paid", retry
+  // itu akan dilewati dan langganan tidak pernah diperpanjang).
   if (newStatus === "paid") {
-    const plan = PLANS[payment.plan as keyof typeof PLANS];
-    const days = plan?.days ?? 30;
+    let grantClaimed = false;
+    let markerError: string | null = null;
 
-    await svc
-      .from("subscriptions")
-      .update({
-        status: "active",
-        plan: payment.plan,
-        valid_until: new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("tenant_id", payment.tenant_id);
+    const { data: grantRows, error: grantError } = await svc
+      .from("payments")
+      .update({ subscription_granted_at: new Date().toISOString() })
+      .eq("id", payment.id)
+      .is("subscription_granted_at", null)
+      .select("id");
 
-    // Proses reward referral: (1) beri +3% ke referrer tenant ini kalau
-    // ada & belum pernah, (2) RESET akumulasi diskon tenant ini sendiri
-    // ke 0 — terjadi SETIAP KALI dia top up, berapa pun akumulasinya saat
-    // itu (tidak menunggu penuh 5/5), dan (3) konsumsi diskon 2%
-    // pendaftar baru kalau masih ada.
-    const { error: referralError } = await svc.rpc("process_referral_on_payment", {
-      p_tenant_id: payment.tenant_id,
-    });
-    if (referralError) {
-      console.error("process_referral_on_payment failed:", referralError);
+    if (grantError) {
+      if (grantError.message.includes("subscription_granted_at")) {
+        // Migrasi 023 belum diterapkan — pakai guard lama agar webhook
+        // tetap berfungsi (hanya kurang tahan retry).
+        grantClaimed = !wasPaid;
+      } else {
+        markerError = grantError.message;
+      }
+    } else {
+      grantClaimed = (grantRows?.length ?? 0) > 0;
+    }
+
+    if (markerError) {
+      await markWebhookEvent(svc, claim, false, "SUBSCRIPTION_MARKER_FAILED: " + markerError);
+      return NextResponse.json({ message: "Gagal menandai perpanjangan langganan." }, { status: 500 });
+    }
+
+    if (grantClaimed) {
+      const plan = PLANS[payment.plan as keyof typeof PLANS];
+      const days = plan?.days ?? 30;
+
+      const { error: subError } = await svc
+        .from("subscriptions")
+        .update({
+          status: "active",
+          plan: payment.plan,
+          valid_until: new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("tenant_id", payment.tenant_id);
+
+      if (subError) {
+        // Lepas penanda supaya retry berikutnya bisa mencoba lagi.
+        await svc.from("payments").update({ subscription_granted_at: null }).eq("id", payment.id);
+        await markWebhookEvent(svc, claim, false, "SUBSCRIPTION_UPDATE_FAILED: " + subError.message);
+        return NextResponse.json({ message: "Gagal memperbarui langganan." }, { status: 500 });
+      }
+
+      // Proses reward referral: (1) beri +3% ke referrer tenant ini kalau
+      // ada & belum pernah, (2) RESET akumulasi diskon tenant ini sendiri
+      // ke 0 — terjadi SETIAP KALI dia top up, berapa pun akumulasinya saat
+      // itu (tidak menunggu penuh 5/5), dan (3) konsumsi diskon 2%
+      // pendaftar baru kalau masih ada.
+      const { error: referralError } = await svc.rpc("process_referral_on_payment", {
+        p_tenant_id: payment.tenant_id,
+      });
+      if (referralError) {
+        console.error("process_referral_on_payment failed:", referralError);
+      }
     }
   }
+
+  await markWebhookEvent(svc, claim, true, null);
 
   // Midtrans mengharapkan response 200 apa pun hasilnya (selama sudah
   // diproses) — response non-200 akan membuat Midtrans retry notifikasi
@@ -193,6 +369,35 @@ async function handleQrOrderNotification(body: Record<string, unknown>) {
   const qrOrderId = order_id.replace("QRORDER-", "");
   const svc = serviceClient();
 
+  const { data: qrOrder } = await svc
+    .from("qr_orders")
+    .select("id, total_amount, payment_status")
+    .eq("id", qrOrderId)
+    .single();
+
+  if (!qrOrder) {
+    console.warn("Midtrans webhook (QR order): qr_order tidak ditemukan:", qrOrderId);
+    return NextResponse.json({ message: "OK (order_id tidak dikenali, notifikasi diabaikan)" });
+  }
+
+  // migration_023 — validasi nominal: total_amount dihitung server saat
+  // order dibuat, gross_amount dari Midtrans tidak boleh berbeda.
+  if (!amountMatches(qrOrder.total_amount, gross_amount)) {
+    console.error("Midtrans webhook (QR order): gross_amount tidak cocok", {
+      order_id,
+      gross_amount,
+      expected: qrOrder.total_amount,
+    });
+    const mismatchClaim = await claimWebhookEvent(svc, body);
+    await markWebhookEvent(svc, mismatchClaim, true, "AMOUNT_MISMATCH");
+    return NextResponse.json({ message: "OK (nominal tidak cocok, status tidak diubah)" });
+  }
+
+  const claim = await claimWebhookEvent(svc, body);
+  if (claim?.alreadyProcessed) {
+    return NextResponse.json({ message: "OK (sudah diproses)" });
+  }
+
   let newStatus: "pending" | "paid" | "failed" = "pending";
   if (transaction_status === "capture" || transaction_status === "settlement") {
     newStatus = !fraud_status || fraud_status === "accept" ? "paid" : "failed";
@@ -200,6 +405,13 @@ async function handleQrOrderNotification(body: Record<string, unknown>) {
     newStatus = "pending";
   } else if (["deny", "cancel", "expire", "failure"].includes(transaction_status)) {
     newStatus = "failed";
+  }
+
+  // Lihat catatan di handler pembayaran langganan: status paid bersifat
+  // final. Notifikasi pending/failed yang datang terlambat tidak boleh
+  // menurunkan order yang sudah lunas.
+  if (qrOrder.payment_status === "paid") {
+    newStatus = "paid";
   }
 
   // mark_qr_order_paid() TIDAK di-grant ke anon/authenticated (lihat
@@ -213,9 +425,11 @@ async function handleQrOrderNotification(body: Record<string, unknown>) {
 
   if (error) {
     console.error("mark_qr_order_paid gagal:", error);
+    await markWebhookEvent(svc, claim, false, "MARK_QR_ORDER_FAILED: " + error.message);
     return NextResponse.json({ message: "Gagal memperbarui status pesanan." }, { status: 500 });
   }
 
+  await markWebhookEvent(svc, claim, true, null);
   return NextResponse.json({ message: "OK" });
 }
 
@@ -241,7 +455,7 @@ async function handlePosQrisNotification(body: Record<string, unknown>) {
 
   const { data: payment } = await svc
     .from("pos_qris_payments")
-    .select("id, branch_id, status")
+    .select("id, branch_id, status, gross_amount")
     .eq("order_id", order_id)
     .single();
 
@@ -280,13 +494,42 @@ async function handlePosQrisNotification(body: Record<string, unknown>) {
     return NextResponse.json({ message: "Invalid signature." }, { status: 403 });
   }
 
+  // migration_023 — nominal charge POS QRIS disimpan saat charge dibuat.
+  if (!amountMatches(payment.gross_amount, gross_amount)) {
+    console.error("Midtrans webhook (POS QRIS): gross_amount tidak cocok", {
+      order_id,
+      gross_amount,
+      expected: payment.gross_amount,
+    });
+    const mismatchClaim = await claimWebhookEvent(svc, body);
+    await markWebhookEvent(svc, mismatchClaim, true, "AMOUNT_MISMATCH");
+    return NextResponse.json({ message: "OK (nominal tidak cocok, status tidak diubah)" });
+  }
+
+  const claim = await claimWebhookEvent(svc, body);
+  if (claim?.alreadyProcessed) {
+    return NextResponse.json({ message: "OK (sudah diproses)" });
+  }
+
   let newStatus: "pending" | "paid" | "failed" | "expired" = payment.status;
   newStatus = mapMidtransTransactionStatus(transaction_status, fraud_status, payment.status);
 
-  await svc
+  // Status paid bersifat final; notifikasi pending/expired/failed yang
+  // datang terlambat tidak boleh menurunkan QRIS yang sudah lunas.
+  if (payment.status === "paid") {
+    newStatus = "paid";
+  }
+
+  const { error: updateError } = await svc
     .from("pos_qris_payments")
     .update({ status: newStatus, raw_response: body })
     .eq("id", payment.id);
 
+  if (updateError) {
+    await markWebhookEvent(svc, claim, false, "POS_QRIS_UPDATE_FAILED: " + updateError.message);
+    return NextResponse.json({ message: "Gagal memperbarui status QRIS." }, { status: 500 });
+  }
+
+  await markWebhookEvent(svc, claim, true, null);
   return NextResponse.json({ message: "OK" });
 }

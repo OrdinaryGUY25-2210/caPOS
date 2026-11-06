@@ -26,6 +26,10 @@ export interface ReceiptData {
   /** Uang diterima & kembalian (khusus metode "cash") — Requirement 2. */
   cashReceived?: number;
   changeDue?: number;
+  /** migration_023 — true = kembalian belum diserahkan, jadi wajib ditagihkan. */
+  changePending?: boolean;
+  /** migration_023 — batas waktu pengambilan kembalian (ISO). */
+  changeDueAt?: string | null;
 }
 
 export default function Receipt({ data }: { data: ReceiptData }) {
@@ -91,9 +95,15 @@ export default function Receipt({ data }: { data: ReceiptData }) {
       )}
       {typeof data.changeDue === "number" && (
         <div className="flex justify-between font-bold">
-          <span>Kembalian</span>
+          <span>{data.changePending ? "Kembalian (BELUM DISERAHKAN)" : "Kembalian"}</span>
           <span>{formatRupiah(data.changeDue)}</span>
         </div>
+      )}
+      {data.changePending && (
+        <p className="text-[10px] mt-1">
+          Simpan struk ini. Kembalian dapat diambil maksimal{" "}
+          {data.changeDueAt ? new Date(data.changeDueAt).toLocaleString("id-ID") : "sesuai ketentuan kafe"}.
+        </p>
       )}
 
       <div className="border-t border-dashed border-black my-1" />

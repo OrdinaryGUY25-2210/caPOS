@@ -11,6 +11,9 @@ const ACTION_LABEL: Record<SensitiveAction, string> = {
   CANCEL_ORDER: "Batalkan Pesanan",
   MANUAL_DISCOUNT: "Diskon Manual",
   PRICE_OVERRIDE: "Ubah Harga (Price Override)",
+  WRITE_OFF_CHANGE: "Hapuskan Kembalian (Write-off)",
+  FORCE_CLOSE_SHIFT: "Tutup Shift Paksa",
+  NO_SALE: "Buka Laci Tanpa Transaksi (No Sale)",
 };
 
 const REASON_PLACEHOLDER: Record<SensitiveAction, string> = {
@@ -18,6 +21,9 @@ const REASON_PLACEHOLDER: Record<SensitiveAction, string> = {
   CANCEL_ORDER: "Contoh: pelanggan membatalkan seluruh pesanan",
   MANUAL_DISCOUNT: "Contoh: kompensasi komplain, promo internal",
   PRICE_OVERRIDE: "Contoh: harga event khusus, negosiasi manager",
+  WRITE_OFF_CHANGE: "Contoh: pelanggan tidak kembali mengambil kembalian",
+  FORCE_CLOSE_SHIFT: "Contoh: kasir harus pulang, kembalian diselesaikan besok",
+  NO_SALE: "Contoh: pelanggan minta pecahan uang, cek laci",
 };
 
 /**

@@ -37,6 +37,16 @@ export interface PendingTransaction {
   member_id: string | null;
   items: { product_id: string; qty: number; subtotal: number }[];
   is_offline_sync: boolean;
+  /**
+   * migration_023 — kunci idempotensi per percobaan checkout. Disimpan bersama
+   * antrean supaya retry (online gagal jaringan / sinkron offline) mengembalikan
+   * transaksi yang SAMA, bukan membuat transaksi ganda.
+   */
+  idempotency_key?: string | null;
+  /** migration_023 — uang tunai fisik yang diterima kasir. */
+  cash_received?: number | null;
+  /** migration_023 — true = kembalian dicatat PENDING (belum diserahkan). */
+  change_pending?: boolean;
   // IndexedDB (and therefore Dexie's IndexableType) cannot index a plain
   // boolean — only string/number/Date/binary/array are indexable. Using
   // `synced: 0 | 1` instead of `synced: boolean` lets Dexie actually use

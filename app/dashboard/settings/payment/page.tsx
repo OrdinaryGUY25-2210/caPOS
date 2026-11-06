@@ -44,6 +44,10 @@ interface QrisSettingsState {
   soundEnabled: boolean;
   soundTone: string;
   soundVolume: number;
+  /** migration_023 — batas minimum kas laci (Rp) untuk peringatan petty cash. */
+  pettyCashThreshold: number;
+  /** migration_023 — menit sebelum kembalian PENDING dianggap lewat jatuh tempo. */
+  changeDueMinutes: number;
 }
 
 const EMPTY_QRIS: QrisSettingsState = {
@@ -55,6 +59,8 @@ const EMPTY_QRIS: QrisSettingsState = {
   soundEnabled: true,
   soundTone: 'bell_chime',
   soundVolume: 0.8,
+  pettyCashThreshold: 100000,
+  changeDueMinutes: 1440,
 };
 
 export default function PaymentSettingsPage() {
@@ -143,6 +149,8 @@ export default function PaymentSettingsPage() {
           soundEnabled: data.sound_enabled ?? true,
           soundTone: data.sound_tone ?? 'bell_chime',
           soundVolume: data.sound_volume ?? 0.8,
+          pettyCashThreshold: Number(data.petty_cash_threshold ?? 100000),
+          changeDueMinutes: Number(data.change_due_minutes ?? 1440),
         });
       }
     } catch {
@@ -268,6 +276,8 @@ export default function PaymentSettingsPage() {
         sound_enabled: qris.soundEnabled,
         sound_tone: qris.soundTone,
         sound_volume: qris.soundVolume,
+        petty_cash_threshold: qris.pettyCashThreshold,
+        change_due_minutes: qris.changeDueMinutes,
       }),
     });
     const data = await res.json();
@@ -531,6 +541,52 @@ export default function PaymentSettingsPage() {
                   <Volume2 size={14} /> Tes Suara
                 </Button>
               </fieldset>
+            </div>
+          </SettingsCard>
+
+          <SettingsCard
+            title="Kas & Kembalian"
+            description="Perlindungan kas laci dan batas waktu pengambilan kembalian (migration_023)"
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <Input
+                  label="Batas Minimum Kas Laci (Rp)"
+                  type="number"
+                  min={0}
+                  step={1000}
+                  value={String(qris.pettyCashThreshold)}
+                  onChange={(e) =>
+                    setQris((p) => ({ ...p, pettyCashThreshold: Math.max(0, Number(e.target.value) || 0) }))
+                  }
+                  disabled={!canEdit}
+                />
+                <p className="text-xs text-neutral-400 mt-1">
+                  Kasir hanya melihat peringatan &quot;kas menipis&quot; — omzet dan expected cash tidak pernah
+                  ditampilkan sebelum shift ditutup (blind closing).
+                </p>
+              </div>
+              <div>
+                <Input
+                  label="Batas Kembalian (menit)"
+                  type="number"
+                  min={1}
+                  max={43200}
+                  step={30}
+                  value={String(qris.changeDueMinutes)}
+                  onChange={(e) =>
+                    setQris((p) => ({
+                      ...p,
+                      changeDueMinutes: Math.min(43200, Math.max(1, Math.trunc(Number(e.target.value) || 1))),
+                    }))
+                  }
+                  disabled={!canEdit}
+                />
+                <p className="text-xs text-neutral-400 mt-1">
+                  Setelah batas ini, kembalian yang belum diserahkan ditandai lewat jatuh tempo di banner kasir.
+                  Default 1440 menit (24 jam).
+                </p>
+              </div>
             </div>
           </SettingsCard>
 

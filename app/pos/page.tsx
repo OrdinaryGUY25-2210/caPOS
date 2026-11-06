@@ -12,6 +12,7 @@ import CashierQuickActions from "@/components/CashierQuickActions";
 import AccessDeniedNotice from "@/components/AccessDeniedNotice";
 import SendToKitchenModal from "@/components/SendToKitchenModal";
 import OpenBillPanel from "@/components/pos/OpenBillPanel";
+import PendingChangeBanner from "@/components/pos/PendingChangeBanner";
 import ShiftModal from "@/components/ShiftModal";
 import { unlockNotificationAudio, playNotificationSound } from "@/lib/notificationSound";
 import SoldOutToggle from "@/components/pos/SoldOutToggle";
@@ -129,6 +130,10 @@ export default function PosPage() {
   // Uang diterima (tunai) — dipakai modal Konfirmasi Pembayaran untuk
   // kalkulasi kembalian otomatis + tombol preset (Requirement 2).
   const [cashReceived, setCashReceived] = useState("");
+  // migration_023 — kembalian yang belum diserahkan (pelanggan ambil nanti).
+  const [changePending, setChangePending] = useState(false);
+  // Penanda untuk memuat ulang banner kembalian tertunda setelah checkout.
+  const [pendingChangeRefresh, setPendingChangeRefresh] = useState(0);
   const [receipt, setReceipt] = useState<ReceiptData | null>(null);
   const [cashierName, setCashierName] = useState("Kasir");
   const [cashierEmail, setCashierEmail] = useState<string | null>(null);
@@ -884,7 +889,17 @@ export default function PosPage() {
     }
 
     const invoiceNumber = generateInvoiceNumber();
+    // migration_023 — satu kunci idempotensi per percobaan checkout. Kunci
+    // ini ikut tersimpan di antrean offline, jadi retry (jaringan putus atau
+    // sinkron belakangan) mengembalikan transaksi yang SAMA, bukan membuat
+    // transaksi kedua.
+    const idempotencyKey = crypto.randomUUID();
     const isOnline = navigator.onLine;
+    const receivedCash = paymentMethod === "cash" ? Number(cashReceived) || 0 : null;
+    // Checkbox "kembalian belum diserahkan" bisa tertinggal aktif kalau
+    // kasir mengubah nominal menjadi uang pas. Server mengabaikannya saat
+    // change = 0, tapi struk/antrean tidak boleh ikut menandai PENDING.
+    const hasChange = paymentMethod === "cash" && receivedCash !== null && receivedCash > total;
 
     // `total` here is only used for the on-screen receipt/UX. It is NEVER
     // sent to the server as the source of truth for how much was charged —
@@ -910,6 +925,9 @@ export default function PosPage() {
       // poin/voucher sudah diterapkan.
       customer_id: selectedCustomer?.id ?? null,
       voucher_code: voucherCode.trim() || null,
+      idempotency_key: idempotencyKey,
+      cash_received: receivedCash,
+      change_pending: hasChange ? changePending : false,
     };
 
     if (!isOnline && (selectedCustomer || voucherCode.trim())) {
@@ -924,6 +942,7 @@ export default function PosPage() {
     // which must also call checkout_transaction() (not a raw insert) once
     // back online, so re-priced totals are enforced even for queued sales.
     const localId = await db.pendingTransactions.add(txPayload);
+    let changeDueAt: string | null = null;
 
     if (isOnline) {
       try {
@@ -931,7 +950,7 @@ export default function PosPage() {
         // Server recomputes total_amount from products.price and
         // memberships.discount_percentage inside checkout_transaction() —
         // the client only supplies product_id/qty, never a price or total.
-        const { error } = await supabase.rpc("checkout_transaction", {
+        const { data: txId, error } = await supabase.rpc("checkout_transaction", {
           p_tenant_id: txPayload.tenant_id,
           p_cashier_id: txPayload.cashier_id,
           p_invoice_number: invoiceNumber,
@@ -941,9 +960,20 @@ export default function PosPage() {
           p_branch_id: session.branchId,
           p_customer_id: selectedCustomer?.id ?? null,
           p_voucher_code: voucherCode.trim() || null,
+          p_idempotency_key: idempotencyKey,
+          p_cash_received: receivedCash,
+          p_change_pending: hasChange ? changePending : false,
         });
         if (!error) {
           await db.pendingTransactions.update(localId, { synced: 1 });
+          if (txId && hasChange && changePending) {
+            const { data: changeRow } = await supabase
+              .from("transactions")
+              .select("change_due_at")
+              .eq("id", txId as string)
+              .maybeSingle();
+            changeDueAt = (changeRow?.change_due_at as string | null) ?? null;
+          }
         } else if (error.message.includes("STOCK_INSUFFICIENT")) {
           // Ini BUKAN kegagalan jaringan (kita sedang online) — server
           // menolak karena stok memang sudah tidak cukup di saat checkout
@@ -1000,6 +1030,8 @@ export default function PosPage() {
       // Uang diterima/kembalian (tunai) — kosong untuk metode lain.
       cashReceived: paymentMethod === "cash" ? Number(cashReceived) : undefined,
       changeDue: paymentMethod === "cash" ? Number(cashReceived) - total : undefined,
+      changePending: hasChange && changePending,
+      changeDueAt,
     });
 
     setCart([]);
@@ -1012,6 +1044,8 @@ export default function PosPage() {
     setPointsInput("");
     setPointsDiscountAmount(0);
     setCashReceived("");
+    setChangePending(false);
+    setPendingChangeRefresh((n) => n + 1);
     setShowCheckout(false);
     resetDemoModeCache();
     resetQrisDynamic();
@@ -1147,6 +1181,17 @@ export default function PosPage() {
         <div className="px-4 pt-3">
           <DemoBanner />
         </div>
+      )}
+
+      {/* migration_023 — kembalian yang belum diserahkan. Tidak menampilkan
+          omzet/expected cash, hanya kewajiban ke pelanggan. */}
+      {session && shiftId && (
+        <PendingChangeBanner
+          branchId={session.branchId}
+          shiftId={shiftId}
+          role={role}
+          refreshKey={pendingChangeRefresh}
+        />
       )}
 
       <div className="flex-1 flex overflow-hidden">
@@ -1407,7 +1452,10 @@ export default function PosPage() {
                     key={m}
                     onClick={() => {
                       setPaymentMethod(m);
-                      if (m !== "cash") setCashReceived("");
+                      if (m !== "cash") {
+                        setCashReceived("");
+                        setChangePending(false);
+                      }
                       if (m !== "qris") resetQrisDynamic();
                     }}
                     className={
@@ -1511,6 +1559,22 @@ export default function PosPage() {
                     {change < 0 ? `Kurang ${formatRupiah(-change)}` : `Kembalian: ${formatRupiah(change)}`}
                   </p>
                 )}
+
+                {change > 0 && (
+                  <label className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 mt-0.5 accent-primary shrink-0"
+                      checked={changePending}
+                      onChange={(e) => setChangePending(e.target.checked)}
+                    />
+                    <span>
+                      <strong>Kembalian belum diserahkan sekarang.</strong> Pelanggan akan mengambil
+                      nanti — kembalian dicatat sebagai kewajiban dan harus diselesaikan sebelum
+                      shift ditutup.
+                    </span>
+                  </label>
+                )}
               </div>
             )}
           </Modal>
@@ -1612,6 +1676,7 @@ export default function PosPage() {
           branchId={session.branchId}
           cashierId={session.cashierId}
           shiftId={shiftId}
+          role={role}
           onOpened={(id, openedAt) => {
             setShiftId(id);
             setShiftStartedAt(openedAt);

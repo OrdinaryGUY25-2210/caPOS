@@ -49,6 +49,10 @@ export interface Branch {
   /** BARU (Phase 4) — dipakai di URL publik /order/[slug]/[table] & /reserve/[slug]. */
   slug: string;
   created_at: string;
+  /** migration_023 — batas minimum kas laci untuk peringatan petty cash (tanpa membocorkan omzet). */
+  petty_cash_threshold?: number;
+  /** migration_023 — berapa menit kembalian yang belum diserahkan boleh menggantung. */
+  change_due_minutes?: number;
 }
 
 export interface InviteCode {
@@ -130,6 +134,43 @@ export interface Transaction {
   is_offline_sync: boolean;
   created_at: string;
   /** Cabang tempat transaksi terjadi (migration_011). NULL = transaksi lama sebelum multi-cabang. */
+  branch_id: string | null;
+  /** migration_023 — siklus hidup transaksi. Baris tidak pernah diubah/dihapus bebas. */
+  status?: TransactionStatus;
+  shift_id?: string | null;
+  subtotal_amount?: number | null;
+  discount_amount?: number | null;
+  loyalty_points_earned?: number | null;
+  /** Uang tunai fisik yang diterima (khusus bagian tunai). */
+  cash_received?: number | null;
+  /** Kembalian yang menjadi kewajiban kasir (bukan diskon / pengurang omzet). */
+  change_amount?: number;
+  change_status?: ChangeStatus;
+  change_due_at?: string | null;
+  change_confirmed_at?: string | null;
+  change_confirmed_by?: string | null;
+  change_writeoff_at?: string | null;
+  change_writeoff_by?: string | null;
+  change_writeoff_reason?: string | null;
+  /** migration_023 — kunci idempotensi dari klien, unik per tenant. */
+  idempotency_key?: string | null;
+}
+
+export type TransactionStatus = "COMPLETED" | "VOIDED" | "REFUNDED";
+
+/** Siklus hidup kembalian (migration_023). */
+export type ChangeStatus = "NONE" | "PENDING" | "SETTLED" | "WRITTEN_OFF";
+
+/** Baris transaksi yang kembaliannya masih PENDING — dipakai banner/manager. */
+export interface PendingChangeRow {
+  id: string;
+  invoice_number: string;
+  total_amount: number;
+  cash_received: number | null;
+  change_amount: number;
+  change_due_at: string | null;
+  created_at: string;
+  cashier_id: string | null;
   branch_id: string | null;
 }
 
@@ -310,6 +351,9 @@ export interface CashMovement {
   reason: string;
   created_by: string | null;
   created_at: string;
+  /** migration_023 — true = baris penukaran uang (selalu berpasangan cash_out + cash_in). */
+  is_exchange?: boolean;
+  exchange_group_id?: string | null;
 }
 
 /** Baris tabel `shifts` setelah Phase 2 (opening/closing cash). */
@@ -338,6 +382,11 @@ export interface ShiftCashSummary {
   expected_cash: number;
   total_transactions: number;
   total_transactions_count: number;
+  /** migration_023 — total uang tunai fisik yang diterima (termasuk kembalian yang belum diserahkan). */
+  total_cash_received: number;
+  /** migration_023 — total kembalian yang masih PENDING. */
+  total_change_owed: number;
+  pending_change_count: number;
 }
 
 // =========================================================
@@ -411,7 +460,17 @@ export interface TableLiveStatus {
  * ========================================================= */
 
 /** Tindakan sensitif yang wajib otorisasi PIN supervisor (SupervisorPinModal.tsx). */
-export type SensitiveAction = "VOID_ITEM" | "CANCEL_ORDER" | "MANUAL_DISCOUNT" | "PRICE_OVERRIDE";
+export type SensitiveAction =
+  | "VOID_ITEM"
+  | "CANCEL_ORDER"
+  | "MANUAL_DISCOUNT"
+  | "PRICE_OVERRIDE"
+  /** migration_023 — hapuskan kembalian yang tidak diambil pelanggan. */
+  | "WRITE_OFF_CHANGE"
+  /** migration_023 — tutup shift walau masih ada kembalian PENDING. */
+  | "FORCE_CLOSE_SHIFT"
+  /** migration_023 — buka laci tanpa transaksi. */
+  | "NO_SALE";
 
 /** Hasil RPC verify_supervisor_pin() — kosong (null) berarti PIN salah/tidak ada yang cocok. */
 export interface SupervisorAuthResult {

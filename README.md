@@ -157,7 +157,7 @@ capos/
 │   └── kitchenPrinter.ts, webBluetooth.d.ts  # cetak tiket dapur (Fase 2)
 └── supabase/
     ├── schema.sql                              # Fondasi Fase 1
-    ├── migration_001 .. migration_022          # Migrasi Fase 1-4 & hardening
+    ├── migration_001 .. migration_023          # Migrasi Fase 1-4, hardening & integritas kas
     ├── 20251031_voucher_branch_scope.sql       # Voucher per cabang
     ├── 20251031_qr_order_page_branch_id.sql    # branch.id di halaman order QR
     ├── 20251104_product_branch_cost.sql        # HPP menu per cabang

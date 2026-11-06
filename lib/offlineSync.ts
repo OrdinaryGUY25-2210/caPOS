@@ -47,6 +47,14 @@ const PERMANENT_REJECTION_PATTERNS = [
   "INVALID_VOUCHER",
   "VOUCHER_EXPIRED",
   "CUSTOMER_NOT_FOUND",
+  // migration_023 — uang tunai yang dikirim tidak cukup / nilai kembalian
+  // tidak masuk akal. Mengulang dengan data yang sama tidak akan pernah
+  // berhasil; kasir harus memperbaiki nominalnya.
+  "CASH_INSUFFICIENT",
+  "INVALID_CHANGE",
+  "PENDING_CHANGE",
+  "CHANGE_NOT_PENDING",
+  "IMMUTABLE_TRANSACTION",
 ];
 
 function isPermanentRejection(message: string): boolean {
@@ -143,6 +151,18 @@ export async function runBackgroundSync() {
 
     // 1. Transaksi kasir yang tertunda.
     await syncPendingTransactions(async (tx) => {
+      // migration_023 — pastikan SETIAP transaksi antrean punya kunci
+      // idempotensi yang stabil. Baris lama (dibuat sebelum kolom ini ada)
+      // dibuatkan sekali lalu disimpan lagi supaya retry berikutnya memakai
+      // kunci yang sama, bukan menghasilkan transaksi baru.
+      let idempotencyKey = tx.idempotency_key ?? null;
+      if (!idempotencyKey) {
+        idempotencyKey = crypto.randomUUID();
+        if (tx.local_id) {
+          await db.pendingTransactions.update(tx.local_id, { idempotency_key: idempotencyKey });
+        }
+      }
+
       const { error } = await supabase.rpc("checkout_transaction", {
         p_tenant_id: tx.tenant_id,
         p_cashier_id: tx.cashier_id,
@@ -156,6 +176,11 @@ export async function runBackgroundSync() {
         p_branch_id: tx.branch_id ?? null,
         p_customer_id: null,
         p_voucher_code: null,
+        p_idempotency_key: idempotencyKey,
+        // Uang tunai ikut dikirim supaya kembalian & rekonsiliasi shift
+        // tetap benar walau transaksi baru tersinkron belakangan.
+        p_cash_received: tx.payment_method === "cash" ? tx.cash_received ?? null : null,
+        p_change_pending: !!tx.change_pending,
       });
       if (error) {
         // Bedakan dua jenis kegagalan, karena keduanya punya konsekuensi yang

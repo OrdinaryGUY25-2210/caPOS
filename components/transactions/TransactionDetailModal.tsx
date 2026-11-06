@@ -127,6 +127,50 @@ export default function TransactionDetailModal({ tx, onClose, onRefunded }: { tx
       </div>
       <p className="text-xs text-neutral-400 uppercase">Dibayar via {tx.payment_method}</p>
 
+      {/* migration_023 — rincian uang tunai & kembalian. */}
+      {(tx.cash_received != null || (tx.change_amount ?? 0) > 0) && (
+        <div className="border-t border-dashed border-neutral-200 pt-3 space-y-1 text-sm">
+          {tx.cash_received != null && (
+            <div className="flex justify-between">
+              <span className="text-neutral-500">Uang diterima</span>
+              <span>{formatRupiah(tx.cash_received)}</span>
+            </div>
+          )}
+          {(tx.change_amount ?? 0) > 0 && (
+            <div className="flex justify-between">
+              <span className="text-neutral-500">Kembalian</span>
+              <span>{formatRupiah(tx.change_amount ?? 0)}</span>
+            </div>
+          )}
+          {tx.change_status && tx.change_status !== "NONE" && (
+            <div className="flex justify-between items-center">
+              <span className="text-neutral-500">Status kembalian</span>
+              <span
+                className={
+                  "text-xs font-semibold px-2 py-0.5 rounded-full " +
+                  (tx.change_status === "PENDING"
+                    ? "bg-amber-100 text-amber-800"
+                    : tx.change_status === "SETTLED"
+                      ? "bg-emerald-50 text-emerald-700"
+                      : "bg-neutral-100 text-neutral-500")
+                }
+              >
+                {tx.change_status === "PENDING"
+                  ? "Belum diserahkan"
+                  : tx.change_status === "SETTLED"
+                    ? "Sudah diserahkan"
+                    : "Dihapuskan"}
+              </span>
+            </div>
+          )}
+          {tx.change_status === "PENDING" && tx.change_due_at && (
+            <p className="text-[11px] text-neutral-400">
+              Batas ambil: {new Date(tx.change_due_at).toLocaleString("id-ID")}
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="flex gap-2 pt-2">
         <button onClick={() => window.print()} className="btn-outline flex-1 flex items-center justify-center gap-2 text-sm">
           <Printer size={15} /> Cetak Struk

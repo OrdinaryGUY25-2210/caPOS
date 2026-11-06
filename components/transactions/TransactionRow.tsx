@@ -13,6 +13,11 @@ export interface TxRow {
   branch_name: string | null;
   refundStatus: "PENDING_APPROVAL" | "COMPLETED" | null;
   refundedAmount: number;
+  /** migration_023 — uang tunai & siklus kembalian. */
+  cash_received?: number | null;
+  change_amount?: number;
+  change_status?: "NONE" | "PENDING" | "SETTLED" | "WRITTEN_OFF";
+  change_due_at?: string | null;
 }
 
 /**
@@ -58,6 +63,21 @@ export default function TransactionRow({
             >
               <RotateCcw size={10} />
               {tx.refundStatus === "COMPLETED" ? `Sudah di-refund (${formatRupiah(tx.refundedAmount)})` : "Refund diajukan"}
+            </span>
+          )}
+          {tx.change_status === "PENDING" && (
+            <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full mt-1 bg-amber-100 text-amber-800">
+              Kembalian PENDING {formatRupiah(tx.change_amount ?? 0)}
+            </span>
+          )}
+          {tx.change_status === "SETTLED" && (tx.change_amount ?? 0) > 0 && (
+            <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full mt-1 bg-emerald-50 text-emerald-700">
+              Kembalian diserahkan
+            </span>
+          )}
+          {tx.change_status === "WRITTEN_OFF" && (
+            <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full mt-1 bg-neutral-100 text-neutral-500">
+              Kembalian dihapuskan
             </span>
           )}
         </div>

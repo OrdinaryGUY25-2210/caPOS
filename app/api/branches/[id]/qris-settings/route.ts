@@ -46,7 +46,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const { data, error } = await auth.svc
     .from("branches")
     .select(
-      "qris_mode, midtrans_client_key, midtrans_is_production, static_qris_image_url, sound_enabled, sound_tone, sound_volume, midtrans_server_key"
+      "qris_mode, midtrans_client_key, midtrans_is_production, static_qris_image_url, sound_enabled, sound_tone, sound_volume, midtrans_server_key, petty_cash_threshold, change_due_minutes"
     )
     .eq("id", id)
     .single();
@@ -89,6 +89,21 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       return NextResponse.json({ message: "sound_volume harus angka 0-1." }, { status: 400 });
     }
     update.sound_volume = vol;
+  }
+  // migration_023 — batas petty cash & jatuh tempo kembalian.
+  if (body.petty_cash_threshold !== undefined) {
+    const threshold = Number(body.petty_cash_threshold);
+    if (!Number.isFinite(threshold) || threshold < 0) {
+      return NextResponse.json({ message: "petty_cash_threshold harus angka >= 0." }, { status: 400 });
+    }
+    update.petty_cash_threshold = threshold;
+  }
+  if (body.change_due_minutes !== undefined) {
+    const minutes = Math.trunc(Number(body.change_due_minutes));
+    if (!Number.isFinite(minutes) || minutes < 1 || minutes > 43200) {
+      return NextResponse.json({ message: "change_due_minutes harus antara 1 dan 43200 menit." }, { status: 400 });
+    }
+    update.change_due_minutes = minutes;
   }
 
   // Pola "kosongkan untuk tetap pakai yang lama": field ini HANYA ditulis

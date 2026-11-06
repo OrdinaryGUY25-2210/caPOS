@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Plus, Trash2, Loader2, Banknote, QrCode, CreditCard, Wallet2, Landmark } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Plus, Trash2, Loader2, Banknote, QrCode, CreditCard, Wallet2, Landmark, HandCoins } from "lucide-react";
 import Modal from "@/components/Modal";
 import { createClient } from "@/lib/supabase/client";
 import { formatRupiah, formatNumberWithDots, stripNumberDots, generateInvoiceNumber } from "@/lib/utils";
@@ -29,6 +29,11 @@ interface PaymentLine {
  * — modal ini hanya membantu kasir menyusun rinciannya sebelum dikirim,
  * bukan sumber kebenaran nominal.
  *
+ * migration_023: kalau ada baris tunai, kasir juga memasukkan UANG FISIK
+ * yang diterima. Setelah checkout_order_v2 berhasil, `record_cash_tender`
+ * mencatat cash_received + kembalian (SETTLED/PENDING) supaya expected
+ * cash shift ikut benar dan kembalian bisa ditagih belakangan.
+ *
  * Catatan pemisahan integrasi (lihat spesifikasi Phase 2 poin 4):
  * Ini BUKAN Midtrans — Midtrans di caPOS khusus untuk pembayaran
  * langganan SaaS Owner (lihat lib/midtransPlans.ts). Pembayaran kasir
@@ -50,9 +55,18 @@ export default function MultiPaymentModal({
   const [memberCode, setMemberCode] = useState("");
   const [lines, setLines] = useState<PaymentLine[]>([{ id: crypto.randomUUID(), method: "cash", amount: String(totalDue) }]);
   const [saving, setSaving] = useState(false);
+  // migration_023 — uang tunai fisik yang diserahkan pelanggan.
+  const [cashReceived, setCashReceived] = useState("");
+  const [changePending, setChangePending] = useState(false);
 
   const paidSoFar = lines.reduce((sum, l) => sum + (Number(l.amount) || 0), 0);
   const remaining = totalDue - paidSoFar;
+  const cashPortion = useMemo(
+    () => lines.filter((l) => l.method === "cash").reduce((sum, l) => sum + (Number(l.amount) || 0), 0),
+    [lines]
+  );
+  const receivedNum = cashReceived === "" ? cashPortion : Number(cashReceived) || 0;
+  const change = cashPortion > 0 ? receivedNum - cashPortion : 0;
 
   function updateLine(id: string, patch: Partial<PaymentLine>) {
     setLines((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)));
@@ -75,6 +89,10 @@ export default function MultiPaymentModal({
       alert("Setiap baris pembayaran harus punya nominal lebih dari 0.");
       return;
     }
+    if (cashPortion > 0 && receivedNum < cashPortion) {
+      alert(`Uang tunai diterima (${formatRupiah(receivedNum)}) kurang dari porsi tunai (${formatRupiah(cashPortion)}).`);
+      return;
+    }
 
     setSaving(true);
     const { data, error } = await supabase.rpc("checkout_order_v2", {
@@ -83,9 +101,9 @@ export default function MultiPaymentModal({
       p_member_code: memberCode || null,
       p_payments: lines.map((l) => ({ method: l.method, amount: Number(l.amount) })),
     });
-    setSaving(false);
 
     if (error) {
+      setSaving(false);
       if (error.message.includes("PAYMENT_MISMATCH")) {
         alert("Total pembayaran tidak sama dengan total tagihan (mungkin ada diskon member yang belum dihitung ulang). Coba lagi.");
       } else {
@@ -94,6 +112,26 @@ export default function MultiPaymentModal({
       return;
     }
 
+    // migration_023 — catat uang fisik & kembalian SEBELUM menutup modal.
+    // RPC ini idempotent: retry tidak menimpa angka yang sudah tercatat.
+    let cashWarning: string | null = null;
+    if (cashPortion > 0 && data) {
+      const { error: tenderError } = await supabase.rpc("record_cash_tender", {
+        p_transaction_id: data as string,
+        p_cash_received: receivedNum,
+        p_change_pending: change > 0 ? changePending : false,
+        p_change_due_minutes: null,
+      });
+      if (tenderError) {
+        cashWarning =
+          "Pembayaran tersimpan, tetapi pencatatan uang tunai/kembalian gagal: " +
+          tenderError.message +
+          ". Laporkan ke supervisor agar kas shift tetap seimbang.";
+      }
+    }
+
+    setSaving(false);
+    if (cashWarning) alert(cashWarning);
     onPaid(data as string);
   }
 
@@ -156,6 +194,42 @@ export default function MultiPaymentModal({
           <Plus size={13} /> Tambah Metode Pembayaran (Split Bill)
         </button>
       </div>
+
+      {cashPortion > 0 && (
+        <div className="rounded-xl border border-neutral-200 p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <label className="text-sm font-medium text-neutral-700 flex items-center gap-1.5">
+              <HandCoins size={14} /> Uang tunai diterima
+            </label>
+            <span className="text-xs text-neutral-400">Porsi tunai {formatRupiah(cashPortion)}</span>
+          </div>
+          <input
+            type="text"
+            inputMode="numeric"
+            value={formatNumberWithDots(cashReceived)}
+            onChange={(e) => setCashReceived(stripNumberDots(e.target.value))}
+            placeholder={`Contoh: ${formatNumberWithDots(String(cashPortion))}`}
+            className="input-field"
+          />
+          <p className={`text-sm font-semibold text-right ${change < 0 ? "text-urgent" : "text-emerald-600"}`}>
+            {change < 0 ? `Kurang ${formatRupiah(-change)}` : `Kembalian: ${formatRupiah(change)}`}
+          </p>
+          {change > 0 && (
+            <label className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 cursor-pointer">
+              <input
+                type="checkbox"
+                className="w-4 h-4 mt-0.5 accent-primary shrink-0"
+                checked={changePending}
+                onChange={(e) => setChangePending(e.target.checked)}
+              />
+              <span>
+                <strong>Kembalian belum diserahkan sekarang.</strong> Pelanggan mengambil nanti —
+                kembalian dicatat sebagai kewajiban dan harus diselesaikan sebelum shift ditutup.
+              </span>
+            </label>
+          )}
+        </div>
+      )}
 
       <div className="border-t border-neutral-100 pt-3 space-y-1 text-sm">
         <div className="flex justify-between"><span className="text-neutral-500">Sudah diisi</span><span>{formatRupiah(paidSoFar)}</span></div>
