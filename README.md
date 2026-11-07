@@ -187,10 +187,10 @@ Lima penguatan pada alur kas/transaksi:
 
 **Penerapan:** jalankan `supabase/migration_023_cash_integrity.sql`
 setelah `migration_022_qris_selfservice_audio.sql`. File ini idempoten
-(aman dijalankan ulang) dan sudah dijalankan di project Supabase.
-Deploy aplikasi bersamaan dengan migrasi — pemanggil lama
-`checkout_transaction` tetap kompatibel karena empat parameter baru
-memakai nilai default.
+(aman dijalankan ulang) dan sekaligus membersihkan sisa patch kas
+alternatif yang sempat terpasang. Deploy aplikasi bersamaan dengan
+migrasi — pemanggil lama `checkout_transaction` tetap kompatibel karena
+empat parameter baru memakai nilai default.
 
 ---
 
@@ -270,9 +270,10 @@ terminal/komputer lokal.** Ringkasannya:
    `20251104_export_audit.sql`.
 3. `migration_023_cash_integrity.sql` dijalankan setelah
    `migration_022_qris_selfservice_audio.sql`. File ini idempoten (aman
-   dijalankan ulang) dan sudah diterapkan di project Supabase. Deploy
-   aplikasi bersamaan — RPC `checkout_transaction` tetap kompatibel
-   dengan pemanggil lama karena parameter baru punya nilai default.
+   dijalankan ulang) dan membersihkan sisa patch kas alternatif bila ada.
+   Deploy aplikasi bersamaan — RPC `checkout_transaction` tetap
+   kompatibel dengan pemanggil lama karena parameter baru punya nilai
+   default.
 4. Import repo ini ke Vercel, isi Environment Variables (lihat
    `.env.local.example`), Deploy.
 5. Buka domain Vercel-nya → daftar akun Owner pertama lewat `/register`.

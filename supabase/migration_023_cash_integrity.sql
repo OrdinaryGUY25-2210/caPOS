@@ -19,6 +19,45 @@
 SET check_function_bodies = off;
 
 -- ============================================================
+-- 0a. KOMPATIBILITAS: BERSIHKAN SISA PATCH ALTERNATIF
+-- ============================================================
+-- Sebagian instalasi pernah menjalankan patch "capos-cash-integrity"
+-- (implementasi lain yang TIDAK dipakai repo ini). Patch itu membuat
+-- constraint change_status dengan nilai WAITING/GIVEN/OWED serta trigger
+-- audit ganda. Kalau dibiarkan, transaksi baru dengan PENDING/SETTLED/
+-- WRITTEN_OFF akan ditolak dan audit harga produk tercatat dua kali.
+-- Bagian ini hanya menyentuh objek milik patch tersebut; instalasi bersih
+-- tidak terpengaruh (semua DROP IF EXISTS / UPDATE tanpa baris cocok).
+ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_change_status_chk;
+
+DO $$
+BEGIN
+  -- Kolom change_status belum tentu ada saat migrasi ini jalan pertama kali.
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'transactions'
+      AND column_name = 'change_status'
+  ) THEN
+    -- Buka gerbang immutability bila 023 lama sempat terpasang sebagian.
+    PERFORM set_config('capos.allow_transaction_mutation', 'on', true);
+    UPDATE transactions
+       SET change_status = CASE change_status
+             WHEN 'WAITING' THEN 'PENDING'
+             WHEN 'GIVEN'   THEN 'SETTLED'
+             WHEN 'OWED'    THEN 'PENDING'
+             ELSE change_status
+           END
+     WHERE change_status IN ('WAITING', 'GIVEN', 'OWED');
+    PERFORM set_config('capos.allow_transaction_mutation', 'off', true);
+  END IF;
+END $$;
+
+DROP TRIGGER IF EXISTS transactions_lock ON transactions;
+DROP FUNCTION IF EXISTS trg_transactions_lock();
+DROP TRIGGER IF EXISTS products_price_audit ON products;
+DROP FUNCTION IF EXISTS trg_products_price_audit();
+
+-- ============================================================
 -- 0. KOLOM KONFIGURASI CABANG
 -- ============================================================
 ALTER TABLE branches
