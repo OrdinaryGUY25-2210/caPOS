@@ -4,8 +4,9 @@ Aplikasi web SaaS POS untuk kafe/restoran berbasis Next.js (App Router),
 Tailwind CSS, Dexie.js (IndexedDB, offline-first), dan Supabase
 (Auth + Postgres + Storage + Realtime).
 
-**Revisi terakhir:** 5 November 2026 — export PDF/Excel lengkap + HPP
-per cabang.
+**Revisi terakhir:** 7 November 2026 — integritas kas & transaksi
+(migration_023). Build **tidak di-upgrade**: tetap Next.js 16.4.2,
+React 19.3.1, TypeScript 5.9.3, Tailwind CSS 3.4.19.
 
 **Paket ini adalah hasil PENGGABUNGAN 4 fase pengembangan** menjadi satu
 basis kode yang konsisten. Kalau ini pertama kalinya kamu membuka proyek
@@ -117,7 +118,83 @@ angka di halaman Laporan & Omzet, PDF, dan Excel konsisten.
 
 ---
 
-## 3. Struktur Proyek (ringkas)
+## 3. Integritas Kas & Transaksi (migration_023)
+
+Lima penguatan pada alur kas/transaksi:
+
+### a. Rekonsiliasi shift
+
+- `transaction_payments.amount` = **total transaksi** (pendapatan neto),
+  sedangkan `transactions.cash_received` mencatat **uang fisik** yang
+  diterima. Kembalian tidak dihitung sebagai penjualan.
+- `shift_cash_summary()` menghitung kas seharusnya dari mutasi kas fisik
+  (kas awal + penjualan tunai + kas masuk − kas keluar), bukan dari total
+  penjualan.
+- **Blind closing**: kasir tidak bisa melihat ringkasan sebelum shift
+  ditutup. `close_shift()` menolak penutupan bila masih ada kembalian
+  tertunda; penutupan paksa hanya bisa dengan PIN supervisor
+  (`p_force_close`, `p_supervisor_pin`).
+- Peringatan petty cash (`shift_cash_alert`) hanya mengembalikan status
+  `is_low` + `threshold`, tanpa membocorkan saldo ke kasir.
+
+### b. Kembalian dihitung server
+
+- `checkout_transaction()` menghitung ulang harga, total, dan kembalian
+  di server — nominal dari klien tidak dipercaya.
+- Status kembalian: `NONE`, `PENDING`, `SETTLED`, `WRITTEN_OFF`.
+- Bila uang kembalian belum diserahkan, kasir mengirim `p_change_pending`;
+  transaksi muncul di banner POS dan halaman Transaksi untuk ditindak
+  lanjuti lewat `confirm_change()` atau `write_off_change()`.
+- `record_cash_tender()` mencatat uang tunai + kembalian untuk pembayaran
+  split/open bill (`checkout_order_v2`).
+
+### c. Idempotency
+
+- `transactions.idempotency_key` unik per tenant: permintaan checkout
+  berulang dengan key yang sama mengembalikan transaksi yang sama, tidak
+  membuat transaksi ganda.
+- Key dibuat sekali per percobaan checkout, disimpan di antrean offline
+  Dexie, dan dipakai ulang saat sinkronisasi (`lib/offlineSync.ts`).
+
+### d. Webhook Midtrans
+
+- Tabel `midtrans_webhook_events` menyimpan dedupe per kombinasi
+  `(order_id, transaction_status, status_code, fraud_status,
+  gross_amount)`.
+- `gross_amount` diverifikasi terhadap `payments.amount`,
+  `qr_orders.total_amount`, dan `pos_qris_payments.gross_amount`. Bila
+  tidak cocok, status tidak diubah dan event ditandai `AMOUNT_MISMATCH`.
+- Perpanjangan langganan idempoten (`payments.subscription_granted_at`).
+- Status `paid` bersifat **final**: notifikasi `pending`/`failed`/
+  `expired` yang datang terlambat tidak menurunkan pembayaran yang sudah
+  lunas.
+
+### e. Transaksi immutable + audit
+
+- `transactions`, `transaction_items`, `transaction_payments`, `shifts`,
+  `cash_movements`, dan `audit_log` hanya bisa **dibaca** klien; semua
+  penulisan lewat RPC `SECURITY DEFINER`.
+- Trigger `BEFORE UPDATE OR DELETE` pada `transactions` menolak
+  perubahan (`IMMUTABLE_TRANSACTION`). Hanya RPC internal
+  (`confirm_change`, `write_off_change`, `record_cash_tender`) yang
+  membuka gerbang itu secara terbatas.
+- Perubahan harga produk dan mutasi kas tercatat di `audit_log`.
+- RPC tambahan: `record_cash_exchange` (tukar uang, neto 0), `log_no_sale`
+  (buka laci tanpa transaksi), `record_cash_tender`.
+- Pengaturan per cabang: `petty_cash_threshold` (default Rp100.000) dan
+  `change_due_minutes` (default 1.440 menit / 24 jam) di halaman
+  **Pengaturan → Pembayaran**.
+
+**Penerapan:** jalankan `supabase/migration_023_cash_integrity.sql`
+setelah `migration_022_qris_selfservice_audio.sql`. File ini idempoten
+(aman dijalankan ulang) dan sudah dijalankan di project Supabase.
+Deploy aplikasi bersamaan dengan migrasi — pemanggil lama
+`checkout_transaction` tetap kompatibel karena empat parameter baru
+memakai nilai default.
+
+---
+
+## 4. Struktur Proyek (ringkas)
 
 ```
 capos/
@@ -134,6 +211,8 @@ capos/
 │   │   └── orders/qris-charge/route.ts      # Generate QRIS dinamis utk pesanan QR
 │   └── dashboard/
 │       ├── laporan-pdf/                     # Export Ringkasan / Laba / Semua Data
+│       ├── transactions/                    # Riwayat + confirm/write-off kembalian
+│       ├── settings/payment/                # Petty cash & batas waktu kembalian
 │       ├── purchasing/, crm/, promotions/   # Fase 3
 │       └── qr-tables/, reservations/, online-orders/,
 │           channel-pricing/, analytics/growth/,
@@ -141,6 +220,7 @@ capos/
 ├── components/
 │   ├── kitchen/, ShiftModal.tsx, MultiPaymentModal.tsx,
 │   │   SendToKitchenModal.tsx               # Fase 2
+│   ├── pos/PendingChangeBanner.tsx, SupervisorPinModal.tsx  # Integritas kas
 │   ├── crm/, purchasing/, analytics/        # Fase 3
 │   ├── tables/, reservations/, order/, pos/QrOrderAlert.tsx  # Fase 4
 │   └── ...
@@ -158,6 +238,7 @@ capos/
 └── supabase/
     ├── schema.sql                              # Fondasi Fase 1
     ├── migration_001 .. migration_023          # Migrasi Fase 1-4, hardening & integritas kas
+    ├── migration_023_cash_integrity.sql         # Shift, kembalian, idempotency, webhook, audit
     ├── 20251031_voucher_branch_scope.sql       # Voucher per cabang
     ├── 20251031_qr_order_page_branch_id.sql    # branch.id di halaman order QR
     ├── 20251104_product_branch_cost.sql        # HPP menu per cabang
@@ -170,16 +251,16 @@ capos/
 
 ---
 
-## 4. Instalasi
+## 5. Instalasi
 
 **Baca `docs/PANDUAN_INSTALASI_WEB.md` untuk langkah lengkap tanpa
 terminal/komputer lokal.** Ringkasannya:
 
 1. Buat project Supabase baru → jalankan `supabase/schema.sql`, lalu
-   seluruh migrasi di folder `supabase/` **berurutan** dari SQL Editor
-   (web, tidak perlu Supabase CLI).
-2. Untuk fitur export & HPP per cabang, jalankan migrasi bertanggal
-   `2025xxxx` **setelah** migrasi lama, dengan urutan:
+   seluruh migrasi bernomor **berurutan** dari `migration_001` sampai
+   `migration_023` lewat SQL Editor (web, tidak perlu Supabase CLI).
+2. Jalankan migrasi bertanggal `2025xxxx` **setelah** migrasi bernomor,
+   dengan urutan:
    `20251031_voucher_branch_scope.sql` →
    `20251031_qr_order_page_branch_id.sql` →
    `20251104_product_branch_cost.sql` →
@@ -187,14 +268,21 @@ terminal/komputer lokal.** Ringkasannya:
    `20251104_profit_report_rpc.sql` →
    `20251104_full_export_rpc.sql` →
    `20251104_export_audit.sql`.
-3. Import repo ini ke Vercel, isi Environment Variables (lihat
+3. `migration_023_cash_integrity.sql` dijalankan setelah
+   `migration_022_qris_selfservice_audio.sql`. File ini idempoten (aman
+   dijalankan ulang) dan sudah diterapkan di project Supabase. Deploy
+   aplikasi bersamaan — RPC `checkout_transaction` tetap kompatibel
+   dengan pemanggil lama karena parameter baru punya nilai default.
+4. Import repo ini ke Vercel, isi Environment Variables (lihat
    `.env.local.example`), Deploy.
-4. Buka domain Vercel-nya → daftar akun Owner pertama lewat `/register`.
+5. Buka domain Vercel-nya → daftar akun Owner pertama lewat `/register`.
 
-Tidak ada dependency baru untuk fitur export — cukup `npm install`
-seperti biasa.
+**Build tidak di-upgrade pada revisi ini.** Versi yang dipakai:
+Next.js 16.4.2, React 19.3.1, TypeScript 5.9.3, Tailwind CSS 3.4.19,
+Node.js 24.x. Jalankan `npm install` mengikuti `package-lock.json`;
+jangan `npm update` / upgrade framework untuk revisi ini.
 
-## 5. Kalau Perlu Reset Total
+## 6. Kalau Perlu Reset Total
 
 Baca **`docs/PANDUAN_RESET_SUPABASE.md`**. Jangan jalankan
 `supabase/reset_all.sql` kalau belum baca dokumen itu — file itu
@@ -202,7 +290,7 @@ Baca **`docs/PANDUAN_RESET_SUPABASE.md`**. Jangan jalankan
 
 ---
 
-## 6. Sistem Tier — Free Trial / Pro / Supreme
+## 7. Sistem Tier — Free Trial / Pro / Supreme
 
 | | Free Trial | Pro (Bulanan) | Supreme (Tahunan) |
 |---|---|---|---|
@@ -222,7 +310,7 @@ tidak bisa dilewati dengan memanipulasi query.
 
 ---
 
-## 7. Dokumentasi Lain
+## 8. Dokumentasi Lain
 
 | Dokumen | Isi |
 |---|---|
@@ -232,7 +320,7 @@ tidak bisa dilewati dengan memanipulasi query.
 | `docs/EXPORT_PDF_LENGKAP.md` | Export PDF/Excel, HPP per cabang, migrasi |
 | `EXPORT_LAPORAN.md` | Definisi metrik & troubleshooting export |
 
-## 8. Dukungan
+## 9. Dukungan
 
 Hubungi Studio D13 lewat tombol WhatsApp di halaman FAQ dashboard, atau
 atur nomornya di `NEXT_PUBLIC_STUDIO_D13_WHATSAPP` (`.env.local`).
