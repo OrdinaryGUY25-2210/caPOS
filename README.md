@@ -188,9 +188,14 @@ Lima penguatan pada alur kas/transaksi:
 **Penerapan:** jalankan `supabase/migration_023_cash_integrity.sql`
 setelah `migration_022_qris_selfservice_audio.sql`. File ini idempoten
 (aman dijalankan ulang) dan sekaligus membersihkan sisa patch kas
-alternatif yang sempat terpasang. Deploy aplikasi bersamaan dengan
-migrasi — pemanggil lama `checkout_transaction` tetap kompatibel karena
-empat parameter baru memakai nilai default.
+alternatif yang sempat terpasang. Setelah selesai, panel **Results** SQL
+Editor menampilkan baris `CAPOS 023 APPLIED` dengan angka
+`5 / midtrans_webhook_events / 5 / false`, dan baris
+`023_cash_integrity` tercatat di tabel `capos_migrations`. Kalau baris
+itu tidak muncul, seluruh batch di-rollback dan migrasi **belum** masuk
+— jalankan `supabase/VERIFY_023.sql` untuk memastikan. Deploy aplikasi
+bersamaan dengan migrasi — pemanggil lama `checkout_transaction` tetap
+kompatibel karena empat parameter baru memakai nilai default.
 
 ---
 
@@ -270,10 +275,12 @@ terminal/komputer lokal.** Ringkasannya:
    `20251104_export_audit.sql`.
 3. `migration_023_cash_integrity.sql` dijalankan setelah
    `migration_022_qris_selfservice_audio.sql`. File ini idempoten (aman
-   dijalankan ulang) dan membersihkan sisa patch kas alternatif bila ada.
-   Deploy aplikasi bersamaan — RPC `checkout_transaction` tetap
-   kompatibel dengan pemanggil lama karena parameter baru punya nilai
-   default.
+   dijalankan ulang), membersihkan sisa patch kas alternatif bila ada,
+   dan di akhir menampilkan baris verifikasi `CAPOS 023 APPLIED`.
+   Gunakan `supabase/VERIFY_023.sql` (hanya membaca) untuk mengecek
+   statusnya kapan saja. Deploy aplikasi bersamaan — RPC
+   `checkout_transaction` tetap kompatibel dengan pemanggil lama karena
+   parameter baru punya nilai default.
 4. Import repo ini ke Vercel, isi Environment Variables (lihat
    `.env.local.example`), Deploy.
 5. Buka domain Vercel-nya → daftar akun Owner pertama lewat `/register`.

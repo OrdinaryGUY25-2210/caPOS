@@ -18,6 +18,20 @@
 
 SET check_function_bodies = off;
 
+-- ------------------------------------------------------------
+-- JEJAK PENERAPAN (ledger)
+-- ------------------------------------------------------------
+-- Baris '023_cash_integrity' HANYA muncul kalau seluruh isi file ini
+-- berhasil dieksekusi. Kalau satu statement gagal, PostgreSQL membatalkan
+-- seluruh batch, jadi tabel ini tetap kosong dan kamu bisa tahu bahwa
+-- migrasi BELUM masuk (tidak perlu menebak dari kolom yang ada).
+CREATE TABLE IF NOT EXISTS capos_migrations (
+  version    TEXT PRIMARY KEY,
+  applied_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  note       TEXT
+);
+REVOKE ALL ON TABLE capos_migrations FROM anon, authenticated;
+
 -- ============================================================
 -- 0a. KOMPATIBILITAS: BERSIHKAN SISA PATCH ALTERNATIF
 -- ============================================================
@@ -1636,59 +1650,62 @@ $$;
 -- helper internal seperti allow_transaction_mutation() untuk membuka
 -- gerbang trigger immutability. Cabut dari ketiganya dulu, lalu berikan
 -- kembali hanya ke role yang memang membutuhkan.
-REVOKE ALL ON FUNCTION allow_transaction_mutation() FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION assert_shift_operator(shifts) FROM PUBLIC, anon, authenticated;
+--
+-- Semua REVOKE/GRANT dibungkus pengecekan `to_regprocedure` supaya file ini
+-- tidak gagal total (dan rollback) hanya karena database lama belum punya
+-- salah satu fungsi legacy (mis. open_shift dari migration_005).
+DO $$
+DECLARE
+  f TEXT;
+BEGIN
+  FOREACH f IN ARRAY ARRAY[
+    'allow_transaction_mutation()',
+    'assert_shift_operator(shifts)',
+    'open_shift(uuid,uuid)',
+    'open_shift_v2(uuid,uuid,uuid,numeric)',
+    'record_cash_movement(uuid,text,numeric,text)',
+    'checkout_transaction(uuid,uuid,text,text,text,jsonb,uuid,uuid,text,uuid,text,numeric,boolean,int)',
+    'shift_cash_summary(uuid)',
+    'shift_cash_alert(uuid)',
+    'close_shift(uuid,numeric,text,boolean,text)',
+    'record_cash_exchange(uuid,numeric,text)',
+    'log_no_sale(uuid,text,text)',
+    'record_cash_tender(uuid,numeric,boolean,int)',
+    'confirm_change(uuid,text)',
+    'write_off_change(uuid,text,text)'
+  ] LOOP
+    IF to_regprocedure('public.' || f) IS NOT NULL THEN
+      EXECUTE format(
+        'REVOKE ALL ON FUNCTION public.%s FROM PUBLIC, anon, authenticated, service_role',
+        f
+      );
+    END IF;
+  END LOOP;
 
--- open_shift(uuid, uuid) legacy: SECURITY DEFINER tanpa validasi tenant,
--- cabang, maupun pemilik. Sejak migration_023 checkout_transaction memakai
--- open_shift_v2, jadi fungsi ini tidak dipanggil aplikasi lagi. Tutup total
--- untuk semua role client; pemanggilan internal dari fungsi SECURITY DEFINER
--- tetap berjalan sebagai owner.
-REVOKE ALL ON FUNCTION open_shift(UUID, UUID) FROM PUBLIC, anon, authenticated, service_role;
+  FOREACH f IN ARRAY ARRAY[
+    'checkout_transaction(uuid,uuid,text,text,text,jsonb,uuid,uuid,text,uuid,text,numeric,boolean,int)',
+    'shift_cash_summary(uuid)',
+    'shift_cash_alert(uuid)',
+    'open_shift_v2(uuid,uuid,uuid,numeric)',
+    'record_cash_movement(uuid,text,numeric,text)',
+    'close_shift(uuid,numeric,text,boolean,text)',
+    'record_cash_exchange(uuid,numeric,text)',
+    'log_no_sale(uuid,text,text)',
+    'record_cash_tender(uuid,numeric,boolean,int)',
+    'confirm_change(uuid,text)',
+    'write_off_change(uuid,text,text)'
+  ] LOOP
+    IF to_regprocedure('public.' || f) IS NOT NULL THEN
+      EXECUTE format('GRANT EXECUTE ON FUNCTION public.%s TO authenticated', f);
+      EXECUTE format('GRANT EXECUTE ON FUNCTION public.%s TO service_role', f);
+    END IF;
+  END LOOP;
 
-REVOKE ALL ON FUNCTION open_shift_v2(UUID, UUID, UUID, NUMERIC) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION record_cash_movement(UUID, TEXT, NUMERIC, TEXT) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION checkout_transaction(
-  UUID, UUID, TEXT, TEXT, TEXT, JSONB, UUID, UUID, TEXT, UUID, TEXT, NUMERIC, BOOLEAN, INT
-) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION shift_cash_summary(UUID) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION shift_cash_alert(UUID) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION close_shift(UUID, NUMERIC, TEXT, BOOLEAN, TEXT) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION record_cash_exchange(UUID, NUMERIC, TEXT) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION log_no_sale(UUID, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION record_cash_tender(UUID, NUMERIC, BOOLEAN, INT) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION confirm_change(UUID, TEXT) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION write_off_change(UUID, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
-
-GRANT EXECUTE ON FUNCTION checkout_transaction(
-  UUID, UUID, TEXT, TEXT, TEXT, JSONB, UUID, UUID, TEXT, UUID, TEXT, NUMERIC, BOOLEAN, INT
-) TO authenticated;
-
-GRANT EXECUTE ON FUNCTION shift_cash_summary(UUID) TO authenticated;
-GRANT EXECUTE ON FUNCTION shift_cash_alert(UUID) TO authenticated;
-GRANT EXECUTE ON FUNCTION open_shift_v2(UUID, UUID, UUID, NUMERIC) TO authenticated;
-GRANT EXECUTE ON FUNCTION record_cash_movement(UUID, TEXT, NUMERIC, TEXT) TO authenticated;
-GRANT EXECUTE ON FUNCTION close_shift(UUID, NUMERIC, TEXT, BOOLEAN, TEXT) TO authenticated;
-GRANT EXECUTE ON FUNCTION record_cash_exchange(UUID, NUMERIC, TEXT) TO authenticated;
-GRANT EXECUTE ON FUNCTION log_no_sale(UUID, TEXT, TEXT) TO authenticated;
-GRANT EXECUTE ON FUNCTION record_cash_tender(UUID, NUMERIC, BOOLEAN, INT) TO authenticated;
-GRANT EXECUTE ON FUNCTION confirm_change(UUID, TEXT) TO authenticated;
-GRANT EXECUTE ON FUNCTION write_off_change(UUID, TEXT, TEXT) TO authenticated;
-
--- service_role juga butuh (dipakai webhook/backoffice bila perlu)
-GRANT EXECUTE ON FUNCTION checkout_transaction(
-  UUID, UUID, TEXT, TEXT, TEXT, JSONB, UUID, UUID, TEXT, UUID, TEXT, NUMERIC, BOOLEAN, INT
-) TO service_role;
-GRANT EXECUTE ON FUNCTION open_shift_v2(UUID, UUID, UUID, NUMERIC) TO service_role;
-GRANT EXECUTE ON FUNCTION record_cash_movement(UUID, TEXT, NUMERIC, TEXT) TO service_role;
-GRANT EXECUTE ON FUNCTION shift_cash_summary(UUID) TO service_role;
-GRANT EXECUTE ON FUNCTION shift_cash_alert(UUID) TO service_role;
-GRANT EXECUTE ON FUNCTION close_shift(UUID, NUMERIC, TEXT, BOOLEAN, TEXT) TO service_role;
-GRANT EXECUTE ON FUNCTION record_cash_exchange(UUID, NUMERIC, TEXT) TO service_role;
-GRANT EXECUTE ON FUNCTION log_no_sale(UUID, TEXT, TEXT) TO service_role;
-GRANT EXECUTE ON FUNCTION record_cash_tender(UUID, NUMERIC, BOOLEAN, INT) TO service_role;
-GRANT EXECUTE ON FUNCTION confirm_change(UUID, TEXT) TO service_role;
-GRANT EXECUTE ON FUNCTION write_off_change(UUID, TEXT, TEXT) TO service_role;
+  -- open_shift legacy (migration_005) sengaja dibiarkan TERTUTUP TOTAL:
+  -- SECURITY DEFINER tanpa validasi tenant/cabang/pemilik. Aplikasi memakai
+  -- open_shift_v2. Pemanggilan internal dari fungsi SECURITY DEFINER tetap
+  -- berjalan sebagai owner, jadi tidak butuh grant ini.
+END $$;
 
 -- Tabel kas/transaksi hanya boleh DIBACA client. Semua penulisan lewat RPC
 -- SECURITY DEFINER. Ini juga mencabut TRUNCATE/REFERENCES/TRIGGER yang tidak
@@ -1705,3 +1722,33 @@ REVOKE ALL ON TABLE midtrans_webhook_events FROM anon, authenticated;
 -- Kembalikan validasi function body ke default supaya sesi SQL editor
 -- tidak "kebal" terhadap kesalahan referensi pada statement berikutnya.
 SET check_function_bodies = on;
+
+-- ============================================================
+-- 16. CATAT & VERIFIKASI (tampil di panel Results)
+-- ============================================================
+-- Baris di capos_migrations adalah bukti bahwa SELURUH file ini sukses.
+-- Kalau setelah menjalankan file ini `select * from capos_migrations`
+-- kosong, berarti eksekusi gagal/rollback dan migrasi belum masuk.
+INSERT INTO capos_migrations (version, note)
+VALUES ('023_cash_integrity', 'kas shift, kembalian, idempotency, webhook, audit')
+ON CONFLICT (version) DO UPDATE
+  SET applied_at = now(),
+      note = EXCLUDED.note;
+
+-- Hasil query ini otomatis tampil di panel Results setelah file dijalankan.
+-- Target: kolom_transaksi = 5, tabel_dedupe = midtrans_webhook_events,
+--         jumlah_rpc = 5, client_boleh_insert = false.
+SELECT
+  'CAPOS 023 APPLIED' AS status,
+  (SELECT count(*) FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'transactions'
+      AND column_name IN ('cash_received','change_amount','change_status',
+                          'change_due_at','idempotency_key')) AS kolom_transaksi,
+  to_regclass('public.midtrans_webhook_events') AS tabel_dedupe,
+  (SELECT count(*) FROM pg_proc p
+     JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public'
+      AND p.proname IN ('checkout_transaction','shift_cash_summary',
+                        'confirm_change','write_off_change',
+                        'record_cash_tender')) AS jumlah_rpc,
+  has_table_privilege('authenticated','public.transactions','INSERT') AS client_boleh_insert;
