@@ -9,7 +9,7 @@ import type { ProfitReport } from "@/lib/types";
 import { hppQuality, metricsFromReport } from "@/lib/metrics";
 import {
   BRAND, DARK, PALETTE, barChart, chartTitle, contentW, createPdf, drawFooters, drawHeader, ensureSpace, hBarChart,
-  lineChart, pageW, paragraph, pct, rp, rpShort, sectionTitle, stackedBar, table, type PdfCtx,
+  kpiTable, lineChart, pageW, paragraph, pct, rp, rpShort, sectionTitle, stackedBar, table, type PdfCtx,
 } from "./common";
 import type { PdfMeta } from "./summaryPdf";
 
@@ -26,6 +26,7 @@ function sideTable(c: PdfCtx, x: number, width: number, head: string[], body: (s
     tableWidth: width,
     theme: "grid",
     styles: { fontSize: 7.5, cellPadding: 2.2, overflow: "linebreak" },
+    rowPageBreak: "avoid",
     head: [head],
     body: body.length ? body : [head.map((_, i) => (i === 0 ? "Tidak ada data" : "-"))],
     headStyles: { fillColor: BRAND },
@@ -99,6 +100,9 @@ export async function buildProfitPdf(report: ProfitReport, meta: PdfMeta) {
   const rightW = contentW(c) - leftW - gutter;
   const rightX = c.margin + leftW + gutter;
 
+  // Dua tabel berdampingan harus mulai di halaman yang sama dan muat bersama;
+  // nama kategori sempit bisa membungkus sampai 3 baris, jadi estimasi tinggi dibuat longgar.
+  ensureSpace(c, 36 + Math.max(plRows.length * 14, (catRows.length + 1) * 28));
   plainTitle(c, c.margin, "Laba Rugi Ringkas");
   plainTitle(c, rightX, "Margin per Kategori Menu");
   c.y += 14;
@@ -154,28 +158,35 @@ export async function buildProfitPdf(report: ProfitReport, meta: PdfMeta) {
   c.doc.setTextColor(110);
   c.doc.text(`${meta.cafeName}  |  ${meta.branchLabel}  |  ${meta.periodLabel}`, c.margin, c.y + 14);
   c.doc.setTextColor(0);
-  c.y += 30;
+  c.y += 28;
+
+  // Ringkasan angka utama di atas grafik, supaya pembaca langsung tahu konteksnya.
+  kpiTable(c, [
+    ["Omzet", rp(m.omzet)],
+    ["Laba Kotor", rp(m.labaKotor)],
+    ["Laba Bersih", rp(m.labaBersih)],
+    ["Margin Bersih", pct(m.marginBersih)],
+  ]);
 
   const days = report.daily;
   const dayLabels = days.map((d) => d.tanggal.slice(5));
 
   // 1. Tren laba kotor harian
-  ensureSpace(c, 150);
-  chartTitle(c, "Tren Laba Kotor Harian", "Omzet - HPP per hari (merah = rugi)");
-  barChart(c, days.map((d) => ({ label: d.tanggal.slice(5), value: Number(d.omzet) - Number(d.hpp) })), 80);
+  if (days.length > 0) {
+    chartTitle(c, "Tren Laba Kotor Harian", "Omzet - HPP per hari (merah = rugi)", 150);
+    barChart(c, days.map((d) => ({ label: d.tanggal.slice(5), value: Number(d.omzet) - Number(d.hpp) })), 80);
 
-  // 2. Omzet vs HPP vs Laba kotor
-  ensureSpace(c, 160);
-  chartTitle(c, "Omzet vs HPP vs Laba Kotor per Hari");
-  lineChart(c, dayLabels, [
-    { name: "Omzet", color: PALETTE[1], values: days.map((d) => Number(d.omzet)) },
-    { name: "HPP", color: PALETTE[2], values: days.map((d) => Number(d.hpp)) },
-    { name: "Laba kotor", color: PALETTE[0], values: days.map((d) => Number(d.omzet) - Number(d.hpp)) },
-  ], 90);
+    // 2. Omzet vs HPP vs Laba kotor
+    chartTitle(c, "Omzet vs HPP vs Laba Kotor per Hari", undefined, 170);
+    lineChart(c, dayLabels, [
+      { name: "Omzet", color: PALETTE[1], values: days.map((d) => Number(d.omzet)) },
+      { name: "HPP", color: PALETTE[2], values: days.map((d) => Number(d.hpp)) },
+      { name: "Laba kotor", color: PALETTE[0], values: days.map((d) => Number(d.omzet) - Number(d.hpp)) },
+    ], 90);
+  }
 
   // 3. Dari omzet ke laba bersih
-  ensureSpace(c, 140);
-  chartTitle(c, "Dari Omzet ke Laba Bersih", "porsi terhadap omzet");
+  chartTitle(c, "Dari Omzet ke Laba Bersih", "porsi terhadap omzet", 150);
   const share = (v: number) => `${rpShort(v)} (${m.omzet > 0 ? ((v / m.omzet) * 100).toFixed(0) : 0}%)`;
   hBarChart(c, [
     { label: "Omzet", value: m.omzet, note: share(m.omzet), color: PALETTE[1] },
@@ -189,8 +200,7 @@ export async function buildProfitPdf(report: ProfitReport, meta: PdfMeta) {
 
   // 4. Laba kotor per kategori
   if (report.by_category.length) {
-    ensureSpace(c, 40 + Math.min(report.by_category.length, 6) * 15);
-    chartTitle(c, "Laba per Kategori Menu", "laba item (omzet item - HPP) dan margin");
+    chartTitle(c, "Laba per Kategori Menu", "laba item (omzet item - HPP) dan margin", 40 + Math.min(report.by_category.length, 6) * 17);
     hBarChart(
       c,
       [...report.by_category]
@@ -204,28 +214,25 @@ export async function buildProfitPdf(report: ProfitReport, meta: PdfMeta) {
 
   // 5. Top 10 menu penyumbang laba
   if (report.top_profit_menu.length) {
-    ensureSpace(c, 40 + report.top_profit_menu.length * 15);
-    chartTitle(c, "Top 10 Menu Penyumbang Laba");
+    chartTitle(c, "Top 10 Menu Penyumbang Laba", undefined, 40 + Math.min(report.top_profit_menu.length, 10) * 17);
     hBarChart(c, report.top_profit_menu.map((t) => ({ label: t.menu, value: Number(t.laba), note: `${rpShort(t.laba)} - ${t.qty} pcs` })), { color: PALETTE[0] });
   }
 
   // 6. Komposisi metode pembayaran
   if (report.by_payment.length) {
-    ensureSpace(c, 90);
-    chartTitle(c, "Komposisi Metode Pembayaran", "porsi omzet");
+    chartTitle(c, "Komposisi Metode Pembayaran", "porsi omzet", 100);
     stackedBar(c, report.by_payment.map((p) => ({ label: p.metode, value: Number(p.omzet) })));
   }
 
   // 7. Perbandingan cabang
   if (report.branch_id === null && report.by_branch.length > 1) {
     const bs = report.by_branch.slice(0, 8).map((b) => ({ ...b, lk: Number(b.omzet) - Number(b.refund) - Number(b.hpp) }));
-    ensureSpace(c, 50 + bs.length * 2 * 14);
-    chartTitle(c, "Perbandingan Cabang", "omzet (biru) dan laba kotor (hijau)");
+    chartTitle(c, "Perbandingan Cabang", "omzet (biru) dan laba kotor (hijau)", 40 + bs.length * 2 * 15);
     hBarChart(
       c,
       bs.flatMap((b) => [
         { label: b.branch_name, value: Number(b.omzet), note: rpShort(Number(b.omzet)), color: PALETTE[1] },
-        { label: "", value: b.lk, note: rpShort(b.lk), color: PALETTE[0] },
+        { label: "laba kotor", value: b.lk, note: rpShort(b.lk), color: PALETTE[0], muted: true },
       ]),
       { rowH: 13, labelW: 110 }
     );

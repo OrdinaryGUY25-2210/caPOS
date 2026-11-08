@@ -195,7 +195,10 @@ export default function NewMenuWizard({ tenantId, existingCategories, onClose, o
         p_name: name.trim(),
         p_category: category.trim() || "Kopi",
         p_price: price,
-        p_items: lines.map((l) => ({ ingredient_id: l.ing.id, quantity: l.qty })),
+        // `unit` WAJIB: kolom recipe_items.unit NOT NULL, dan create_menu_with_recipe memasukkan
+        // x->>'unit' apa adanya. Takaran di wizard dihitung per UNIT STOK bahan (HPP = qty x harga
+        // per unit stok), jadi unit yang dikirim = inventory_unit — sama dengan halaman Resep.
+        p_items: lines.map((l) => ({ ingredient_id: l.ing.id, quantity: l.qty, unit: l.ing.inventory_unit })),
       };
       let { error } = await supabase.rpc("create_menu_with_recipe", { ...baseArgs, p_stock_mode: "recipe" });
       if (error && (error.code === "PGRST202" || /Could not find the function/i.test(error.message))) {

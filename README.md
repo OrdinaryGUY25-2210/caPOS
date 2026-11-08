@@ -4,9 +4,10 @@ Aplikasi web SaaS POS untuk kafe/restoran berbasis Next.js (App Router),
 Tailwind CSS, Dexie.js (IndexedDB, offline-first), dan Supabase
 (Auth + Postgres + Storage + Realtime).
 
-**Revisi terakhir:** 7 November 2026 — integritas kas & transaksi
-(migration_023). Build **tidak di-upgrade**: tetap Next.js 16.4.2,
-React 19.3.1, TypeScript 5.9.3, Tailwind CSS 3.4.19.
+**Revisi terakhir:** 8 November 2026 — tata letak PDF (tabel/grafik tidak
+terpotong antar halaman) dan perbaikan simpan menu beresep. Build **tidak
+di-upgrade**: tetap Next.js 16.4.2, React 19.3.1, TypeScript 5.9.3,
+Tailwind CSS 3.4.19.
 
 **Paket ini adalah hasil PENGGABUNGAN 4 fase pengembangan** menjadi satu
 basis kode yang konsisten. Kalau ini pertama kalinya kamu membuka proyek
@@ -98,6 +99,17 @@ Catatan perilaku export:
   secara default. Owner/Super Admin bisa membukanya dengan konfirmasi.
   PIN, kunci pembayaran, dan kredensial tidak pernah diekspor.
 - Setiap export dicatat di `export_logs` dan `audit_log`.
+- Tata letak PDF: baris tabel tidak terbelah di batas halaman (header
+  tabel diulang tiap halaman), label grafik dipotong/dibungkus menurut
+  lebar terukur sehingga tidak bertumpuk, legenda bisa pindah baris, dan
+  grafik tidak pernah terpisah dari judulnya. PDF Laba Rugi juga memuat
+  ringkasan KPI di atas grafik.
+
+### Simpan menu beresep
+
+Wizard menu baru mengirim `unit` (unit stok bahan) saat memanggil
+`create_menu_with_recipe`, karena kolom `recipe_items.unit` NOT NULL.
+Tanpa ini, simpan menu beresep gagal walau bahan sudah dipilih.
 
 ### Sumber HPP (fallback berjenjang)
 
