@@ -1,0 +1,1114 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<title>caPOS — Panduan Lengkap Pengguna</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<style>
+/* ============================================================
+   caPOS — Dokumen Panduan. Tema disalin dari sumber kebenaran
+   aplikasi: tailwind.config.ts (primary/urgent/warning/neutral/
+   sidebar) + app/globals.css (radius, shadow, kelas komponen).
+   ============================================================ */
+:root{
+  --primary:#10B981; --primary-dark:#059669; --primary-light:#D1FAE5;
+  --urgent:#EF4444; --urgent-light:#FEE2E2;
+  --warning:#F59E0B; --warning-light:#FEF3C7;
+  --n50:#F8FAFC; --n100:#F1F5F9; --n200:#E2E8F0; --n300:#CBD5E1; --n500:#64748B; --n700:#334155; --n900:#0F172A;
+  --sb:#12181F; --sb-raised:#1A222C; --sb-border:#232B36; --sb-hover:#1E2731;
+  --sb-text:#94A3B8; --sb-text-active:#F8FAFC; --sb-group:#828FA1;
+  --r-sm:.375rem; --r-md:.5rem; --r-lg:.75rem; --r-xl:1rem;
+  --shadow-card:0 1px 2px 0 rgb(15 23 42/.06),0 1px 3px 0 rgb(15 23 42/.08);
+  --shadow-modal:0 20px 25px -5px rgb(15 23 42/.15),0 8px 10px -6px rgb(15 23 42/.1);
+}
+*{box-sizing:border-box}
+html{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+body{
+  margin:0;background:#fff;color:var(--n900);
+  font-family:'Inter',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  font-size:12.5px;line-height:1.65;-webkit-font-smoothing:antialiased;
+}
+::selection{background:var(--primary-light);color:var(--primary-dark)}
+a{color:var(--primary-dark);text-decoration:none}
+
+/* ---------- Tipografi ---------- */
+h1,h2,h3,h4{line-height:1.25;color:var(--n900);margin:0 0 .5em}
+h1{font-size:30px;font-weight:800;letter-spacing:-.02em}
+h2{font-size:21px;font-weight:700;letter-spacing:-.01em;margin:0 0 12px;padding-bottom:8px;border-bottom:2px solid var(--n200);break-after:avoid}
+h3{font-size:15px;font-weight:600;margin:20px 0 6px;break-after:avoid}
+h4{font-size:13px;font-weight:600;color:var(--n700);margin:14px 0 4px;break-after:avoid}
+p{margin:.55em 0;color:var(--n700)}
+ul,ol{color:var(--n700);padding-left:1.3em;margin:.5em 0}
+li{margin:.24em 0}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.85em;background:var(--n100);border:1px solid var(--n200);border-radius:var(--r-sm);padding:.08em .38em;color:var(--n900)}
+strong,b{color:var(--n900)}
+hr{border:none;border-top:1px solid var(--n200);margin:20px 0}
+
+/* ---------- Struktur dokumen ---------- */
+.doc{padding:0}
+.chapter{break-before:page;padding-top:4px}
+.chapter:first-child{break-before:auto}
+.lead{font-size:13.5px;color:var(--n500)}
+.section-sub{color:var(--n500);font-size:12px;margin-top:-4px}
+
+/* ---------- Cover ---------- */
+.cover{
+  position:relative;width:210mm;height:297mm;padding:24mm 20mm;overflow:hidden;
+  display:flex;flex-direction:column;break-after:page;background:#fff;
+}
+.cover-glow{position:absolute;right:-90px;top:-90px;width:360px;height:360px;border-radius:50%;
+  background:radial-gradient(circle,rgba(16,185,129,.28),transparent 68%)}
+.cover-glow-2{position:absolute;left:-120px;bottom:-140px;width:420px;height:420px;border-radius:50%;
+  background:radial-gradient(circle,rgba(16,185,129,.12),transparent 70%)}
+.cover-bar{position:absolute;left:0;top:0;bottom:0;width:10mm;background:linear-gradient(180deg,#10B981,#059669)}
+.cover-top{position:relative;display:flex;align-items:center;gap:12px}
+.cover-logo{width:46px;height:46px;border-radius:14px;background:var(--primary);color:#fff;font-weight:800;
+  font-size:26px;display:flex;align-items:center;justify-content:center;box-shadow:0 10px 24px rgba(16,185,129,.4)}
+.cover-brand b{display:block;font-size:18px;color:var(--n900)}
+.cover-brand span{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:var(--n500);font-weight:600}
+.cover-main{position:relative;margin-top:auto;margin-bottom:auto}
+.cover-kicker{display:inline-block;background:var(--primary-light);color:var(--primary-dark);font-weight:700;
+  font-size:11px;letter-spacing:.12em;text-transform:uppercase;padding:6px 14px;border-radius:9999px;margin-bottom:18px}
+.cover-main h1{font-size:46px;line-height:1.08;letter-spacing:-.03em;margin-bottom:10px}
+.cover-sub{font-size:19px;font-weight:600;color:var(--primary-dark);margin:0 0 14px}
+.cover-desc{font-size:13px;color:var(--n500);max-width:135mm}
+.cover-pills{margin-top:20px}
+.cover-pills span{display:inline-block;background:var(--n100);border:1px solid var(--n200);color:var(--n700);
+  border-radius:9999px;padding:6px 13px;font-size:11px;font-weight:500;margin:5px 6px 0 0}
+.cover-meta{position:relative;border-top:1px solid var(--n200);padding-top:16px;display:grid;
+  grid-template-columns:repeat(2,1fr);gap:10px 24px}
+.cover-meta div{font-size:11px}
+.cover-meta span{display:block;text-transform:uppercase;letter-spacing:.08em;color:var(--n500);font-weight:600;font-size:9.5px}
+.cover-meta b{font-size:12.5px;color:var(--n900)}
+.cover-foot{position:relative;margin-top:14px;font-size:10.5px;color:var(--n500);display:flex;justify-content:space-between}
+
+/* ---------- Komponen ---------- */
+.card{background:#fff;border:1px solid var(--n200);border-radius:14px;box-shadow:var(--shadow-card);padding:16px}
+.card.tight{padding:13px}
+.grid{display:grid;gap:14px}
+.g2{grid-template-columns:repeat(2,1fr)}
+.g3{grid-template-columns:repeat(3,1fr)}
+.btn-primary,.btn-outline,.btn-danger{display:inline-flex;align-items:center;gap:8px;font-weight:600;border-radius:var(--r-xl);
+  padding:9px 16px;font-size:12.5px;border:1px solid transparent;cursor:default}
+.btn-primary{background:var(--primary);color:#fff}
+.btn-outline{background:#fff;border-color:var(--n200);color:var(--n700)}
+.btn-danger{background:var(--urgent);color:#fff}
+.badge-active,.badge-urgent,.badge-warning,.badge-neutral{display:inline-flex;align-items:center;gap:4px;
+  border-radius:9999px;font-size:11px;font-weight:500;padding:3px 10px;line-height:1.3}
+.badge-active{background:var(--primary-light);color:var(--primary-dark)}
+.badge-urgent{background:var(--urgent-light);color:var(--urgent)}
+.badge-warning{background:var(--warning-light);color:var(--warning)}
+.badge-neutral{background:var(--n100);color:var(--n700)}
+.field{display:block;width:100%;border:1px solid var(--n200);border-radius:var(--r-xl);padding:9px 13px;font-size:12.5px;background:#fff;color:var(--n900);font-family:inherit}
+.callout{display:flex;gap:11px;align-items:flex-start;padding:12px 15px;border-radius:var(--r-lg);
+  border-left:4px solid var(--primary);background:var(--primary-light);margin:14px 0;break-inside:avoid}
+.callout.warn{border-left-color:var(--warning);background:var(--warning-light)}
+.callout.danger{border-left-color:var(--urgent);background:var(--urgent-light)}
+.callout .ico{font-weight:800;flex:0 0 auto}
+.callout p{margin:0;color:var(--n900);font-size:12.5px}
+.callout strong{display:block;margin-bottom:2px}
+.table-wrap{overflow:hidden;border:1px solid var(--n200);border-radius:14px;background:#fff;box-shadow:var(--shadow-card);margin:14px 0;break-inside:avoid}
+table{width:100%;border-collapse:collapse;font-size:12px}
+thead th{background:var(--n50);text-align:left;font-size:10.5px;font-weight:700;color:var(--n500);
+  padding:9px 12px;border-bottom:1px solid var(--n200);text-transform:uppercase;letter-spacing:.03em}
+tbody td{padding:9px 12px;border-top:1px solid var(--n100);color:var(--n700);vertical-align:top}
+tbody tr:nth-child(even){background:var(--n50)}
+.swatches{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:14px 0}
+.sw{border:1px solid var(--n200);border-radius:var(--r-lg);overflow:hidden;background:#fff;box-shadow:var(--shadow-card);break-inside:avoid}
+.sw .chip{height:52px}
+.sw .meta{padding:7px 9px;font-size:11px}
+.sw .meta b{display:block;color:var(--n900);font-size:11px}
+.sw .meta code{font-size:10px;background:none;border:none;padding:0;color:var(--n500)}
+
+/* Steps */
+ol.steps{counter-reset:s;list-style:none;padding-left:0;margin:12px 0}
+ol.steps>li{position:relative;padding:0 0 14px 42px;margin:0;break-inside:avoid}
+ol.steps>li:before{counter-increment:s;content:counter(s);position:absolute;left:0;top:0;width:27px;height:27px;
+  border-radius:50%;background:var(--primary);color:#fff;font-weight:700;font-size:12.5px;display:flex;align-items:center;justify-content:center}
+ol.steps>li:not(:last-child):after{content:"";position:absolute;left:13px;top:31px;bottom:0;width:2px;background:var(--n200)}
+ol.steps>li b{color:var(--n900)}
+
+/* Figures */
+figure.fig{margin:16px 0;background:#fff;border:1px solid var(--n200);border-radius:14px;padding:15px;box-shadow:var(--shadow-card);break-inside:avoid}
+figure.fig .fig-title{font-size:12px;font-weight:600;color:var(--n700);margin:0 0 12px;display:flex;align-items:center;gap:8px}
+figure.fig .fig-title .num{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;
+  background:var(--primary-light);color:var(--primary-dark);font-size:11px;font-weight:700;flex:0 0 auto}
+figure.fig svg{display:block;width:100%;height:auto}
+figure.fig svg text{font-family:'Inter',system-ui,sans-serif}
+figure.fig figcaption{margin-top:10px;font-size:11px;color:var(--n500);text-align:center;line-height:1.5}
+
+/* Daftar isi / gambar */
+.toc{margin:6px 0}
+.toc-item{display:flex;gap:14px;padding:10px 0;border-bottom:1px solid var(--n100);break-inside:avoid}
+.toc-num{flex:0 0 30px;height:30px;border-radius:9px;background:var(--n100);color:var(--n700);font-weight:700;
+  display:flex;align-items:center;justify-content:center;font-size:12px}
+.toc-body{flex:1}
+.toc-body a,.toc-body b{font-weight:600;color:var(--n900);font-size:13px}
+.toc-body p{margin:2px 0 0;color:var(--n500);font-size:11.5px}
+
+/* Info dokumen */
+.meta-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin:14px 0}
+.meta-grid .card b{display:block;font-size:12.5px}
+.meta-grid .card span{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--n500);font-weight:600}
+
+/* Glosarium */
+.gloss dt{font-weight:700;color:var(--n900);margin-top:10px}
+.gloss dd{margin:2px 0 0;color:var(--n700);padding-left:0}
+
+/* Print */
+@page{size:A4}
+.chapter{break-before:page}
+.cover{break-after:page}
+h2,h3,h4{break-after:avoid}
+</style>
+</head>
+<body>
+
+<!-- ================= COVER ================= -->
+<section class="cover">
+  <div class="cover-glow"></div>
+  <div class="cover-glow-2"></div>
+  <div class="cover-bar"></div>
+  <div class="cover-top">
+    <div class="cover-logo">c</div>
+    <div class="cover-brand"><b>caPOS</b><span>Point of Sale</span></div>
+  </div>
+  <div class="cover-main">
+    <span class="cover-kicker">Panduan Pengguna</span>
+    <h1>Panduan Lengkap<br>caPOS</h1>
+    <p class="cover-sub">Point of Sale untuk Kafe &amp; Restoran</p>
+    <p class="cover-desc">Dokumen ini memandu Anda menggunakan caPOS dari awal hingga mahir — mulai dari
+      pendaftaran akun, melayani transaksi di kasir, mengelola menu &amp; stok, sampai membaca laporan
+      bisnis. Disusun langkah demi langkah dengan contoh tampilan.</p>
+    <div class="cover-pills">
+      <span>Kasir offline-first</span><span>Kitchen Display</span><span>QR Meja</span>
+      <span>Resep &amp; HPP</span><span>Multi-cabang</span><span>Laporan otomatis</span>
+    </div>
+  </div>
+  <div class="cover-meta">
+    <div><span>Versi Dokumen</span><b>1.0</b></div>
+    <div><span>Tanggal Terbit</span><b>Oktober 2026</b></div>
+    <div><span>Disusun Untuk</span><b>Admin, Supervisor, Kasir, Dapur</b></div>
+    <div><span>Penyusun</span><b>Studio D13</b></div>
+  </div>
+  <div class="cover-foot"><span>caPOS — Panduan Lengkap Pengguna</span><span>Aplikasi Point of Sale Kafe &amp; Restoran</span></div>
+</section>
+
+<!-- ================= ISI DOKUMEN ================= -->
+<main class="doc">
+
+  <!-- ---------- INFORMASI DOKUMEN ---------- -->
+  <section class="chapter" id="info">
+    <h2>Informasi Dokumen</h2>
+    <p class="lead">Ringkasan identitas dan cakupan dokumen ini.</p>
+    <div class="meta-grid">
+      <div class="card tight"><span>Judul</span><b>Panduan Lengkap caPOS</b></div>
+      <div class="card tight"><span>Versi</span><b>1.0</b></div>
+      <div class="card tight"><span>Tanggal</span><b>Oktober 2026</b></div>
+      <div class="card tight"><span>Penyusun</span><b>Studio D13</b></div>
+      <div class="card tight"><span>Pengguna Sasaran</span><b>Admin, Supervisor, Kasir, Dapur</b></div>
+      <div class="card tight"><span>Bentuk Produk</span><b>Aplikasi web &amp; PWA (Android/iOS)</b></div>
+    </div>
+
+    <h3>Tujuan Dokumen</h3>
+    <p>Menjadi acuan tunggal bagi pengguna caPOS agar dapat:</p>
+    <ul>
+      <li>Menyiapkan akun dan data dasar kafe dengan benar sejak awal.</li>
+      <li>Menjalankan operasional harian: kasir, dapur, stok, dan pembelian.</li>
+      <li>Memahami setiap menu pada dashboard beserta manfaatnya.</li>
+      <li>Membaca laporan &amp; analitik untuk mengambil keputusan bisnis.</li>
+      <li>Mengelola langganan, karyawan, dan pengaturan aplikasi.</li>
+    </ul>
+
+    <h3>Riwayat Revisi</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Versi</th><th>Tanggal</th><th>Perubahan</th></tr></thead>
+        <tbody>
+          <tr><td>1.0</td><td>Oktober 2026</td><td>Terbitan pertama: seluruh modul pengguna, tur pengenalan, mode contoh, dan gambar ilustrasi.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Konvensi yang Dipakai</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Penanda</th><th>Arti</th></tr></thead>
+        <tbody>
+          <tr><td><span class="badge-neutral">Supreme</span></td><td>Fitur hanya tersedia pada paket Supreme.</td></tr>
+          <tr><td><span class="badge-warning">Contoh</span></td><td>Data contoh (mode demo) yang tidak dapat diubah.</td></tr>
+          <tr><td><code>rute</code></td><td>Alamat halaman di dalam aplikasi, mis. <code>/dashboard/menu</code>.</td></tr>
+          <tr><td><b>Admin</b> / <b>Kasir</b> / dst.</td><td>Peran pengguna yang sedang dibahas.</td></tr>
+          <tr><td>Boks biru tua (callout)</td><td>Catatan penting atau tips tambahan.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ---------- TENTANG PANDUAN ---------- -->
+  <section class="chapter" id="tentang">
+    <h2>Tentang Panduan Ini</h2>
+    <p>caPOS adalah aplikasi <b>Point of Sale (POS)</b> untuk kafe &amp; restoran: kasir yang tetap jalan
+      saat internet mati (<i>offline-first</i>), layar dapur real-time, manajemen stok &amp; HPP, pembelian
+      ke pemasok, multi-cabang, dan laporan otomatis. Aplikasi dapat dipasang ke layar utama ponsel
+      sebagai PWA.</p>
+
+    <h3>Siapa yang Perlu Membaca Bagian Apa</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Peran</th><th>Bagian yang paling relevan</th></tr></thead>
+        <tbody>
+          <tr><td><b>Admin</b></td><td>Seluruh dokumen (§1–§15).</td></tr>
+          <tr><td><b>Supervisor</b></td><td>§3–§11 (operasional, katalog, stok, tim) dan §12–§13.</td></tr>
+          <tr><td><b>Kasir</b></td><td>§1 (memulai), §12 (POS), §13 (dapur), §14 (langganan).</td></tr>
+          <tr><td><b>Dapur</b></td><td>§1 (memulai) dan §13 (Kitchen Display).</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Cara Menggunakan Panduan</h3>
+    <ol class="steps">
+      <li><b>Mulai dari Bab 1</b> untuk menyiapkan akun &amp; data dasar.</li>
+      <li><b>Gunakan Daftar Isi</b> untuk melompat ke modul yang ingin dipelajari.</li>
+      <li><b>Perhatikan gambar</b> — setiap gambar menampilkan contoh tampilan aplikasi.</li>
+      <li><b>Ikuti kotak catatan</b> untuk tips, peringatan, dan pengecualian.</li>
+    </ol>
+    <div class="callout"><p><strong>Tema dokumen</strong>Warna, tipografi, dan komponen pada panduan ini disamakan dengan tampilan aplikasi caPOS — lihat Bab 15.</p></div>
+  </section>
+
+  <!-- ---------- DAFTAR ISI ---------- -->
+  <section class="chapter" id="daftar-isi">
+    <h2>Daftar Isi</h2>
+    <p class="section-sub">Setiap bab disertai ringkasan singkat isinya.</p>
+    <div class="toc">
+      <div class="toc-item"><span class="toc-num">1</span><div class="toc-body"><a href="#memulai">Memulai</a><p>Pendaftaran akun, verifikasi OTP, masuk (login), lupa password, peran pengguna, tur pengenalan 39 langkah, dan mode contoh.</p></div></div>
+      <div class="toc-item"><span class="toc-num">2</span><div class="toc-body"><a href="#navigasi">Struktur Navigasi</a><p>Susunan 9 grup menu pada sidebar dashboard dan pintasan cepat ke halaman kasir.</p></div></div>
+      <div class="toc-item"><span class="toc-num">3</span><div class="toc-body"><a href="#ringkasan">Ringkasan</a><p>Laporan &amp; omzet, laporan PDF otomatis, target bulanan, riwayat transaksi, dan log pembatalan.</p></div></div>
+      <div class="toc-item"><span class="toc-num">4</span><span class="toc-body"><a href="#katalog">Katalog Produk</a><p>Kelola menu, varian, modifier, resep &amp; HPP, serta master bahan baku.</p></div></div>
+      <div class="toc-item"><span class="toc-num">5</span><div class="toc-body"><a href="#inventori">Inventori</a><p>Pantau stok &amp; HPP per cabang dan lakukan stok opname fisik.</p></div></div>
+      <div class="toc-item"><span class="toc-num">6</span><div class="toc-body"><a href="#purchasing">Purchasing</a><p>Data pemasok dan pembuatan/penerimaan Purchase Order ke pemasok.</p></div></div>
+      <div class="toc-item"><span class="toc-num">7</span><div class="toc-body"><a href="#operasional">Operasional &amp; Channel</a><p>QR meja &amp; self-order, QRIS dinamis, reservasi, online order, dan harga per kanal.</p></div></div>
+      <div class="toc-item"><span class="toc-num">8</span><div class="toc-body"><a href="#pelanggan">Pelanggan &amp; Loyalitas</a><p>Database pelanggan, promosi &amp; voucher, membership poin, dan program referral.</p></div></div>
+      <div class="toc-item"><span class="toc-num">9</span><div class="toc-body"><a href="#analitik">Analitik</a><p>Pertumbuhan, menu engineering, profitabilitas produk, jam sibuk, dan kerugian barang.</p></div></div>
+      <div class="toc-item"><span class="toc-num">10</span><div class="toc-body"><a href="#cabang">Cabang &amp; Tim</a><p>Manajemen cabang, karyawan, monitoring &amp; evaluasi kasir, serta kehadiran.</p></div></div>
+      <div class="toc-item"><span class="toc-num">11</span><div class="toc-body"><a href="#pengaturan">Pengaturan</a><p>Profil bisnis, printer &amp; struk, pembayaran, QRIS, keamanan, import data, dan FAQ.</p></div></div>
+      <div class="toc-item"><span class="toc-num">12</span><div class="toc-body"><a href="#pos">Halaman POS (Kasir)</a><p>Alur transaksi standar dan fitur kunci kasir sehari-hari.</p></div></div>
+      <div class="toc-item"><span class="toc-num">13</span><div class="toc-body"><a href="#dapur">Dapur (Kitchen Display)</a><p>Layar tiket pesanan untuk staf dapur dan alur statusnya.</p></div></div>
+      <div class="toc-item"><span class="toc-num">14</span><div class="toc-body"><a href="#langganan">Langganan &amp; Paket</a><p>Paket Free Trial, Pro, Supreme, tabel perbandingan fitur, dan pembayaran.</p></div></div>
+      <div class="toc-item"><span class="toc-num">15</span><div class="toc-body"><a href="#tema">Tema &amp; Design System</a><p>Palet warna, tipografi, token bentuk, komponen inti, dan status halaman.</p></div></div>
+      <div class="toc-item"><span class="toc-num">16</span><div class="toc-body"><a href="#faq">FAQ &amp; Dukungan</a><p>Pertanyaan umum, glosarium istilah, dan kanal bantuan.</p></div></div>
+    </div>
+  </section>
+
+  <!-- ---------- DAFTAR GAMBAR ---------- -->
+  <section class="chapter" id="daftar-gambar">
+    <h2>Daftar Gambar</h2>
+    <div class="toc">
+      <div class="toc-item"><span class="toc-num">1</span><div class="toc-body"><b>Alur memulai caPOS</b><p>Tiga langkah awal: daftar, verifikasi OTP, mulai berjualan.</p></div></div>
+      <div class="toc-item"><span class="toc-num">2</span><div class="toc-body"><b>Tampilan halaman Login &amp; Daftar</b><p>Contoh antarmuka masuk dan pendaftaran akun baru.</p></div></div>
+      <div class="toc-item"><span class="toc-num">3</span><div class="toc-body"><b>Penanda Mode Contoh</b><p>Banner, badge "Contoh", dan tombol yang dinonaktifkan.</p></div></div>
+      <div class="toc-item"><span class="toc-num">4</span><div class="toc-body"><b>Struktur sidebar dashboard</b><p>Mockup sidebar dengan 9 grup menu.</p></div></div>
+      <div class="toc-item"><span class="toc-num">5</span><div class="toc-body"><b>Halaman Ringkasan</b><p>Kartu statistik dan grafik tren penjualan.</p></div></div>
+      <div class="toc-item"><span class="toc-num">6</span><div class="toc-body"><b>Halaman POS (Kasir)</b><p>Panel kategori, katalog menu, dan keranjang pesanan.</p></div></div>
+      <div class="toc-item"><span class="toc-num">7</span><div class="toc-body"><b>Kitchen Display System</b><p>Kolom Baru, Diproses, dan Selesai pada layar dapur.</p></div></div>
+    </div>
+    <div class="callout"><p><strong>Catatan</strong>Gambar bersifat ilustrasi untuk memperjelas alur; tata letak sebenarnya dapat berbeda sedikit antarperangkat.</p></div>
+  </section>
+
+  <!-- ================= BAB 1 ================= -->
+  <section class="chapter" id="memulai">
+    <h2>1. Memulai</h2>
+    <p class="lead">Menyiapkan akun, mengaktifkannya, dan mengenal aplikasi untuk pertama kali.</p>
+
+    <h3>1.1 Pendaftaran Akun (Registrasi)</h3>
+    <p>Setiap kafe baru mendaftar sekali dan otomatis mendapat <b>Free Trial 28 hari</b> (tanpa kartu kredit).</p>
+    <ol class="steps">
+      <li><b>Buka halaman pendaftaran</b> — pilih <b>Daftar</b> atau akses rute <code>/register</code>.</li>
+      <li><b>Isi data kafe</b>: Nama Kafe, Nama Pemilik, Email, Password (min. 8 karakter, kombinasi huruf &amp; angka), lalu Konfirmasi Password.</li>
+      <li><b>Kode Referral (opsional)</b> — jika punya kode dari teman, masukkan untuk <b>diskon 2%</b> pada pembayaran pertama.</li>
+      <li><b>Klik "Daftar Sekarang"</b>. Sistem membuat akun + entitas bisnis (tenant) + cabang pertama Anda, dan mengirim kode OTP ke email.</li>
+    </ol>
+    <figure class="fig">
+      <div class="fig-title"><span class="num">1</span> Alur memulai caPOS</div>
+      <svg viewBox="0 0 760 170" role="img" aria-label="Alur tiga langkah: daftar, verifikasi OTP, mulai berjualan">
+        <defs>
+          <marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#10B981"/>
+          </marker>
+        </defs>
+        <rect x="20" y="45" width="200" height="80" rx="14" fill="#ffffff" stroke="#E2E8F0"/>
+        <circle cx="52" cy="75" r="14" fill="#D1FAE5"/>
+        <text x="52" y="80" text-anchor="middle" font-size="14" font-weight="700" fill="#059669">1</text>
+        <text x="78" y="72" font-size="14" font-weight="700" fill="#0F172A">Daftar</text>
+        <text x="78" y="92" font-size="11" fill="#64748B">Nama kafe, email,</text>
+        <text x="78" y="107" font-size="11" fill="#64748B">dan password</text>
+        <line x1="224" y1="85" x2="270" y2="85" stroke="#10B981" stroke-width="2.5" marker-end="url(#arw)"/>
+        <rect x="280" y="45" width="200" height="80" rx="14" fill="#ffffff" stroke="#E2E8F0"/>
+        <circle cx="312" cy="75" r="14" fill="#D1FAE5"/>
+        <text x="312" y="80" text-anchor="middle" font-size="14" font-weight="700" fill="#059669">2</text>
+        <text x="338" y="72" font-size="14" font-weight="700" fill="#0F172A">Verifikasi OTP</text>
+        <text x="338" y="92" font-size="11" fill="#64748B">Kode 6 digit dikirim</text>
+        <text x="338" y="107" font-size="11" fill="#64748B">ke email Anda</text>
+        <line x1="484" y1="85" x2="530" y2="85" stroke="#10B981" stroke-width="2.5" marker-end="url(#arw)"/>
+        <rect x="540" y="45" width="200" height="80" rx="14" fill="#10B981" stroke="#059669"/>
+        <circle cx="572" cy="75" r="14" fill="rgba(255,255,255,.25)"/>
+        <text x="572" y="80" text-anchor="middle" font-size="14" font-weight="700" fill="#ffffff">3</text>
+        <text x="598" y="72" font-size="14" font-weight="700" fill="#ffffff">Mulai Berjualan</text>
+        <text x="598" y="92" font-size="11" fill="#D1FAE5">Gratis 28 hari,</text>
+        <text x="598" y="107" font-size="11" fill="#D1FAE5">tanpa kartu kredit</text>
+      </svg>
+      <figcaption>Gambar 1. Tiga langkah awal pengguna: daftar → verifikasi email → masuk ke dashboard.</figcaption>
+    </figure>
+    <div class="callout"><p><strong>Catatan</strong>Akun pertama yang mendaftar otomatis berperan <b>Admin</b> — pemilik penuh dengan akses ke seluruh modul dashboard.</p></div>
+
+    <h3>1.2 Verifikasi OTP</h3>
+    <p>Setelah mendaftar, masukkan <b>kode OTP</b> (6 digit) yang dikirim ke email untuk mengaktifkan akun.</p>
+    <div class="callout warn"><p><strong>Belum menerima kode?</strong>Periksa email yang Anda daftarkan, lalu <b>cek folder Spam / Promosi / Pembaruan secara berkala</b> — email verifikasi kadang tersaring ke folder tersebut. Bila tetap tidak ada, tunggu beberapa menit lalu tekan <b>"Kirim ulang kode"</b>.</p></div>
+    <ul>
+      <li>Kotak OTP hanya menerima angka dan otomatis diformat (kode satu kali pakai).</li>
+      <li>Jika kode <b>kedaluwarsa</b> atau <b>salah</b>, aplikasi menampilkan pesan dan tombol <b>"Kirim ulang kode"</b>.</li>
+      <li>Setelah verifikasi sukses, Anda diarahkan otomatis sesuai peran: Admin → <code>/dashboard</code>, Kasir → <code>/pos</code>, Dapur → <code>/kitchen</code>.</li>
+    </ul>
+
+    <h3>1.3 Masuk (Login)</h3>
+    <p>Gunakan Email &amp; Password yang terdaftar di halaman <code>/login</code>. Tersedia opsi <b>lihat/sembunyikan password</b> untuk meminimalkan salah ketik.</p>
+    <div class="callout"><p><strong>Tujuan otomatis per peran</strong>Admin/Supervisor → <code>/dashboard</code> · Kasir → <code>/pos</code> · Dapur → <code>/kitchen</code>.</p></div>
+    <figure class="fig">
+      <div class="fig-title"><span class="num">2</span> Tampilan halaman Login &amp; Daftar</div>
+      <svg viewBox="0 0 760 340" role="img" aria-label="Contoh tampilan halaman login dan pendaftaran caPOS">
+        <rect x="18" y="18" width="350" height="304" rx="16" fill="#ffffff" stroke="#E2E8F0"/>
+        <path d="M18 34 a16 16 0 0 1 16 -16 h318 a16 16 0 0 1 16 16 v18 h-350 z" fill="#F8FAFC"/>
+        <circle cx="40" cy="35" r="4" fill="#EF4444"/><circle cx="54" cy="35" r="4" fill="#F59E0B"/><circle cx="68" cy="35" r="4" fill="#10B981"/>
+        <rect x="118" y="27" width="200" height="16" rx="8" fill="#E2E8F0"/>
+        <text x="218" y="39" text-anchor="middle" font-size="10" fill="#64748B">capos.app/login</text>
+        <rect x="171" y="64" width="44" height="44" rx="12" fill="#10B981"/>
+        <text x="193" y="94" text-anchor="middle" font-size="24" font-weight="800" fill="#ffffff">c</text>
+        <text x="193" y="132" text-anchor="middle" font-size="16" font-weight="700" fill="#0F172A">Masuk</text>
+        <text x="193" y="150" text-anchor="middle" font-size="10" fill="#64748B">Selamat datang kembali</text>
+        <rect x="60" y="168" width="266" height="36" rx="10" fill="#F8FAFC" stroke="#E2E8F0"/>
+        <text x="74" y="191" font-size="11" fill="#94A3B8">Email</text>
+        <rect x="60" y="214" width="266" height="36" rx="10" fill="#F8FAFC" stroke="#E2E8F0"/>
+        <text x="74" y="237" font-size="11" fill="#94A3B8">Password</text>
+        <rect x="60" y="264" width="266" height="40" rx="12" fill="#10B981"/>
+        <text x="193" y="289" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">Masuk</text>
+        <rect x="392" y="18" width="350" height="304" rx="16" fill="#ffffff" stroke="#E2E8F0"/>
+        <path d="M392 34 a16 16 0 0 1 16 -16 h318 a16 16 0 0 1 16 16 v18 h-350 z" fill="#F8FAFC"/>
+        <circle cx="414" cy="35" r="4" fill="#EF4444"/><circle cx="428" cy="35" r="4" fill="#F59E0B"/><circle cx="442" cy="35" r="4" fill="#10B981"/>
+        <rect x="492" y="27" width="200" height="16" rx="8" fill="#E2E8F0"/>
+        <text x="592" y="39" text-anchor="middle" font-size="10" fill="#64748B">capos.app/register</text>
+        <text x="567" y="70" text-anchor="middle" font-size="15" font-weight="700" fill="#0F172A">Daftar caPOS</text>
+        <text x="567" y="87" text-anchor="middle" font-size="9.5" fill="#64748B">Gratis 28 hari, tanpa kartu kredit</text>
+        <rect x="434" y="100" width="266" height="30" rx="9" fill="#F8FAFC" stroke="#E2E8F0"/><text x="448" y="120" font-size="10.5" fill="#94A3B8">Nama Kafe</text>
+        <rect x="434" y="137" width="266" height="30" rx="9" fill="#F8FAFC" stroke="#E2E8F0"/><text x="448" y="157" font-size="10.5" fill="#94A3B8">Nama Pemilik</text>
+        <rect x="434" y="174" width="266" height="30" rx="9" fill="#F8FAFC" stroke="#E2E8F0"/><text x="448" y="194" font-size="10.5" fill="#94A3B8">Email</text>
+        <rect x="434" y="211" width="266" height="30" rx="9" fill="#F8FAFC" stroke="#E2E8F0"/><text x="448" y="231" font-size="10.5" fill="#94A3B8">Password</text>
+        <rect x="434" y="248" width="266" height="36" rx="12" fill="#10B981"/>
+        <text x="567" y="271" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">Daftar Sekarang</text>
+        <text x="567" y="303" text-anchor="middle" font-size="10" fill="#64748B">Sudah punya akun? Masuk</text>
+      </svg>
+      <figcaption>Gambar 2. Halaman masuk (kiri) dan pendaftaran akun baru (kanan).</figcaption>
+    </figure>
+
+    <h3>1.4 Lupa Password / Reset</h3>
+    <p>Klik <b>"Lupa password?"</b> di halaman login → masukkan email → Anda menerima tautan reset via email (<code>/forgot-password</code>) untuk membuat password baru.</p>
+
+    <h3>1.5 Peran Pengguna (Role)</h3>
+    <p>caPOS memakai <b>4 peran</b>. Label di antarmuka memakai istilah bisnis, sedangkan nilai di database tetap istilah teknis.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Label di UI</th><th>Halaman utama</th><th>Ringkasan wewenang</th></tr></thead>
+        <tbody>
+          <tr><td><b>Admin</b></td><td><code>/dashboard</code></td><td>Pemilik kafe — akses penuh semua modul &amp; pengaturan.</td></tr>
+          <tr><td><b>Supervisor</b></td><td><code>/dashboard</code></td><td>Akses operasional &amp; sebagian pengaturan atas izin Admin.</td></tr>
+          <tr><td><b>Kasir</b></td><td><code>/pos</code></td><td>Melayani transaksi di halaman kasir (POS).</td></tr>
+          <tr><td><b>Dapur</b></td><td><code>/kitchen</code></td><td>Melihat &amp; memproses tiket pesanan di layar dapur.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout"><p><strong>Satu sumber kebenaran</strong>Semua akun staf dibuat &amp; diubah dari menu <b>Manajemen Karyawan</b> (Bab 10). Menu "Monitoring Kasir" bersifat hanya-lihat agar tidak terjadi duplikasi pengelolaan akun.</p></div>
+
+    <h3>1.6 Tur Pengenalan (In-App Tour)</h3>
+    <p>Saat pertama kali masuk dashboard, caPOS menjalankan <b>tur otomatis 39 langkah</b> yang memandu setiap menu di sidebar satu per satu.</p>
+    <ul>
+      <li>Setiap langkah menyorot (spotlight) satu menu dengan penjelasan singkat, indikator <code>n / 39</code>, dan progress bar.</li>
+      <li>Kontrol: <b>Lanjut</b>, <b>Kembali</b>, dan <b>Lewati tur</b>.</li>
+      <li>Selama tur, semua grup sidebar dipaksa terbuka supaya tidak ada menu yang terlewat.</li>
+      <li>Status tur disimpan per akun, jadi tidak muncul lagi di perangkat mana pun dengan akun yang sama.</li>
+    </ul>
+    <div class="callout warn"><p><strong>Ingin menonton ulang?</strong>Minta Admin menyetel ulang status tur pada akun Anda, lalu login kembali.</p></div>
+
+    <h3>1.7 Mode Contoh (Demo Data)</h3>
+    <p>Untuk kafe yang <b>baru mendaftar dan belum punya aktivitas</b>, caPOS menampilkan <b>data contoh</b> agar setiap halaman tidak tampak kosong saat pertama dijelajahi.</p>
+    <ul>
+      <li>Saat tenant belum pernah bertransaksi, halaman menampilkan data contoh dengan penanda <span class="badge-warning">Contoh</span> dan <b>banner informasi</b>.</li>
+      <li>Data ini <b>tidak dapat diklik, diedit, atau dihapus</b> — tombol tambah/ubah/nonaktif dinonaktifkan.</li>
+      <li>Di halaman POS, tombol tambah ke keranjang menampilkan pesan "Ini contoh data. Tambahkan menu asli dulu sebelum menjual."</li>
+      <li>Mode contoh <b>hilang otomatis secara global</b> begitu transaksi pertama dicatat.</li>
+    </ul>
+    <figure class="fig">
+      <div class="fig-title"><span class="num">3</span> Penanda "Mode Contoh" di dalam aplikasi</div>
+      <svg viewBox="0 0 760 180" role="img" aria-label="Contoh banner mode contoh dan kartu data contoh yang tidak bisa diklik">
+        <rect x="20" y="18" width="720" height="58" rx="12" fill="#FEF3C7" stroke="#FDE68A"/>
+        <rect x="20" y="18" width="5" height="58" rx="2.5" fill="#F59E0B"/>
+        <circle cx="58" cy="47" r="13" fill="#F59E0B"/>
+        <text x="58" y="52" text-anchor="middle" font-size="15" font-weight="800" fill="#ffffff">i</text>
+        <text x="82" y="43" font-size="13" font-weight="700" fill="#0F172A">Mode Contoh aktif</text>
+        <text x="82" y="61" font-size="11" fill="#78350F">Data di bawah hanya ilustrasi. Akan hilang otomatis setelah transaksi asli pertama.</text>
+        <rect x="642" y="34" width="80" height="26" rx="13" fill="#F59E0B"/>
+        <text x="682" y="51" text-anchor="middle" font-size="11" font-weight="700" fill="#ffffff">Contoh</text>
+        <rect x="20" y="98" width="720" height="66" rx="12" fill="#ffffff" stroke="#E2E8F0"/>
+        <rect x="40" y="114" width="34" height="34" rx="8" fill="#F1F5F9"/>
+        <text x="88" y="126" font-size="13" font-weight="700" fill="#0F172A">Es Kopi Susu</text>
+        <text x="88" y="144" font-size="11" fill="#64748B">Rp18.000</text>
+        <rect x="200" y="120" width="62" height="22" rx="11" fill="#FEF3C7"/>
+        <text x="231" y="135" text-anchor="middle" font-size="10" font-weight="600" fill="#B45309">Contoh</text>
+        <rect x="588" y="118" width="132" height="28" rx="12" fill="#E2E8F0"/>
+        <text x="654" y="137" text-anchor="middle" font-size="11" font-weight="600" fill="#94A3B8">Tambah (nonaktif)</text>
+      </svg>
+      <figcaption>Gambar 3. Banner Mode Contoh di atas halaman, badge "Contoh", dan tombol yang dinonaktifkan.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ================= BAB 2 ================= -->
+  <section class="chapter" id="navigasi">
+    <h2>2. Struktur Navigasi</h2>
+    <p class="lead">Memahami tata letak menu agar mudah berpindah antar fitur.</p>
+    <p>Sidebar dashboard (identitas gelap) tersusun dalam <b>9 grup</b> yang bisa dibuka/tutup. Grup yang memuat halaman aktif selalu terbuka otomatis. Di bawahnya ada pintasan cepat <b>"Buka Halaman Kasir (POS)"</b> dan tombol <b>Keluar</b>.</p>
+    <figure class="fig">
+      <div class="fig-title"><span class="num">4</span> Struktur sidebar dashboard</div>
+      <svg viewBox="0 0 760 600" role="img" aria-label="Mockup sidebar dashboard dengan 9 grup menu">
+        <rect x="40" y="20" width="300" height="560" rx="18" fill="#12181F"/>
+        <rect x="64" y="44" width="30" height="30" rx="9" fill="#10B981"/>
+        <text x="79" y="65" text-anchor="middle" font-size="17" font-weight="800" fill="#ffffff">c</text>
+        <text x="104" y="64" font-size="15" font-weight="700" fill="#F8FAFC">caPOS</text>
+        <line x1="40" y1="88" x2="340" y2="88" stroke="#232B36"/>
+        <text x="60" y="112" font-size="10" font-weight="700" letter-spacing="1.2" fill="#828FA1">RINGKASAN</text>
+        <rect x="52" y="120" width="276" height="26" rx="10" fill="rgba(16,185,129,.15)" stroke="rgba(16,185,129,.25)"/>
+        <circle cx="68" cy="133" r="5" fill="#10B981"/>
+        <text x="82" y="137" font-size="12.5" font-weight="600" fill="#D1FAE5">Laporan &amp; Omzet</text>
+        <circle cx="68" cy="163" r="5" fill="#334155"/><text x="82" y="167" font-size="12.5" fill="#94A3B8">Laporan PDF Otomatis</text>
+        <circle cx="68" cy="191" r="5" fill="#334155"/><text x="82" y="195" font-size="12.5" fill="#94A3B8">Target Bulanan</text>
+        <circle cx="68" cy="219" r="5" fill="#334155"/><text x="82" y="223" font-size="12.5" fill="#94A3B8">Riwayat Transaksi</text>
+        <circle cx="68" cy="247" r="5" fill="#334155"/><text x="82" y="251" font-size="12.5" fill="#94A3B8">Log Pembatalan</text>
+        <text x="60" y="284" font-size="10" font-weight="700" letter-spacing="1.2" fill="#828FA1">KATALOG PRODUK</text>
+        <text x="60" y="314" font-size="10" font-weight="700" letter-spacing="1.2" fill="#828FA1">INVENTORI</text>
+        <text x="60" y="344" font-size="10" font-weight="700" letter-spacing="1.2" fill="#828FA1">PURCHASING</text>
+        <text x="60" y="374" font-size="10" font-weight="700" letter-spacing="1.2" fill="#828FA1">OPERASIONAL &amp; CHANNEL</text>
+        <text x="60" y="404" font-size="10" font-weight="700" letter-spacing="1.2" fill="#828FA1">PELANGGAN</text>
+        <text x="60" y="434" font-size="10" font-weight="700" letter-spacing="1.2" fill="#828FA1">ANALITIK</text>
+        <text x="60" y="464" font-size="10" font-weight="700" letter-spacing="1.2" fill="#828FA1">CABANG &amp; TIM</text>
+        <text x="60" y="494" font-size="10" font-weight="700" letter-spacing="1.2" fill="#828FA1">PENGATURAN</text>
+        <line x1="40" y1="514" x2="340" y2="514" stroke="#232B36"/>
+        <text x="60" y="540" font-size="12.5" font-weight="600" fill="#10B981">Buka Halaman Kasir (POS)</text>
+        <line x1="40" y1="560" x2="340" y2="560" stroke="#232B36"/>
+        <text x="60" y="582" font-size="12.5" fill="#94A3B8">Keluar</text>
+        <line x1="380" y1="112" x2="346" y2="110" stroke="#CBD5E1" stroke-dasharray="4 3"/>
+        <circle cx="346" cy="110" r="3" fill="#10B981"/>
+        <text x="388" y="110" font-size="12.5" font-weight="600" fill="#334155">9 grup menu</text>
+        <text x="388" y="128" font-size="11" fill="#64748B">tiap grup bisa dibuka/tutup</text>
+        <line x1="380" y1="176" x2="336" y2="133" stroke="#CBD5E1" stroke-dasharray="4 3"/>
+        <circle cx="336" cy="133" r="3" fill="#10B981"/>
+        <text x="388" y="176" font-size="12.5" font-weight="600" fill="#334155">Menu aktif disorot</text>
+        <text x="388" y="194" font-size="11" fill="#64748B">halaman yang sedang dibuka tampil hijau</text>
+        <line x1="380" y1="540" x2="346" y2="537" stroke="#CBD5E1" stroke-dasharray="4 3"/>
+        <circle cx="346" cy="537" r="3" fill="#10B981"/>
+        <text x="388" y="540" font-size="12.5" font-weight="600" fill="#334155">Pintasan ke Kasir</text>
+        <text x="388" y="558" font-size="11" fill="#64748B">langsung membuka halaman POS</text>
+      </svg>
+      <figcaption>Gambar 4. Sidebar gelap dengan 9 grup; grup berisi halaman aktif selalu terbuka.</figcaption>
+    </figure>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>#</th><th>Grup</th><th>Menu di dalamnya</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td><b>Ringkasan</b></td><td>Laporan &amp; Omzet · Laporan PDF Otomatis · Target Bulanan · Riwayat Transaksi · Log Pembatalan</td></tr>
+          <tr><td>2</td><td><b>Katalog Produk</b></td><td>Kelola Menu &amp; Stok · Varian Produk · Modifier · Resep &amp; HPP · Bahan Baku</td></tr>
+          <tr><td>3</td><td><b>Inventori</b></td><td>Stok &amp; HPP · Stok Opname</td></tr>
+          <tr><td>4</td><td><b>Purchasing</b></td><td>Pemasok · Purchase Order</td></tr>
+          <tr><td>5</td><td><b>Operasional &amp; Channel</b></td><td>QR Meja &amp; Self-Order · QRIS Dinamis · Reservasi Meja · Online Order Hub · Harga per Kanal</td></tr>
+          <tr><td>6</td><td><b>Pelanggan</b></td><td>Pelanggan · Promosi &amp; Voucher · Membership · Program Referral</td></tr>
+          <tr><td>7</td><td><b>Analitik</b></td><td>Analitik Pertumbuhan · Menu Engineering · Profitabilitas Produk · Jam Sibuk <span class="badge-neutral">Supreme</span> · Kerugian Barang</td></tr>
+          <tr><td>8</td><td><b>Cabang &amp; Tim</b></td><td>Manajemen Cabang · Manajemen Karyawan · Monitoring Kasir · Evaluasi Kasir · Kehadiran Karyawan</td></tr>
+          <tr><td>9</td><td><b>Pengaturan</b></td><td>Pengaturan Kafe · Import / Migrasi Data · Status Langganan · FAQ &amp; Helpdesk</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout"><p><strong>Ikon gembok</strong>Menu bertanda <span class="badge-neutral">Supreme</span> menampilkan ikon gembok jika paket Anda belum Supreme.</p></div>
+  </section>
+
+  <!-- ================= BAB 3 ================= -->
+  <section class="chapter" id="ringkasan">
+    <h2>3. Ringkasan</h2>
+    <p class="lead">Pusat pantauan performa kafe dan laporan penjualan.</p>
+    <p>Semua halaman di grup ini menampilkan indikator periode dan mengikuti batas riwayat sesuai paket.</p>
+
+    <h3>3.1 Laporan &amp; Omzet <span class="badge-neutral">/dashboard</span></h3>
+    <p>Halaman pembuka setelah login. Menyajikan kartu kunci: <b>omzet</b>, <b>jumlah transaksi</b>, <b>rata-rata per transaksi</b>, <b>menu terlaris</b>, serta grafik tren penjualan pada periode terpilih.</p>
+    <ul>
+      <li>Ganti periode (7 / 14 / 30 hari atau rentang khusus sesuai paket) untuk memperbarui kartu &amp; grafik.</li>
+      <li>Tersedia tab <b>Jadwal Harian</b> dan <b>Diagram</b>.</li>
+      <li>Kartu "Kesehatan Penjualan" tampil untuk paket Pro &amp; Supreme.</li>
+    </ul>
+    <figure class="fig">
+      <div class="fig-title"><span class="num">5</span> Halaman Ringkasan (Laporan &amp; Omzet)</div>
+      <svg viewBox="0 0 760 400" role="img" aria-label="Mockup halaman ringkasan dengan kartu statistik dan grafik penjualan">
+        <rect x="20" y="20" width="720" height="360" rx="16" fill="#ffffff" stroke="#E2E8F0"/>
+        <path d="M36 20 h120 v360 h-120 a16 16 0 0 1 -16 -16 v-328 a16 16 0 0 1 16 -16 z" fill="#12181F"/>
+        <rect x="40" y="40" width="24" height="24" rx="7" fill="#10B981"/>
+        <text x="52" y="57" text-anchor="middle" font-size="14" font-weight="800" fill="#ffffff">c</text>
+        <text x="74" y="57" font-size="12" font-weight="700" fill="#F8FAFC">caPOS</text>
+        <rect x="40" y="78" width="96" height="8" rx="4" fill="#232B36"/>
+        <rect x="40" y="100" width="120" height="8" rx="4" fill="rgba(16,185,129,.5)"/>
+        <rect x="40" y="122" width="88" height="8" rx="4" fill="#232B36"/>
+        <rect x="40" y="144" width="104" height="8" rx="4" fill="#232B36"/>
+        <rect x="40" y="166" width="72" height="8" rx="4" fill="#232B36"/>
+        <rect x="40" y="188" width="110" height="8" rx="4" fill="#232B36"/>
+        <text x="170" y="58" font-size="16" font-weight="700" fill="#0F172A">Laporan &amp; Omzet</text>
+        <rect x="620" y="42" width="100" height="26" rx="13" fill="#F1F5F9"/>
+        <text x="670" y="59" text-anchor="middle" font-size="11" fill="#334155">30 hari terakhir</text>
+        <rect x="170" y="86" width="130" height="78" rx="12" fill="#ffffff" stroke="#E2E8F0"/>
+        <text x="184" y="108" font-size="10" fill="#64748B">Omzet</text>
+        <text x="184" y="132" font-size="16" font-weight="800" fill="#059669">Rp18,4 jt</text>
+        <text x="184" y="150" font-size="9.5" fill="#94A3B8">+12% vs bulan lalu</text>
+        <rect x="310" y="86" width="130" height="78" rx="12" fill="#ffffff" stroke="#E2E8F0"/>
+        <text x="324" y="108" font-size="10" fill="#64748B">Transaksi</text>
+        <text x="324" y="132" font-size="16" font-weight="800" fill="#0F172A">512</text>
+        <text x="324" y="150" font-size="9.5" fill="#94A3B8">rata-rata 17/hari</text>
+        <rect x="450" y="86" width="130" height="78" rx="12" fill="#ffffff" stroke="#E2E8F0"/>
+        <text x="464" y="108" font-size="10" fill="#64748B">Rata-rata</text>
+        <text x="464" y="132" font-size="16" font-weight="800" fill="#0F172A">Rp35.900</text>
+        <text x="464" y="150" font-size="9.5" fill="#94A3B8">per transaksi</text>
+        <rect x="590" y="86" width="130" height="78" rx="12" fill="#ffffff" stroke="#E2E8F0"/>
+        <text x="604" y="108" font-size="10" fill="#64748B">Menu Terlaris</text>
+        <text x="604" y="132" font-size="14" font-weight="700" fill="#0F172A">Es Kopi Susu</text>
+        <text x="604" y="150" font-size="9.5" fill="#94A3B8">138 terjual</text>
+        <rect x="170" y="180" width="550" height="180" rx="12" fill="#ffffff" stroke="#E2E8F0"/>
+        <text x="186" y="204" font-size="12" font-weight="600" fill="#0F172A">Tren Penjualan</text>
+        <line x1="190" y1="326" x2="710" y2="326" stroke="#E2E8F0"/>
+        <line x1="190" y1="240" x2="710" y2="240" stroke="#F1F5F9"/>
+        <line x1="190" y1="283" x2="710" y2="283" stroke="#F1F5F9"/>
+        <path d="M190 300 L262 282 L334 294 L406 254 L478 236 L550 218 L622 230 L704 205 L704 326 L190 326 Z" fill="rgba(16,185,129,.12)"/>
+        <polyline points="190,300 262,282 334,294 406,254 478,236 550,218 622,230 704,205" fill="none" stroke="#10B981" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+        <circle cx="704" cy="205" r="4" fill="#10B981"/>
+      </svg>
+      <figcaption>Gambar 5. Kartu omzet/transaksi/rata-rata/menu terlaris dan grafik tren penjualan.</figcaption>
+    </figure>
+
+    <h3>3.2 Laporan PDF Otomatis <span class="badge-neutral">/dashboard/laporan-pdf</span></h3>
+    <p>Membuat &amp; mengunduh laporan penjualan berformat <b>PDF</b> sesuai rentang tanggal, siap dicetak atau dikirim ke pemangku kepentingan.</p>
+
+    <h3>3.3 Target Bulanan <span class="badge-neutral">/dashboard/target</span></h3>
+    <p>Tetapkan <b>target omzet bulanan</b> dan pantau tingkat pencapaiannya terhadap realisasi berjalan.</p>
+
+    <h3>3.4 Riwayat Transaksi <span class="badge-neutral">/dashboard/transactions</span></h3>
+    <p>Daftar seluruh transaksi. Fitur: pencarian, filter, lihat detail, dan <b>cetak ulang struk</b>. Batas riwayat: Free 14 hari, Pro 30 hari, Supreme lengkap.</p>
+
+    <h3>3.5 Log Pembatalan <span class="badge-neutral">/dashboard/cancellations</span></h3>
+    <p>Catatan transaksi yang <b>dibatalkan (void)</b> beserta alasannya — berguna untuk audit dan mencegah penyalahgunaan.</p>
+  </section>
+
+  <!-- ================= BAB 4 ================= -->
+  <section class="chapter" id="katalog">
+    <h2>4. Katalog Produk</h2>
+    <p class="lead">Semua hal tentang apa yang Anda jual.</p>
+    <p>Susun menu terlebih dahulu sebelum mulai bertransaksi.</p>
+
+    <h3>4.1 Kelola Menu &amp; Stok <span class="badge-neutral">/dashboard/menu</span></h3>
+    <p>Tambah/ubah menu: nama, harga, kategori, foto, dan status <b>ketersediaan</b>. Menu nonaktif tidak tampil di kasir.</p>
+    <ul><li>Paket Free dibatasi maks <b>10 menu</b>; Pro &amp; Supreme tidak terbatas.</li></ul>
+
+    <h3>4.2 Varian Produk <span class="badge-neutral">/dashboard/variants</span></h3>
+    <p>Atur varian menu seperti <b>ukuran</b> atau <b>penyajian</b> (mis. Regular / Large) beserta <b>selisih harga</b> masing-masing.</p>
+
+    <h3>4.3 Modifier <span class="badge-neutral">/dashboard/modifiers</span></h3>
+    <p>Grup pilihan tambahan seperti <b>topping</b>, <b>level gula</b>, atau <b>es/panas</b>. Modifier dapat dikaitkan ke menu tertentu dan bahkan memengaruhi pemakaian bahan.</p>
+
+    <h3>4.4 Resep &amp; HPP <span class="badge-neutral">/dashboard/recipes</span></h3>
+    <p>Resep tiap menu sekaligus <b>perhitungan Harga Pokok Penjualan (HPP)</b> dari bahan baku yang dipakai. Ini dasar analisis margin &amp; menu engineering.</p>
+
+    <h3>4.5 Bahan Baku <span class="badge-neutral">/dashboard/ingredients</span></h3>
+    <p>Master bahan baku beserta <b>satuan</b> dan <b>harga beli</b>. Bahan di sini dipakai oleh resep dan modul Inventori/Purchasing.</p>
+  </section>
+
+  <!-- ================= BAB 5 ================= -->
+  <section class="chapter" id="inventori">
+    <h2>5. Inventori</h2>
+    <p class="lead">Menjaga stok tetap akurat dan nilai persediaan terkendali.</p>
+
+    <h3>5.1 Stok &amp; HPP <span class="badge-neutral">/dashboard/stock</span></h3>
+    <p>Pantau <b>stok bahan baku</b> per cabang dan <b>nilai persediaan</b> saat ini. Pergerakan stok tercatat dari penjualan, pembelian, dan koreksi.</p>
+
+    <h3>5.2 Stok Opname <span class="badge-neutral">/dashboard/stock-opname</span></h3>
+    <p>Lakukan <b>sensus fisik stok</b> dan koreksi selisih hasil hitung. Mendukung <b>multi-cabang</b>.</p>
+  </section>
+
+  <!-- ================= BAB 6 ================= -->
+  <section class="chapter" id="purchasing">
+    <h2>6. Purchasing</h2>
+    <p class="lead">Mengelola pembelian bahan ke pemasok.</p>
+
+    <h3>6.1 Pemasok <span class="badge-neutral">/dashboard/purchasing/suppliers</span></h3>
+    <p>Data <b>supplier/vendor</b> tempat kafe membeli bahan, lengkap dengan kontak &amp; informasi pendukung.</p>
+
+    <h3>6.2 Purchase Order <span class="badge-neutral">/dashboard/purchasing/purchase-orders</span></h3>
+    <p>Buat &amp; kelola <b>pesanan pembelian</b> ke pemasok, lalu catat <b>penerimaan barang</b> sehingga stok bertambah otomatis.</p>
+  </section>
+
+  <!-- ================= BAB 7 ================= -->
+  <section class="chapter" id="operasional">
+    <h2>7. Operasional &amp; Channel</h2>
+    <p class="lead">Fitur pendukung layanan pelanggan dan penjualan lintas kanal.</p>
+
+    <h3>7.1 QR Meja &amp; Self-Order <span class="badge-neutral">/dashboard/qr-tables</span></h3>
+    <p>Kelola <b>meja</b> dan QR-nya agar pelanggan bisa <b>memesan sendiri</b> dari meja (scan → pilih menu → pesan).</p>
+
+    <h3>7.2 QRIS Dinamis (Kasir) <span class="badge-neutral">/dashboard/qris-dinamis</span></h3>
+    <p>Terima <b>pembayaran QRIS dinamis</b> langsung dari kasir — QR dibuat sesuai nominal transaksi.</p>
+
+    <h3>7.3 Reservasi Meja <span class="badge-neutral">/dashboard/reservations</span></h3>
+    <p>Terima &amp; atur <b>booking meja</b>, lengkap dengan kalender reservasi.</p>
+
+    <h3>7.4 Online Order Hub <span class="badge-neutral">/dashboard/online-orders</span></h3>
+    <p>Kelola <b>pesanan online</b> (delivery/ojol) dari kanal eksternal dalam satu tempat.</p>
+
+    <h3>7.5 Harga per Kanal <span class="badge-neutral">/dashboard/channel-pricing</span></h3>
+    <p>Atur <b>harga berbeda per kanal penjualan</b> (dine-in, online, marketplace) beserta komisi kanal.</p>
+  </section>
+
+  <!-- ================= BAB 8 ================= -->
+  <section class="chapter" id="pelanggan">
+    <h2>8. Pelanggan &amp; Loyalitas</h2>
+    <p class="lead">Membangun hubungan jangka panjang dengan pelanggan.</p>
+
+    <h3>8.1 Pelanggan <span class="badge-neutral">/dashboard/crm/customers</span></h3>
+    <p>Database pelanggan beserta <b>riwayat belanja</b>, memudahkan personalisasi &amp; promosi bertarget.</p>
+
+    <h3>8.2 Promosi &amp; Voucher <span class="badge-neutral">/dashboard/promotions</span></h3>
+    <p>Buat <b>promo, diskon, dan voucher</b> untuk pelanggan (mis. beli 2 gratis 1, potongan nominal/persen).</p>
+
+    <h3>8.3 Membership <span class="badge-neutral">/dashboard/membership</span></h3>
+    <p>Program <b>member &amp; poin loyalitas</b>: atur tier pelanggan dan cara perolehan/penukaran poin.</p>
+
+    <h3>8.4 Program Referral <span class="badge-neutral">/dashboard/referral</span></h3>
+    <p>Kelola <b>kode referral</b> dan kode khusus kafe Anda untuk pertumbuhan pelanggan.</p>
+  </section>
+
+  <!-- ================= BAB 9 ================= -->
+  <section class="chapter" id="analitik">
+    <h2>9. Analitik</h2>
+    <p class="lead">Modul pengambil keputusan berbasis data.</p>
+    <p>Sebagian fitur menyesuaikan paket (lihat Bab 14).</p>
+
+    <h3>9.1 Analitik Pertumbuhan <span class="badge-neutral">/dashboard/analytics/growth</span></h3>
+    <p>Tren <b>pertumbuhan omzet</b> dan <b>jumlah pelanggan</b> dari waktu ke waktu.</p>
+
+    <h3>9.2 Menu Engineering <span class="badge-neutral">/dashboard/analytics/menu-engineering</span></h3>
+    <p>Klasifikasi menu (bintang, kuda pekerja, teka-teki, anjing) berdasarkan <b>margin &amp; volume penjualan</b>.</p>
+
+    <h3>9.3 Profitabilitas Produk <span class="badge-neutral">/dashboard/analytics/profitability</span></h3>
+    <p><b>Margin &amp; keuntungan</b> tiap menu — memanfaatkan data resep &amp; HPP.</p>
+
+    <h3>9.4 Jam Sibuk (Peak Hours) <span class="badge-neutral">/dashboard/analytics/peak-hours</span> <span class="badge-warning">Supreme</span></h3>
+    <p>Analisis <b>jam ramai</b> untuk optimasi jadwal staf &amp; persiapan stok.</p>
+
+    <h3>9.5 Kerugian Barang <span class="badge-neutral">/dashboard/analytics/waste-loss</span></h3>
+    <p>Catat &amp; pantau <b>barang terbuang/rusak</b> beserta nilai kerugiannya.</p>
+  </section>
+
+  <!-- ================= BAB 10 ================= -->
+  <section class="chapter" id="cabang">
+    <h2>10. Cabang &amp; Tim</h2>
+    <p class="lead">Mengelola outlet dan seluruh staf.</p>
+
+    <h3>10.1 Manajemen Cabang <span class="badge-neutral">/dashboard/branches</span></h3>
+    <p>Kelola <b>cabang/outlet</b>. Batas cabang: Free 1, Pro 3, Supreme tidak terbatas.</p>
+
+    <h3>10.2 Manajemen Karyawan <span class="badge-neutral">/dashboard/employees</span></h3>
+    <p><b>Satu-satunya sumber kebenaran</b> untuk akun staf. Tambah/ubah peran: Admin, Supervisor, Kasir, Dapur; atur cabang penempatan.</p>
+
+    <h3>10.3 Monitoring Kasir <span class="badge-neutral">/dashboard/cashiers</span></h3>
+    <p>Memantau <b>shift kasir yang sedang aktif</b> — bersifat hanya-lihat.</p>
+
+    <h3>10.4 Evaluasi Kasir <span class="badge-neutral">/dashboard/cashier-evaluation</span></h3>
+    <p>Lihat <b>skor &amp; kinerja</b> masing-masing kasir.</p>
+
+    <h3>10.5 Kehadiran Karyawan <span class="badge-neutral">/dashboard/attendance</span></h3>
+    <p>Absensi &amp; jadwal kehadiran staf, termasuk pengajuan <b>izin</b>.</p>
+  </section>
+
+  <!-- ================= BAB 11 ================= -->
+  <section class="chapter" id="pengaturan">
+    <h2>11. Pengaturan</h2>
+    <p class="lead">Menyesuaikan aplikasi dengan kebutuhan kafe Anda.</p>
+
+    <h3>11.1 Pengaturan Kafe <span class="badge-neutral">/dashboard/settings</span></h3>
+    <p>Pusat konfigurasi bisnis. Sub-halaman yang tersedia:</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Halaman</th><th>Fungsi</th></tr></thead>
+        <tbody>
+          <tr><td><b>Profil Bisnis</b></td><td>Nama kafe, logo, data dasar bisnis.</td></tr>
+          <tr><td><b>Cabang</b></td><td>Pengaturan per cabang (alamat, kontak, dll.).</td></tr>
+          <tr><td><b>Menu</b></td><td>Preferensi tampilan/urutan katalog menu.</td></tr>
+          <tr><td><b>Pembayaran</b></td><td>Metode pembayaran yang aktif (tunai, kartu, QRIS).</td></tr>
+          <tr><td><b>QRIS</b></td><td>Konfigurasi penerimaan QRIS.</td></tr>
+          <tr><td><b>Printer</b></td><td>Pengaturan printer struk.</td></tr>
+          <tr><td><b>Struk (Receipt)</b></td><td>Format &amp; isi struk, termasuk "Cetak Struk Percobaan".</td></tr>
+          <tr><td><b>Hardware</b></td><td>Perangkat pendukung (printer, laci kas).</td></tr>
+          <tr><td><b>Keamanan</b></td><td>Pengaturan keamanan akun &amp; akses.</td></tr>
+          <tr><td><b>PWA</b></td><td>Instalasi aplikasi ke layar utama (Android/iOS).</td></tr>
+          <tr><td><b>Profil</b></td><td>Profil pengguna yang sedang login.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>11.2 Import / Migrasi Data <span class="badge-neutral">/dashboard/settings/import</span></h3>
+    <p>Impor data menu/stok dari berkas untuk mempercepat <b>setup awal</b> tanpa input manual satu per satu.</p>
+
+    <h3>11.3 Status Langganan <span class="badge-neutral">/dashboard/subscription</span></h3>
+    <p>Lihat paket aktif, sisa masa trial, dan cara perpanjangan. Detail lengkap di Bab 14.</p>
+
+    <h3>11.4 FAQ &amp; Helpdesk <span class="badge-neutral">/dashboard/faq</span></h3>
+    <p>Pertanyaan umum dan kanal bantuan, termasuk WhatsApp helpdesk.</p>
+  </section>
+
+  <!-- ================= BAB 12 ================= -->
+  <section class="chapter" id="pos">
+    <h2>12. Halaman POS (Kasir)</h2>
+    <p class="lead">Halaman kerja utama kasir.</p>
+    <p>Dibuka via sidebar → <b>"Buka Halaman Kasir (POS)"</b> atau rute <code>/pos</code>.</p>
+    <figure class="fig">
+      <div class="fig-title"><span class="num">6</span> Halaman POS (Kasir)</div>
+      <svg viewBox="0 0 760 440" role="img" aria-label="Mockup halaman kasir: kategori, katalog menu, dan keranjang pesanan">
+        <rect x="20" y="20" width="720" height="400" rx="16" fill="#F8FAFC" stroke="#E2E8F0"/>
+        <path d="M36 20 h688 a16 16 0 0 1 16 16 v28 h-720 v-28 a16 16 0 0 1 16 -16 z" fill="#12181F"/>
+        <rect x="40" y="30" width="22" height="22" rx="6" fill="#10B981"/>
+        <text x="51" y="46" text-anchor="middle" font-size="13" font-weight="800" fill="#ffffff">c</text>
+        <text x="70" y="46" font-size="12.5" font-weight="700" fill="#F8FAFC">caPOS · Kasir</text>
+        <text x="540" y="46" font-size="11" fill="#94A3B8">Kasir: Andi</text>
+        <circle cx="646" cy="42" r="5" fill="#10B981"/>
+        <text x="658" y="46" font-size="11" font-weight="600" fill="#D1FAE5">Shift aktif</text>
+        <rect x="32" y="76" width="148" height="332" rx="12" fill="#ffffff" stroke="#E2E8F0"/>
+        <rect x="42" y="88" width="128" height="32" rx="10" fill="#10B981"/>
+        <text x="106" y="108" text-anchor="middle" font-size="12" font-weight="600" fill="#ffffff">Kopi</text>
+        <rect x="42" y="128" width="128" height="32" rx="10" fill="#F1F5F9"/><text x="106" y="148" text-anchor="middle" font-size="12" fill="#334155">Non-Kopi</text>
+        <rect x="42" y="168" width="128" height="32" rx="10" fill="#F1F5F9"/><text x="106" y="188" text-anchor="middle" font-size="12" fill="#334155">Makanan</text>
+        <rect x="42" y="208" width="128" height="32" rx="10" fill="#F1F5F9"/><text x="106" y="228" text-anchor="middle" font-size="12" fill="#334155">Snack</text>
+        <rect x="42" y="248" width="128" height="32" rx="10" fill="#F1F5F9"/><text x="106" y="268" text-anchor="middle" font-size="12" fill="#334155">Dessert</text>
+        <g><rect x="192" y="88" width="108" height="126" rx="10" fill="#ffffff" stroke="#E2E8F0"/><rect x="200" y="96" width="92" height="64" rx="8" fill="#F1F5F9"/><text x="202" y="182" font-size="11.5" font-weight="600" fill="#0F172A">Es Kopi Susu</text><text x="202" y="200" font-size="10.5" fill="#64748B">Rp18.000</text></g>
+        <g><rect x="308" y="88" width="108" height="126" rx="10" fill="#ffffff" stroke="#E2E8F0"/><rect x="316" y="96" width="92" height="64" rx="8" fill="#F1F5F9"/><text x="318" y="182" font-size="11.5" font-weight="600" fill="#0F172A">Cappuccino</text><text x="318" y="200" font-size="10.5" fill="#64748B">Rp22.000</text></g>
+        <g><rect x="424" y="88" width="108" height="126" rx="10" fill="#ffffff" stroke="#E2E8F0"/><rect x="432" y="96" width="92" height="64" rx="8" fill="#F1F5F9"/><text x="434" y="182" font-size="11.5" font-weight="600" fill="#0F172A">Latte</text><text x="434" y="200" font-size="10.5" fill="#64748B">Rp25.000</text></g>
+        <g><rect x="192" y="226" width="108" height="126" rx="10" fill="#ffffff" stroke="#E2E8F0"/><rect x="200" y="234" width="92" height="64" rx="8" fill="#F1F5F9"/><text x="202" y="320" font-size="11.5" font-weight="600" fill="#0F172A">Matcha</text><text x="202" y="338" font-size="10.5" fill="#64748B">Rp26.000</text></g>
+        <g><rect x="308" y="226" width="108" height="126" rx="10" fill="#ffffff" stroke="#E2E8F0"/><rect x="316" y="234" width="92" height="64" rx="8" fill="#F1F5F9"/><text x="318" y="320" font-size="11.5" font-weight="600" fill="#0F172A">Croissant</text><text x="318" y="338" font-size="10.5" fill="#64748B">Rp14.000</text></g>
+        <g><rect x="424" y="226" width="108" height="126" rx="10" fill="#ffffff" stroke="#E2E8F0"/><rect x="432" y="234" width="92" height="64" rx="8" fill="#F1F5F9"/><text x="434" y="320" font-size="11.5" font-weight="600" fill="#0F172A">Donat</text><text x="434" y="338" font-size="10.5" fill="#64748B">Rp10.000</text></g>
+        <rect x="548" y="76" width="180" height="332" rx="12" fill="#ffffff" stroke="#E2E8F0"/>
+        <text x="562" y="100" font-size="12.5" font-weight="700" fill="#0F172A">Pesanan #A-01</text>
+        <text x="562" y="126" font-size="11" fill="#334155">2× Es Kopi Susu</text><text x="712" y="126" text-anchor="end" font-size="11" fill="#334155">36.000</text>
+        <text x="562" y="150" font-size="11" fill="#334155">1× Latte</text><text x="712" y="150" text-anchor="end" font-size="11" fill="#334155">25.000</text>
+        <text x="562" y="174" font-size="11" fill="#334155">1× Croissant</text><text x="712" y="174" text-anchor="end" font-size="11" fill="#334155">14.000</text>
+        <line x1="560" y1="196" x2="716" y2="196" stroke="#E2E8F0"/>
+        <text x="562" y="224" font-size="12" font-weight="700" fill="#0F172A">Total</text>
+        <text x="712" y="224" text-anchor="end" font-size="13" font-weight="800" fill="#059669">Rp75.000</text>
+        <rect x="560" y="252" width="156" height="34" rx="10" fill="#F1F5F9"/>
+        <text x="638" y="274" text-anchor="middle" font-size="11" fill="#334155">Pilih Meja · Open Bill</text>
+        <rect x="560" y="352" width="156" height="42" rx="12" fill="#10B981"/>
+        <text x="638" y="378" text-anchor="middle" font-size="13" font-weight="700" fill="#ffffff">Bayar</text>
+      </svg>
+      <figcaption>Gambar 6. Tiga panel POS: kategori (kiri), katalog menu (tengah), keranjang &amp; tombol Bayar (kanan).</figcaption>
+    </figure>
+
+    <h3>12.1 Alur Transaksi Standar</h3>
+    <ol class="steps">
+      <li><b>Buka shift</b> — masukkan modal awal kas di modal shift. Shift wajib aktif sebelum menjual.</li>
+      <li><b>Pilih menu</b> dari katalog (bisa pilih varian &amp; modifier), lalu masukkan ke keranjang.</li>
+      <li><b>Kelola meja</b> (opsional) — pilih/mindahkan/gabungkan meja, atau gunakan mode <b>Open Bill</b>.</li>
+      <li><b>Kirim ke dapur</b> — pesanan dikirim ke Kitchen Display agar langsung diproses.</li>
+      <li><b>Pembayaran</b> — pilih metode (tunai/kartu/QRIS). Mendukung <b>pembayaran campuran (multi-payment)</b>.</li>
+      <li><b>Selesaikan transaksi</b> — struk tercetak, stok bahan terpotong otomatis mengikuti resep.</li>
+    </ol>
+
+    <h3>12.2 Fitur Kunci di POS</h3>
+    <ul>
+      <li><b>Offline-first</b> — transaksi tetap berjalan walau koneksi terputus; disinkronkan saat online.</li>
+      <li><b>Manajemen meja</b> — papan status meja dengan pindah/gabung meja.</li>
+      <li><b>Open Bill</b> — panel untuk pesanan yang belum dibayar.</li>
+      <li><b>Cetak struk</b> — tombol cetak per transaksi; format 80mm.</li>
+      <li><b>Aksi cepat kasir</b> — pintasan operasional umum.</li>
+      <li><b>Supervisor PIN</b> — untuk aksi tertentu yang butuh otorisasi (mis. void).</li>
+    </ul>
+    <div class="callout"><p><strong>Mode contoh</strong>Jika kafe belum punya transaksi, POS menampilkan data contoh dan menonaktifkan penambahan item ke keranjang sampai ada menu asli.</p></div>
+  </section>
+
+  <!-- ================= BAB 13 ================= -->
+  <section class="chapter" id="dapur">
+    <h2>13. Dapur (Kitchen Display)</h2>
+    <p class="lead">Layar kerja staf dapur.</p>
+    <p>Halaman khusus staf dapur (<code>/kitchen</code>) menampilkan <b>tiket pesanan</b> yang masuk dari kasir atau self-order.</p>
+    <figure class="fig">
+      <div class="fig-title"><span class="num">7</span> Kitchen Display System (layar dapur)</div>
+      <svg viewBox="0 0 760 380" role="img" aria-label="Mockup layar dapur dengan kolom Baru, Diproses, dan Selesai">
+        <rect x="20" y="20" width="220" height="330" rx="12" fill="#F8FAFC" stroke="#E2E8F0"/>
+        <rect x="20" y="20" width="220" height="38" rx="12" fill="#FEE2E2"/><rect x="20" y="50" width="220" height="8" fill="#FEE2E2"/>
+        <text x="34" y="44" font-size="12" font-weight="700" fill="#EF4444">BARU (2)</text>
+        <rect x="32" y="72" width="196" height="112" rx="10" fill="#ffffff" stroke="#E2E8F0"/>
+        <text x="44" y="92" font-size="12.5" font-weight="700" fill="#0F172A">#A-01</text>
+        <rect x="176" y="78" width="42" height="18" rx="9" fill="#F1F5F9"/><text x="197" y="91" text-anchor="middle" font-size="9.5" fill="#334155">Meja 4</text>
+        <text x="44" y="112" font-size="11" fill="#334155">2× Es Kopi Susu</text>
+        <text x="44" y="130" font-size="11" fill="#334155">1× Latte</text>
+        <text x="44" y="148" font-size="11" fill="#334155">1× Croissant</text>
+        <text x="44" y="172" font-size="10" fill="#94A3B8">12:41</text>
+        <rect x="32" y="194" width="196" height="112" rx="10" fill="#ffffff" stroke="#E2E8F0"/>
+        <text x="44" y="214" font-size="12.5" font-weight="700" fill="#0F172A">#A-02</text>
+        <rect x="176" y="200" width="42" height="18" rx="9" fill="#F1F5F9"/><text x="197" y="213" text-anchor="middle" font-size="9.5" fill="#334155">Meja 7</text>
+        <text x="44" y="234" font-size="11" fill="#334155">3× Matcha</text>
+        <text x="44" y="252" font-size="11" fill="#334155">2× Donat</text>
+        <text x="44" y="294" font-size="10" fill="#94A3B8">12:44</text>
+        <rect x="270" y="20" width="220" height="330" rx="12" fill="#F8FAFC" stroke="#E2E8F0"/>
+        <rect x="270" y="20" width="220" height="38" rx="12" fill="#FEF3C7"/><rect x="270" y="50" width="220" height="8" fill="#FEF3C7"/>
+        <text x="284" y="44" font-size="12" font-weight="700" fill="#B45309">DIPROSES (1)</text>
+        <rect x="282" y="72" width="196" height="112" rx="10" fill="#ffffff" stroke="#E2E8F0"/>
+        <text x="294" y="92" font-size="12.5" font-weight="700" fill="#0F172A">#A-00</text>
+        <rect x="426" y="78" width="42" height="18" rx="9" fill="#F1F5F9"/><text x="447" y="91" text-anchor="middle" font-size="9.5" fill="#334155">Meja 2</text>
+        <text x="294" y="112" font-size="11" fill="#334155">1× Cappuccino</text>
+        <text x="294" y="130" font-size="11" fill="#334155">2× Croissant</text>
+        <text x="294" y="172" font-size="10" fill="#94A3B8">12:38</text>
+        <rect x="520" y="20" width="220" height="330" rx="12" fill="#F8FAFC" stroke="#E2E8F0"/>
+        <rect x="520" y="20" width="220" height="38" rx="12" fill="#D1FAE5"/><rect x="520" y="50" width="220" height="8" fill="#D1FAE5"/>
+        <text x="534" y="44" font-size="12" font-weight="700" fill="#059669">SELESAI (1)</text>
+        <rect x="532" y="72" width="196" height="112" rx="10" fill="#ffffff" stroke="#E2E8F0"/>
+        <text x="544" y="92" font-size="12.5" font-weight="700" fill="#0F172A">#A-99</text>
+        <rect x="676" y="78" width="42" height="18" rx="9" fill="#F1F5F9"/><text x="697" y="91" text-anchor="middle" font-size="9.5" fill="#334155">Meja 1</text>
+        <text x="544" y="112" font-size="11" fill="#334155">4× Es Kopi Susu</text>
+        <text x="544" y="172" font-size="10" fill="#94A3B8">12:30</text>
+      </svg>
+      <figcaption>Gambar 7. Tiket pesanan berpindah kolom: Baru → Diproses → Selesai.</figcaption>
+    </figure>
+    <ul>
+      <li>Tiket menampilkan item, varian/modifier, dan meja/nomor pesanan.</li>
+      <li>Status tiket diperbarui (baru → diproses → selesai) sehingga kasir &amp; pelayan tahu kesiapan pesanan.</li>
+      <li>Cocok ditempatkan di tablet/monitor dapur; halaman ini punya mode lanskap.</li>
+    </ul>
+  </section>
+
+  <!-- ================= BAB 14 ================= -->
+  <section class="chapter" id="langganan">
+    <h2>14. Langganan &amp; Paket</h2>
+    <p class="lead">Pilihan paket dan cara pembayarannya.</p>
+    <p>caPOS punya tiga tingkatan paket. Semua akun baru mulai dari <b>Free Trial 28 hari</b>.</p>
+
+    <div class="grid g3">
+      <div class="card">
+        <span class="badge-warning">Free Trial</span>
+        <h3 style="margin:.5em 0 .2em">Rp0 <span style="font-size:12px;font-weight:400;color:var(--n500)">/ 28 hari</span></h3>
+        <ul style="font-size:12px;padding-left:1.1em">
+          <li>1 Owner + 2 Kasir</li><li>Maks 10 Menu</li><li>Maks 1 Cabang</li>
+          <li>Riwayat 14 hari</li><li>Laporan dasar &amp; Export CSV</li>
+        </ul>
+      </div>
+      <div class="card" style="border-color:var(--primary);box-shadow:0 6px 18px rgba(16,185,129,.18)">
+        <span class="badge-active">Pro · Populer</span>
+        <h3 style="margin:.5em 0 .2em">Rp100.000 <span style="font-size:12px;font-weight:400;color:var(--n500)">/ bulan</span></h3>
+        <ul style="font-size:12px;padding-left:1.1em">
+          <li>Kasir &amp; Menu <b>unlimited</b></li><li>Maks 3 Cabang</li><li>Riwayat 30 hari</li>
+          <li>Kesehatan Penjualan</li><li>Export Excel multi-sheet &amp; PDF</li><li>Menu Terlaris</li>
+        </ul>
+      </div>
+      <div class="card">
+        <span class="badge-active">Supreme</span>
+        <h3 style="margin:.5em 0 .2em">Rp900.000 <span style="font-size:12px;font-weight:400;color:var(--n500)">/ tahun</span></h3>
+        <ul style="font-size:12px;padding-left:1.1em">
+          <li>Semua fitur Pro</li><li>Cabang &amp; riwayat <b>lengkap</b></li>
+          <li>Jam Sibuk (Peak Hours)</li><li>Prioritas Support</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>14.1 Perbandingan Fitur</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Fitur</th><th>Free</th><th>Pro</th><th>Supreme</th></tr></thead>
+        <tbody>
+          <tr><td>Akun Kasir</td><td>Maks 2</td><td>Unlimited</td><td>Unlimited</td></tr>
+          <tr><td>Jumlah Menu</td><td>Maks 10</td><td>Unlimited</td><td>Unlimited</td></tr>
+          <tr><td>Jumlah Cabang</td><td>1</td><td>3</td><td>Unlimited</td></tr>
+          <tr><td>Riwayat Transaksi</td><td>14 hari</td><td>30 hari</td><td>Lengkap</td></tr>
+          <tr><td>Grafik Omzet Harian</td><td>✓</td><td>✓</td><td>✓</td></tr>
+          <tr><td>Kesehatan Penjualan</td><td>—</td><td>✓</td><td>✓</td></tr>
+          <tr><td>Jam Sibuk (Peak Hours)</td><td>—</td><td>—</td><td>✓</td></tr>
+          <tr><td>Menu Terlaris</td><td>—</td><td>✓</td><td>✓</td></tr>
+          <tr><td>Export CSV Sederhana</td><td>✓</td><td>✓</td><td>✓</td></tr>
+          <tr><td>Export Excel Multi-sheet + PDF</td><td>—</td><td>✓</td><td>✓</td></tr>
+          <tr><td>Prioritas Support</td><td>—</td><td>—</td><td>✓</td></tr>
+          <tr><td>Laporan PDF Otomatis</td><td>14 hari</td><td>30 hari</td><td>Lengkap</td></tr>
+          <tr><td>Stok &amp; HPP, Stok Opname</td><td>✓</td><td>✓</td><td>✓</td></tr>
+          <tr><td>Target Bulanan, Evaluasi Kasir</td><td>✓</td><td>✓</td><td>✓</td></tr>
+          <tr><td>Kehadiran &amp; Izin Karyawan</td><td>✓</td><td>✓</td><td>✓</td></tr>
+          <tr><td>Membership Pelanggan</td><td>✓</td><td>✓</td><td>✓</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>14.2 Status Langganan &amp; Pembayaran</h3>
+    <ul>
+      <li>Status: <span class="badge-warning">Trial</span> · <span class="badge-active">Aktif</span> · <span class="badge-urgent">Tertunggak</span> · <span class="badge-neutral">Kedaluwarsa</span>.</li>
+      <li>Pembayaran melalui kanal pembayaran yang terhubung — tersedia portal pembayaran langsung dari halaman Status Langganan.</li>
+      <li>Diskon 2% untuk pembayaran pertama bila mendaftar dengan kode referral.</li>
+      <li>Trial yang tinggal ≤ 3 hari ditandai <span class="badge-urgent">Trial Hampir Habis</span>.</li>
+    </ul>
+  </section>
+
+  <!-- ================= BAB 15 ================= -->
+  <section class="chapter" id="tema">
+    <h2>15. Tema &amp; Design System</h2>
+    <p class="lead">Palet &amp; komponen yang dipakai aplikasi (dan dokumen ini).</p>
+    <p>Sumber kebenaran warna ada pada konfigurasi tema aplikasi; token bentuk (radius, bayangan) ada pada CSS global. Palet ini dipakai konsisten di seluruh halaman.</p>
+
+    <h3>15.1 Palet Warna</h3>
+    <h4>Primary — hijau emerald</h4>
+    <div class="swatches">
+      <div class="sw"><div class="chip" style="background:#10B981"></div><div class="meta"><b>primary</b><code>#10B981</code></div></div>
+      <div class="sw"><div class="chip" style="background:#059669"></div><div class="meta"><b>primary-dark</b><code>#059669</code></div></div>
+      <div class="sw"><div class="chip" style="background:#D1FAE5"></div><div class="meta"><b>primary-light</b><code>#D1FAE5</code></div></div>
+      <div class="sw"><div class="chip" style="background:#F0FDF9"></div><div class="meta"><b>primary-tint</b><code>#F0FDF9</code></div></div>
+    </div>
+    <h4>Urgent — merah</h4>
+    <div class="swatches">
+      <div class="sw"><div class="chip" style="background:#EF4444"></div><div class="meta"><b>urgent</b><code>#EF4444</code></div></div>
+      <div class="sw"><div class="chip" style="background:#FEE2E2"></div><div class="meta"><b>urgent-light</b><code>#FEE2E2</code></div></div>
+    </div>
+    <h4>Warning — amber</h4>
+    <div class="swatches">
+      <div class="sw"><div class="chip" style="background:#F59E0B"></div><div class="meta"><b>warning</b><code>#F59E0B</code></div></div>
+      <div class="sw"><div class="chip" style="background:#FEF3C7"></div><div class="meta"><b>warning-light</b><code>#FEF3C7</code></div></div>
+    </div>
+    <h4>Neutral — slate</h4>
+    <div class="swatches">
+      <div class="sw"><div class="chip" style="background:#F8FAFC"></div><div class="meta"><b>neutral-50</b><code>#F8FAFC</code></div></div>
+      <div class="sw"><div class="chip" style="background:#F1F5F9"></div><div class="meta"><b>neutral-100</b><code>#F1F5F9</code></div></div>
+      <div class="sw"><div class="chip" style="background:#E2E8F0"></div><div class="meta"><b>neutral-200</b><code>#E2E8F0</code></div></div>
+      <div class="sw"><div class="chip" style="background:#CBD5E1"></div><div class="meta"><b>neutral-300</b><code>#CBD5E1</code></div></div>
+      <div class="sw"><div class="chip" style="background:#64748B"></div><div class="meta"><b>neutral-500</b><code>#64748B</code></div></div>
+      <div class="sw"><div class="chip" style="background:#334155"></div><div class="meta"><b>neutral-700</b><code>#334155</code></div></div>
+      <div class="sw"><div class="chip" style="background:#0F172A"></div><div class="meta"><b>neutral-900</b><code>#0F172A</code></div></div>
+    </div>
+    <h4>Sidebar — identitas gelap</h4>
+    <div class="swatches">
+      <div class="sw"><div class="chip" style="background:#12181F"></div><div class="meta"><b>sidebar</b><code>#12181F</code></div></div>
+      <div class="sw"><div class="chip" style="background:#1A222C"></div><div class="meta"><b>sidebar-raised</b><code>#1A222C</code></div></div>
+      <div class="sw"><div class="chip" style="background:#232B36"></div><div class="meta"><b>sidebar-border</b><code>#232B36</code></div></div>
+      <div class="sw"><div class="chip" style="background:#1E2731"></div><div class="meta"><b>sidebar-hover</b><code>#1E2731</code></div></div>
+      <div class="sw"><div class="chip" style="background:#94A3B8"></div><div class="meta"><b>sidebar-text</b><code>#94A3B8</code></div></div>
+      <div class="sw"><div class="chip" style="background:#F8FAFC"></div><div class="meta"><b>text-active</b><code>#F8FAFC</code></div></div>
+    </div>
+
+    <h3>15.2 Tipografi</h3>
+    <ul>
+      <li><b>Font</b>: <b>Inter</b> (fallback <code>system-ui</code>).</li>
+      <li>Heading: H1 30/800, H2 21/700, H3 15/600, H4 13/600.</li>
+      <li>Body: 12,5px; bobot 400/500/600/700.</li>
+      <li>Warna tema PWA: <code>#10B981</code>.</li>
+    </ul>
+
+    <h3>15.3 Token Bentuk &amp; Bayangan</h3>
+    <ul>
+      <li>Radius: badge <code>6px</code> · input/button <code>8–12px</code> · card <code>12–14px</code> · modal <code>16px</code>.</li>
+      <li>Bayangan card: halus (1–3px) dengan opasitas rendah.</li>
+      <li>Bayangan modal: lebih tebal untuk fokus.</li>
+      <li>Transisi dasar: <code>150ms</code>.</li>
+      <li>Focus ring: cincin hijau primary; seleksi teks hijau muda.</li>
+    </ul>
+
+    <h3>15.4 Komponen Inti</h3>
+    <div class="card">
+      <p style="margin-top:0"><b>Tombol</b></p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn-primary">Simpan</button>
+        <button class="btn-outline">Batal</button>
+        <button class="btn-danger">Hapus</button>
+        <button class="btn-primary" style="opacity:.5">Nonaktif</button>
+      </div>
+      <p style="margin-top:16px"><b>Badge</b></p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <span class="badge-active">Aktif</span>
+        <span class="badge-warning">Trial</span>
+        <span class="badge-urgent">Tertunggak</span>
+        <span class="badge-neutral">Supreme</span>
+      </div>
+      <p style="margin-top:16px"><b>Input</b></p>
+      <span class="field" style="max-width:320px">Masukkan nilai</span>
+    </div>
+
+    <h3>15.5 Status Halaman</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Status</th><th>Yang ditampilkan</th></tr></thead>
+        <tbody>
+          <tr><td><b>Loading</b></td><td>Skeleton loader; kontrol interaktif dinonaktifkan.</td></tr>
+          <tr><td><b>Loaded</b></td><td>Data sebenarnya; semua aksi aktif.</td></tr>
+          <tr><td><b>Empty</b></td><td>Ikon besar + judul + penjelasan + tombol aksi pertama.</td></tr>
+          <tr><td><b>Error</b></td><td>Ikon peringatan + pesan + tombol "Coba lagi".</td></tr>
+          <tr><td><b>Success</b></td><td>Konfirmasi centang + pesan (toast/sementara).</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout"><p><strong>Ikon</strong>Seluruh aplikasi memakai pustaka ikon yang konsisten (mis. ikon kopi untuk Katalog, keranjang untuk POS).</p></div>
+  </section>
+
+  <!-- ================= BAB 16 ================= -->
+  <section class="chapter" id="faq">
+    <h2>16. FAQ &amp; Dukungan</h2>
+    <p class="lead">Pertanyaan umum dan tempat meminta bantuan.</p>
+
+    <h4>Apakah kasir tetap bisa jalan tanpa internet?</h4>
+    <p>Bisa. POS dirancang <i>offline-first</i>; transaksi disimpan lokal lalu disinkronkan saat koneksi kembali. Perhatikan indikator status sinkronisasi.</p>
+
+    <h4>Kenapa halaman dashboard menampilkan data "Contoh"?</h4>
+    <p>Itu <b>Mode Contoh</b> untuk kafe tanpa aktivitas. Hilang otomatis setelah transaksi pertama (Bab 1.7).</p>
+
+    <h4>Bagaimana menambah kasir atau staf dapur?</h4>
+    <p>Dari <b>Cabang &amp; Tim → Manajemen Karyawan</b>. Itu satu-satunya tempat membuat akun staf.</p>
+
+    <h4>Tidak menerima kode OTP saat mendaftar, bagaimana?</h4>
+    <p>Cek email yang didaftarkan, lalu <b>cek folder Spam / Promosi / Pembaruan secara berkala</b>. Bila tetap tidak ada, tunggu beberapa menit dan tekan <b>"Kirim ulang kode"</b>.</p>
+
+    <h4>Bagaimana mengubah tempat cetak struk?</h4>
+    <p>Atur di <b>Pengaturan → Printer / Struk / Hardware</b>, lalu gunakan "Cetak Struk Percobaan" untuk menguji.</p>
+
+    <h4>Berapa batas jumlah menu/cabang/kasir?</h4>
+    <p>Tergantung paket — lihat tabel di Bab 14. Free: 10 menu, 1 cabang, 2 kasir.</p>
+
+    <h4>Apa yang terjadi saat trial habis?</h4>
+    <p>Status berubah menjadi kedaluwarsa/tertunggak. Perpanjang dari <b>Status Langganan</b> untuk melanjutkan fitur penuh.</p>
+
+    <h4>Bagaimana menonton ulang tur pengenalan?</h4>
+    <p>Minta Admin menyetel ulang status tur pada akun Anda (Bab 1.6), lalu login kembali.</p>
+
+    <h3>Glosarium</h3>
+    <dl class="gloss">
+      <dt>HPP</dt><dd>Harga Pokok Penjualan — biaya bahan untuk menghasilkan satu menu; dasar perhitungan margin.</dd>
+      <dt>Tenant</dt><dd>Entitas bisnis/kafe Anda di dalam sistem (satu pendaftaran = satu tenant).</dd>
+      <dt>Cabang</dt><dd>Outlet/lokasi penjualan. Satu tenant bisa punya beberapa cabang sesuai paket.</dd>
+      <dt>Varian</dt><dd>Pilihan bentuk menu, mis. ukuran Regular/Large.</dd>
+      <dt>Modifier</dt><dd>Tambahan pilihan pada menu, mis. topping atau level gula.</dd>
+      <dt>Stok Opname</dt><dd>Kegiatan menghitung fisik stok dan menyesuaikan selisihnya di sistem.</dd>
+      <dt>Purchase Order (PO)</dt><dd>Dokumen pesanan pembelian barang ke pemasok.</dd>
+      <dt>GRN</dt><dd>Goods Receipt Note — catatan penerimaan barang dari pemasok.</dd>
+      <dt>QRIS</dt><dd>Standar pembayaran QR nasional (Quick Response Code Indonesian Standard).</dd>
+      <dt>KDS</dt><dd>Kitchen Display System — layar tiket pesanan untuk staf dapur.</dd>
+      <dt>Offline-first</dt><dd>Desain aplikasi yang tetap berfungsi tanpa koneksi internet lalu menyinkronkan data.</dd>
+      <dt>PWA</dt><dd>Progressive Web App — aplikasi web yang dapat dipasang ke layar utama ponsel.</dd>
+    </dl>
+
+    <h3>Kontak &amp; Dukungan</h3>
+    <div class="callout"><p><strong>Bantuan</strong>Gunakan menu <b>FAQ &amp; Helpdesk</b> di dalam aplikasi untuk kanal bantuan, termasuk WhatsApp helpdesk Studio D13.</p></div>
+    <p style="color:var(--n500);font-size:11.5px;margin-top:22px">
+      Dokumen ini mengikuti tampilan aplikasi caPOS. Warna, tipografi, dan komponen diambil dari konfigurasi tema aplikasi
+      agar panduan terasa konsisten dengan produk yang digunakan.
+    </p>
+  </section>
+
+</main>
+</body>
+</html>
