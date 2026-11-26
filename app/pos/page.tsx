@@ -7,6 +7,8 @@ import { DEMO_PRODUCTS } from "@/lib/demoData";
 import { Search, Plus, Minus, Trash2, Printer, ScanLine, Loader2 } from "lucide-react";
 import PosNavbar from "@/components/PosNavbar";
 import Receipt, { type ReceiptData } from "@/components/Receipt";
+import KitchenTicket from "@/components/receipt/KitchenTicket";
+import { computeCharges, useChargeSettings, hasCharges } from "@/lib/charges";
 import Modal from "@/components/Modal";
 import CashierQuickActions from "@/components/CashierQuickActions";
 import AccessDeniedNotice from "@/components/AccessDeniedNotice";
@@ -24,7 +26,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
 import { db } from "@/lib/dexie";
 import { useProductAvailabilityChannel } from "@/lib/useProductAvailabilityChannel";
-import { formatRupiah, generateInvoiceNumber, formatNumberWithDots, stripNumberDots, cx, printReceipt } from "@/lib/utils";
+import { formatRupiah, generateInvoiceNumber, formatNumberWithDots, stripNumberDots, cx, printReceipt, printCustomerAndKitchen } from "@/lib/utils";
 import type { CartItem, KitchenStation, OrderWithItems, Product, ProductVariant, ModifierGroup, Modifier } from "@/lib/types";
 
 import { toast } from "@/components/Toast";
@@ -130,6 +132,25 @@ export default function PosPage() {
   // kalkulasi kembalian otomatis + tombol preset (Requirement 2).
   const [cashReceived, setCashReceived] = useState("");
   const [receipt, setReceipt] = useState<ReceiptData | null>(null);
+  // Preferensi kasir: cetak otomatis 2 lembar (customer + kitchen) tiap transaksi selesai.
+  const [autoPrintBoth, setAutoPrintBoth] = useState(false);
+  useEffect(() => {
+    try {
+      setAutoPrintBoth(localStorage.getItem("capos:autoPrintBoth") === "1");
+    } catch {}
+  }, []);
+  function toggleAutoPrintBoth(v: boolean) {
+    setAutoPrintBoth(v);
+    try {
+      localStorage.setItem("capos:autoPrintBoth", v ? "1" : "0");
+    } catch {}
+  }
+  useEffect(() => {
+    if (!receipt || !autoPrintBoth) return;
+    const t = setTimeout(() => printCustomerAndKitchen(receipt.width), 500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [receipt]);
   const [cashierName, setCashierName] = useState("Kasir");
   const [cashierEmail, setCashierEmail] = useState<string | null>(null);
   const [roleLabel, setRoleLabel] = useState("Kasir");
@@ -348,6 +369,20 @@ export default function PosPage() {
           // branch_stock untuk cabang ini, dianggap stoknya 0 (bukan
           // unlimited) supaya tidak bisa terjual tanpa batas.
           let merged = data as StockAwareProduct[];
+          // Menu yang dimatikan untuk cabang ini (Daftar Menu → "Dijual di cabang mana?").
+          // Tidak ada baris = dijual. Kalau tabelnya belum ada (migration_020 belum
+          // dijalankan), error diabaikan dan semua menu tetap tampil seperti biasa.
+          if (effectiveBranchId) {
+            const { data: hiddenRows } = await supabase
+              .from("branch_product_availability")
+              .select("product_id")
+              .eq("branch_id", effectiveBranchId)
+              .eq("is_available", false);
+            if (hiddenRows && hiddenRows.length > 0) {
+              const hiddenIds = new Set((hiddenRows as { product_id: string }[]).map((r) => r.product_id));
+              merged = merged.filter((p) => !hiddenIds.has(p.id));
+            }
+          }
           if (effectiveBranchId) {
             const { data: stockRows } = await supabase
               .from("branch_stock")
@@ -691,7 +726,14 @@ export default function PosPage() {
   // adalah inti alur checkout yang sudah stabil dan di luar 3 modul yang
   // diminta (Subscription/Onboarding/Membership).
   const discountAmount = memberDiscountAmount + voucherDiscountPreview + pointsDiscountAmount;
-  const total = Math.max(0, subtotal - discountAmount);
+  // Biaya layanan & pajak (Pengaturan → Kwitansi). `total` = yang harus dibayar
+  // pelanggan (sudah termasuk service/pajak bila aktif) sehingga kembalian,
+  // QRIS, dan struk otomatis memakai angka yang sama. Server menghitung ulang
+  // dengan rumus identik (calc_charges, migration_021).
+  const chargeSettings = useChargeSettings();
+  const netTotal = Math.max(0, subtotal - discountAmount);
+  const charges = computeCharges(netTotal, chargeSettings);
+  const total = charges.total;
 
   async function applyVoucherCode() {
     setVoucherError(null);
@@ -975,6 +1017,13 @@ export default function PosPage() {
       cashierName,
       items: cart,
       total,
+      serviceAmount: charges.service || undefined,
+      servicePct: chargeSettings.servicePct || undefined,
+      taxAmount: charges.tax || undefined,
+      taxPct: chargeSettings.taxPct || undefined,
+      taxInclusive: chargeSettings.taxInclusive,
+      serviceLabel: chargeSettings.serviceLabel,
+      taxLabel: chargeSettings.taxLabel,
       discount: discountAmount,
       paymentMethod,
       createdAt: txPayload.created_at,
@@ -1010,7 +1059,9 @@ export default function PosPage() {
   // layar ini tidak dipakai untuk order yang sudah dikirim ke dapur).
   function handleOpenBillPaid(_transactionId: string, order: OrderWithItems) {
     setShowOpenBills(false);
-    const total = order.order_items.reduce((sum, i) => sum + i.subtotal, 0);
+    const openBase = Math.max(0, order.order_items.reduce((sum, i) => sum + i.subtotal, 0) - (order.manual_discount_amount ?? 0));
+    const openCharges = computeCharges(openBase, chargeSettings);
+    const total = openCharges.total;
     setReceipt({
       cafeName: cafeSettings.name,
       cafeLogoUrl: cafeSettings.logoUrl,
@@ -1026,7 +1077,14 @@ export default function PosPage() {
         modifiers: i.modifier_selections ?? [],
       })) as unknown as ReceiptData["items"],
       total,
-      discount: 0,
+      serviceAmount: openCharges.service || undefined,
+      servicePct: chargeSettings.servicePct || undefined,
+      taxAmount: openCharges.tax || undefined,
+      taxPct: chargeSettings.taxPct || undefined,
+      taxInclusive: chargeSettings.taxInclusive,
+      serviceLabel: chargeSettings.serviceLabel,
+      taxLabel: chargeSettings.taxLabel,
+      discount: order.manual_discount_amount ?? 0,
       paymentMethod: "lihat rincian di kasir",
       createdAt: new Date().toISOString(),
       showWifi: cafeSettings.showWifi,
@@ -1292,6 +1350,13 @@ export default function PosPage() {
             discountPct={discountPct}
             discountAmount={discountAmount}
             total={total}
+            serviceAmount={charges.service}
+            taxAmount={charges.tax}
+            servicePct={chargeSettings.servicePct}
+            taxPct={chargeSettings.taxPct}
+            taxInclusive={chargeSettings.taxInclusive}
+            serviceLabel={chargeSettings.serviceLabel}
+            taxLabel={chargeSettings.taxLabel}
             onCheckout={() => setShowCheckout(true)}
             onSendToKitchen={() => setShowSendToKitchen(true)}
             quickPayDisabled={cartHasConfiguredItems}
@@ -1346,6 +1411,13 @@ export default function PosPage() {
             discountPct={discountPct}
             discountAmount={discountAmount}
             total={total}
+            serviceAmount={charges.service}
+            taxAmount={charges.tax}
+            servicePct={chargeSettings.servicePct}
+            taxPct={chargeSettings.taxPct}
+            taxInclusive={chargeSettings.taxInclusive}
+            serviceLabel={chargeSettings.serviceLabel}
+            taxLabel={chargeSettings.taxLabel}
             onCheckout={() => {
               setShowCartSheet(false);
               setShowCheckout(true);
@@ -1556,16 +1628,43 @@ export default function PosPage() {
           onClose={() => setReceipt(null)}
           maxWidth="sm:max-w-xs"
           footer={
-            <div className="flex gap-2">
-              <button onClick={() => printReceipt(receipt.width)} className="btn-primary flex-1 flex items-center justify-center gap-2">
-                <Printer size={16} /> Cetak Struk
+            <div className="flex flex-col gap-2">
+              <button onClick={() => printCustomerAndKitchen(receipt.width)} className="btn-primary w-full flex items-center justify-center gap-2">
+                <Printer size={16} /> Cetak 2 Struk (Customer + Kitchen)
               </button>
+              <div className="flex gap-2">
+                <button onClick={() => printReceipt(receipt.width, "customer")} className="btn-outline flex-1 text-sm">
+                  Struk Customer
+                </button>
+                <button onClick={() => printReceipt(receipt.width, "kitchen")} className="btn-outline flex-1 text-sm">
+                  Tiket Kitchen
+                </button>
+              </div>
+              <label className="flex items-start gap-2 text-xs text-neutral-600 cursor-pointer">
+                <input type="checkbox" checked={autoPrintBoth} onChange={(e) => toggleAutoPrintBoth(e.target.checked)} className="mt-0.5" />
+                <span>Cetak otomatis 2 struk setiap transaksi selesai (di perangkat ini)</span>
+              </label>
               <button onClick={() => setReceipt(null)} className="btn-outline">Tutup</button>
             </div>
           }
         >
-          <div className="bg-neutral-100 -m-5 p-4">
-            <Receipt data={receipt} />
+          <div className="bg-neutral-100 -m-5 p-4 space-y-4">
+            <div>
+              <p className="text-[11px] font-semibold text-neutral-500 mb-1 text-center">1. STRUK CUSTOMER</p>
+              <Receipt data={receipt} />
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold text-neutral-500 mb-1 text-center">2. TIKET KITCHEN</p>
+              <KitchenTicket
+                data={{
+                  invoiceNumber: receipt.invoiceNumber,
+                  cashierName: receipt.cashierName,
+                  createdAt: receipt.createdAt,
+                  items: receipt.items,
+                  width: receipt.width,
+                }}
+              />
+            </div>
           </div>
         </Modal>
       )}
@@ -1649,6 +1748,13 @@ function CartPanel({
   discountPct,
   discountAmount,
   total,
+  serviceAmount = 0,
+  taxAmount = 0,
+  servicePct = 0,
+  taxPct = 0,
+  taxInclusive = false,
+  serviceLabel = "Service",
+  taxLabel = "Pajak",
   onCheckout,
   onSendToKitchen,
   quickPayDisabled = false,
@@ -1679,6 +1785,14 @@ function CartPanel({
   discountPct: number;
   discountAmount: number;
   total: number;
+  /** Biaya layanan & pajak (0 = nonaktif). */
+  serviceAmount?: number;
+  taxAmount?: number;
+  servicePct?: number;
+  taxPct?: number;
+  taxInclusive?: boolean;
+  serviceLabel?: string;
+  taxLabel?: string;
   onCheckout: () => void;
   onSendToKitchen: () => void;
   /** true kalau keranjang berisi item bervarian/modifier — jalur Bayar Langsung dimatikan untuk transaksi ini. */
@@ -1839,10 +1953,25 @@ function CartPanel({
               <span>-{formatRupiah(pointsDiscountAmount)}</span>
             </div>
           )}
+          {serviceAmount > 0 && (
+            <div className="flex justify-between text-neutral-600">
+              <span>{serviceLabel}{servicePct ? ` ${servicePct}%` : ""}</span>
+              <span>{formatRupiah(serviceAmount)}</span>
+            </div>
+          )}
+          {taxAmount > 0 && !taxInclusive && (
+            <div className="flex justify-between text-neutral-600">
+              <span>{taxLabel}{taxPct ? ` ${taxPct}%` : ""}</span>
+              <span>{formatRupiah(taxAmount)}</span>
+            </div>
+          )}
           <div className="flex justify-between font-bold text-neutral-900 text-base pt-1">
             <span>Total</span>
             <span>{formatRupiah(total)}</span>
           </div>
+          {taxAmount > 0 && taxInclusive && (
+            <p className="text-[11px] text-neutral-400 text-right">Sudah termasuk {taxLabel}{taxPct ? ` ${taxPct}%` : ""}: {formatRupiah(taxAmount)}</p>
+          )}
         </div>
 
         {/* Jalur utama F&B (Phase 2): kirim ke dapur dulu, lalu bayar

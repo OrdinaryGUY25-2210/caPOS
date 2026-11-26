@@ -75,14 +75,4 @@ export function formatItemConfigLine(item: {
  * app/pos/page.tsx, components/pos/OpenBillPanel.tsx,
  * components/tables/TableStatusBoard.tsx.
  */
-export function printReceipt(width: "58mm" | "80mm" = "80mm") {
-  const styleId = "dynamic-receipt-page-size";
-  let styleTag = document.getElementById(styleId) as HTMLStyleElement | null;
-  if (!styleTag) {
-    styleTag = document.createElement("style");
-    styleTag.id = styleId;
-    document.head.appendChild(styleTag);
-  }
-  styleTag.textContent = `@media print { @page { size: ${width} auto; margin: 0; } }`;
-  window.print();
-}
+export { printReceipt, printCustomerAndKitchen, type PrintTarget } from "./receipt";

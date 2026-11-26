@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { computeCharges, useChargeSettings } from "@/lib/charges";
 import { Loader2, ArrowLeft, ArrowRightLeft, X, Ban, Pencil, Percent, Printer, Combine, SplitSquareHorizontal } from "lucide-react";
 import Modal from "@/components/Modal";
 import ConfirmDialog from "@/components/ConfirmDialog";
@@ -198,7 +199,11 @@ export default function OpenBillPanel({
   }
 
   const subtotal = selectedOrder?.order_items.reduce((sum, i) => sum + i.unit_price * (i.qty - i.voided_qty), 0) ?? 0;
-  const total = Math.max(0, subtotal - (selectedOrder?.manual_discount_amount ?? 0));
+  const chargeSettings = useChargeSettings();
+  const net = Math.max(0, subtotal - (selectedOrder?.manual_discount_amount ?? 0));
+  const charges = computeCharges(net, chargeSettings);
+  // total = yang harus dibayar (termasuk service/pajak bila aktif); server memvalidasi dengan rumus identik.
+  const total = charges.total;
 
   // Void (poin 32-33, gerbang PIN Migrasi 019) — HANYA sebelum lunas
   // (status COMPLETED/CANCELLED ditolak sendiri oleh void_order_item()/
@@ -389,10 +394,25 @@ export default function OpenBillPanel({
                 <span>-{formatRupiah(selectedOrder.manual_discount_amount)}</span>
               </div>
             )}
+            {charges.service > 0 && (
+              <div className="flex justify-between text-sm text-neutral-500">
+                <span>{chargeSettings.serviceLabel}{chargeSettings.servicePct ? ` ${chargeSettings.servicePct}%` : ""}</span>
+                <span>{formatRupiah(charges.service)}</span>
+              </div>
+            )}
+            {charges.tax > 0 && !chargeSettings.taxInclusive && (
+              <div className="flex justify-between text-sm text-neutral-500">
+                <span>{chargeSettings.taxLabel}{chargeSettings.taxPct ? ` ${chargeSettings.taxPct}%` : ""}</span>
+                <span>{formatRupiah(charges.tax)}</span>
+              </div>
+            )}
             <div className="flex justify-between font-bold">
               <span>Total</span>
               <span className="text-primary">{formatRupiah(total)}</span>
             </div>
+            {charges.tax > 0 && chargeSettings.taxInclusive && (
+              <p className="text-[11px] text-neutral-400 text-right">Sudah termasuk {chargeSettings.taxLabel}: {formatRupiah(charges.tax)}</p>
+            )}
           </div>
 
           <p className="text-xs text-neutral-500">Status pesanan: <span className="font-semibold">{selectedOrder.status}</span></p>

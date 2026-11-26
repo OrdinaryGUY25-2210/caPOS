@@ -112,10 +112,19 @@
   body * {
     visibility: hidden;
   }
-  #receipt-print, #receipt-print * {
+  /* Default: struk customer. Tiket kitchen hanya saat body[data-print-target="kitchen"]. */
+  body:not([data-print-target="kitchen"]) #receipt-print,
+  body:not([data-print-target="kitchen"]) #receipt-print *,
+  body[data-print-target="kitchen"] #kitchen-print,
+  body[data-print-target="kitchen"] #kitchen-print * {
     visibility: visible;
   }
-  #receipt-print {
+  body[data-print-target="kitchen"] #receipt-print,
+  body:not([data-print-target="kitchen"]) #kitchen-print {
+    display: none !important;
+  }
+  #receipt-print,
+  #kitchen-print {
     position: absolute;
     left: 0;
     top: 0;

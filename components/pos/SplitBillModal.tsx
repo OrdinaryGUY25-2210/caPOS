@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { computeCharges, useChargeSettings } from "@/lib/charges";
 import { Loader2, Users, Layers, Plus, Trash2, CheckCircle2 } from "lucide-react";
 import Modal from "@/components/Modal";
 import { createClient } from "@/lib/supabase/client";
@@ -147,11 +148,17 @@ export default function SplitBillModal({
     if (activeGroupId === id) setActiveGroupId(groups[0].id);
   }
 
-  function groupTotal(g: ItemGroup) {
+  const chargeSettings = useChargeSettings();
+  // Nilai item (sebelum service/pajak) untuk satu sub-bill.
+  function groupNet(g: ItemGroup) {
     return Object.entries(g.allocations).reduce((sum, [itemId, qty]) => {
       const item = items.find((i) => i.id === itemId);
       return sum + (item ? item.unit_price * qty : 0);
     }, 0);
+  }
+  // Total yang dibayar sub-bill = nilai item + service + pajak (server memvalidasi rumus yang sama).
+  function groupTotal(g: ItemGroup) {
+    return computeCharges(groupNet(g), chargeSettings).total;
   }
 
   async function payItemGroup(group: ItemGroup) {

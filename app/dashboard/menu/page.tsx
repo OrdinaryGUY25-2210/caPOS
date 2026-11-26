@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, Pencil, ImagePlus, Loader2, Lock, WifiOff } from "lucide-react";
+import { Plus, Pencil, ImagePlus, Loader2, Lock, WifiOff, Wheat, Store } from "lucide-react";
 import { formatRupiah, formatNumberWithDots, stripNumberDots, cx } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
@@ -11,6 +11,7 @@ import { getTier, FREE_TIER_LIMITS, TIER_LABEL, type Tier } from "@/lib/tier";
 import { db } from "@/lib/dexie";
 import { SYNC_COMPLETE_EVENT } from "@/lib/offlineSync";
 import Modal from "@/components/Modal";
+import { useBranch } from "@/lib/branchContext";
 import type { Product } from "@/lib/types";
 import { Skeleton, SkeletonCardGrid } from "@/components/Skeleton";
 import { tenantHasNoActivity } from "@/lib/demoMode";
@@ -20,7 +21,14 @@ import { DEMO_PRODUCTS } from "@/lib/demoData";
 const CATEGORIES = ["Kopi", "Non-Kopi", "Makanan", "Dessert"];
 
 export default function MenuPage() {
+  const { branches, canSwitchBranch } = useBranch();
   const [menu, setMenu] = useState<Product[]>([]);
+  // product_id → set cabang yang TIDAK menjual menu itu (tidak ada baris = dijual di semua cabang).
+  const [hiddenAt, setHiddenAt] = useState<Map<string, Set<string>>>(new Map());
+  const [branchModalProduct, setBranchModalProduct] = useState<Product | null>(null);
+  const [branchSaving, setBranchSaving] = useState(false);
+  const activeBranches = branches.filter((b) => b.is_active);
+  const showBranchControl = canSwitchBranch && activeBranches.length > 1;
   const [tenantId, setTenantId] = useState<string | null>(null);
   const [tier, setTier] = useState<Tier>("free");
   const [loading, setLoading] = useState(true);
@@ -33,6 +41,9 @@ export default function MenuPage() {
   // + perubahan yang masih tertunda, bukan data server yang terverifikasi.
   const [isOffline, setIsOffline] = useState(false);
   const [isDemo, setIsDemo] = useState(false);
+  // null = belum dicek. Dipakai untuk mengingatkan Owner agar mengisi Bahan
+  // Baku sebelum/sambil menambah menu (resep & HPP butuh bahan baku).
+  const [ingredientCount, setIngredientCount] = useState<number | null>(null);
 
   async function loadMenu() {
     setLoading(true);
@@ -58,6 +69,24 @@ export default function MenuPage() {
       ]);
 
       if (error) throw error;
+
+      const { count: ingCount } = await supabase
+        .from("ingredients")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", profile.tenant_id)
+        .eq("status", "active");
+      setIngredientCount(ingCount ?? 0);
+
+      const { data: bpaRows } = await supabase
+        .from("branch_product_availability")
+        .select("branch_id, product_id")
+        .eq("tenant_id", profile.tenant_id)
+        .eq("is_available", false);
+      const hidden = new Map<string, Set<string>>();
+      for (const r of (bpaRows as { branch_id: string; product_id: string }[]) ?? []) {
+        hidden.set(r.product_id, (hidden.get(r.product_id) ?? new Set<string>()).add(r.branch_id));
+      }
+      setHiddenAt(hidden);
 
       const fresh = (data as Product[]) ?? [];
       setMenu(fresh);
@@ -166,6 +195,34 @@ export default function MenuPage() {
       synced: 0,
       created_at: new Date().toISOString(),
     });
+  }
+
+  /** Simpan cabang mana saja yang menjual menu ini (centang = dijual). */
+  async function saveBranchAvailability(product: Product, soldAt: Set<string>) {
+    if (!tenantId) return;
+    setBranchSaving(true);
+    const supabase = createClient();
+    const rows = activeBranches.map((b) => ({
+      tenant_id: tenantId,
+      branch_id: b.id,
+      product_id: product.id,
+      is_available: soldAt.has(b.id),
+      updated_at: new Date().toISOString(),
+    }));
+    const { error } = await supabase.from("branch_product_availability").upsert(rows, { onConflict: "branch_id,product_id" });
+    setBranchSaving(false);
+    if (error) {
+      alert("Gagal menyimpan: " + error.message + "\n(Pastikan migration_020 sudah dijalankan di Supabase.)");
+      return;
+    }
+    setHiddenAt((prev) => {
+      const next = new Map(prev);
+      const hiddenSet = new Set(activeBranches.filter((b) => !soldAt.has(b.id)).map((b) => b.id));
+      if (hiddenSet.size === 0) next.delete(product.id);
+      else next.set(product.id, hiddenSet);
+      return next;
+    });
+    setBranchModalProduct(null);
   }
 
   async function toggleAvailability(product: Product) {
@@ -308,10 +365,10 @@ export default function MenuPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-neutral-900">Kelola Menu & Stok</h1>
+          <h1 className="text-xl font-bold text-neutral-900">Daftar Menu</h1>
           {isDemo && <DemoBadge />}
           <p className="text-sm text-neutral-500">
-            Tambah, edit foto, dan atur ketersediaan menu
+            Tambah menu, ubah harga/foto, dan atur tersedia atau habis
             {tier === "free" && <> — {menu.length}/{FREE_TIER_LIMITS.maxMenu} menu terpakai (paket {TIER_LABEL.free})</>}
           </p>
         </div>
@@ -319,6 +376,21 @@ export default function MenuPage() {
           {atMenuLimit ? <Lock size={16} /> : <Plus size={16} />} Tambah Menu
         </button>
       </div>
+
+      {ingredientCount === 0 && (
+        <div className="card p-4 flex items-center justify-between gap-3 border-warning bg-warning-light">
+          <div className="flex items-start gap-3">
+            <Wheat size={18} className="text-warning shrink-0 mt-0.5" />
+            <p className="text-sm text-neutral-800">
+              <span className="font-semibold">Bahan baku belum ditambahkan.</span> Menu tetap bisa dibuat, tetapi
+              resep, HPP, dan pengurangan stok otomatis baru berfungsi setelah bahan baku diisi.
+            </p>
+          </div>
+          <Link href="/dashboard/ingredients" className="btn-primary text-sm whitespace-nowrap">
+            Tambah Bahan Baku
+          </Link>
+        </div>
+      )}
 
       {isOffline && (
         <div className="card p-4 flex items-center gap-3 border-warning bg-warning-light">
@@ -374,6 +446,19 @@ export default function MenuPage() {
             >
               {product.is_available ? "Tersedia" : "Habis / Nonaktif"}
             </button>
+
+            {showBranchControl && !isDemo && !product.id.startsWith("local-") && (
+              <button
+                onClick={() => setBranchModalProduct(product)}
+                className="mt-1.5 w-full flex items-center justify-center gap-1 text-[11px] text-neutral-500 hover:text-primary-dark py-1"
+                title="Atur cabang mana saja yang menjual menu ini"
+              >
+                <Store size={11} />
+                {(hiddenAt.get(product.id)?.size ?? 0) === 0
+                  ? "Dijual di semua cabang"
+                  : `Dijual di ${activeBranches.length - (hiddenAt.get(product.id)?.size ?? 0)} dari ${activeBranches.length} cabang`}
+              </button>
+            )}
           </div>
         ))}
         {menu.length === 0 && (
@@ -390,6 +475,17 @@ export default function MenuPage() {
           onClose={() => setShowForm(false)}
           onSave={saveProduct}
           existingCategories={Array.from(new Set(menu.map((m) => m.category).filter(Boolean)))}
+        />
+      )}
+
+      {branchModalProduct && (
+        <BranchAvailabilityModal
+          product={branchModalProduct}
+          branches={activeBranches.map((b) => ({ id: b.id, name: b.name }))}
+          hiddenBranchIds={hiddenAt.get(branchModalProduct.id) ?? new Set()}
+          saving={branchSaving}
+          onClose={() => setBranchModalProduct(null)}
+          onSave={(soldAt) => saveBranchAvailability(branchModalProduct, soldAt)}
         />
       )}
     </div>
@@ -553,6 +649,56 @@ function ProductForm({
         <datalist id="menu-category-suggestions">
           {existingCategories.map((c) => <option key={c} value={c} />)}
         </datalist>
+      </div>
+    </Modal>
+  );
+}
+
+function BranchAvailabilityModal({
+  product,
+  branches,
+  hiddenBranchIds,
+  saving,
+  onClose,
+  onSave,
+}: {
+  product: Product;
+  branches: { id: string; name: string }[];
+  hiddenBranchIds: Set<string>;
+  saving: boolean;
+  onClose: () => void;
+  onSave: (soldAt: Set<string>) => void;
+}) {
+  const [soldAt, setSoldAt] = useState<Set<string>>(new Set(branches.filter((b) => !hiddenBranchIds.has(b.id)).map((b) => b.id)));
+  const toggle = (id: string) =>
+    setSoldAt((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  return (
+    <Modal
+      title={`Dijual di cabang mana? — ${product.name}`}
+      onClose={onClose}
+      footer={
+        <button disabled={saving} onClick={() => onSave(soldAt)} className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-50">
+          {saving && <Loader2 className="animate-spin" size={16} />}
+          Simpan
+        </button>
+      }
+    >
+      <p className="text-sm text-neutral-600">
+        Hilangkan centang pada cabang yang <strong>tidak menjual</strong> menu ini. Menu akan otomatis tidak muncul di Kasir cabang itu.
+      </p>
+      <div className="space-y-1">
+        {branches.map((b) => (
+          <label key={b.id} className="flex items-center gap-2 rounded-xl border border-neutral-200 px-3 py-2 text-sm cursor-pointer hover:bg-neutral-50">
+            <input type="checkbox" checked={soldAt.has(b.id)} onChange={() => toggle(b.id)} />
+            <Store size={14} className="text-neutral-400" />
+            <span>{b.name}</span>
+          </label>
+        ))}
       </div>
     </Modal>
   );

@@ -39,7 +39,15 @@ export function getOrderTypeLabel(orderType?: ReceiptOrderType | null): string |
  * Dipakai oleh setiap tempat yang merender <Receipt/> (id="receipt-print"):
  * CheckoutSuccess, Open Bill, riwayat transaksi, dsb.
  */
-export function printReceipt(width: "58mm" | "80mm" = "80mm") {
+export type PrintTarget = "customer" | "kitchen";
+
+/**
+ * target "customer" → mencetak <Receipt/> (id="receipt-print").
+ * target "kitchen"  → mencetak <KitchenTicket/> (id="kitchen-print").
+ * Pilihan ditandai lewat body[data-print-target]; aturan @media print di
+ * globals.css hanya menampilkan elemen yang sesuai target.
+ */
+export function printReceipt(width: "58mm" | "80mm" = "80mm", target: PrintTarget = "customer") {
   if (typeof document === "undefined") return; // guard SSR
   const styleId = "dynamic-receipt-page-size";
   let styleTag = document.getElementById(styleId) as HTMLStyleElement | null;
@@ -49,7 +57,29 @@ export function printReceipt(width: "58mm" | "80mm" = "80mm") {
     document.head.appendChild(styleTag);
   }
   styleTag.textContent = `@media print { @page { size: ${width} auto; margin: 0; } }`;
+  document.body.dataset.printTarget = target;
+  const cleanup = () => {
+    delete document.body.dataset.printTarget;
+    window.removeEventListener("afterprint", cleanup);
+  };
+  window.addEventListener("afterprint", cleanup);
   window.print();
+}
+
+/**
+ * Cetak 2 lembar berurutan dari satu transaksi: struk customer, lalu tiket
+ * kitchen. Tiket kitchen dicetak setelah dialog/cetak pertama selesai
+ * (event afterprint) supaya tidak saling menimpa. Kalau browser memakai
+ * kiosk-printing (tanpa dialog), kedua lembar keluar otomatis berurutan.
+ */
+export function printCustomerAndKitchen(width: "58mm" | "80mm" = "80mm") {
+  if (typeof window === "undefined") return;
+  const onAfter = () => {
+    window.removeEventListener("afterprint", onAfter);
+    setTimeout(() => printReceipt(width, "kitchen"), 400);
+  };
+  window.addEventListener("afterprint", onAfter);
+  printReceipt(width, "customer");
 }
 
 export interface ReceiptTotals {

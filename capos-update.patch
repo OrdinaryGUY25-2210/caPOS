@@ -1,0 +1,4080 @@
+diff --git a/app/dashboard/ingredients/page.tsx b/app/dashboard/ingredients/page.tsx
+index 14977a9..93d569f 100644
+--- a/app/dashboard/ingredients/page.tsx
++++ b/app/dashboard/ingredients/page.tsx
+@@ -1,6 +1,7 @@
+ "use client";
+ 
+ import { useEffect, useMemo, useState } from "react";
++import { INGREDIENT_TEMPLATES } from "@/lib/ingredientTemplates";
+ import { Wheat, Search, Plus, Pencil, PackagePlus, AlertTriangle, Loader2, Ban, CheckCircle2 } from "lucide-react";
+ import { formatRupiah, formatNumberWithDots, stripNumberDots, cx } from "@/lib/utils";
+ import { createClient } from "@/lib/supabase/client";
+@@ -35,9 +36,11 @@ interface StockRow {
+ }
+ 
+ export default function IngredientsPage() {
+-  const { selectedBranchId, selectedBranch, canSwitchBranch } = useBranch();
++  const { selectedBranchId, selectedBranch, canSwitchBranch, branches } = useBranch();
+   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+   const [units, setUnits] = useState<Unit[]>([]);
++  const [showTemplates, setShowTemplates] = useState(false);
++  const [templateBusy, setTemplateBusy] = useState(false);
+   const [stockMap, setStockMap] = useState<Map<string, StockRow[]>>(new Map());
+   const [loading, setLoading] = useState(true);
+   const [role, setRole] = useState<string>("owner");
+@@ -155,7 +158,79 @@ export default function IngredientsPage() {
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, [ingredients, stockMap, selectedBranchId]);
+ 
+-  async function saveIngredient(payload: Partial<Ingredient> & { name: string; purchase_unit: string; inventory_unit: string }) {
++  /** Tambahkan bahan dari template; nama yang sudah ada dilewati (tidak dobel). */
++  async function applyTemplate(packId: string) {
++    const pack = INGREDIENT_TEMPLATES.find((p) => p.id === packId);
++    if (!pack) return;
++    setTemplateBusy(true);
++    try {
++      const { profile } = await getCurrentProfile();
++      if (!profile) return;
++      const supabase = createClient();
++      const existing = new Set(ingredients.map((i) => i.name.trim().toLowerCase()));
++      const unitCodes = new Set(units.map((u) => u.code));
++      const rows = pack.items
++        .filter((it) => !existing.has(it.name.toLowerCase()) && unitCodes.has(it.unit))
++        .map((it) => ({
++          tenant_id: profile.tenant_id,
++          name: it.name,
++          category: it.category,
++          purchase_unit: it.unit,
++          inventory_unit: it.unit,
++          purchase_to_inventory_ratio: null,
++          low_stock_threshold: 0,
++          status: "active",
++          is_86: false,
++        }));
++      if (rows.length === 0) {
++        alert("Semua bahan di template ini sudah ada di daftar Anda.");
++        return;
++      }
++      const { error } = await supabase.from("ingredients").insert(rows);
++      if (error) {
++        alert("Gagal menambahkan template: " + error.message);
++        return;
++      }
++      setShowTemplates(false);
++      await loadAll();
++      alert(`${rows.length} bahan ditambahkan. Sekarang isi harga belinya (klik ikon pensil) supaya HPP menu terhitung.`);
++    } finally {
++      setTemplateBusy(false);
++    }
++  }
++
++  /**
++   * Simpan harga per satuan (cost_price) bahan ke branch_ingredients_stock.
++   * Owner: harga yang sama dipasang ke semua cabang. Manager: cabangnya saja
++   * (sesuai RLS). HPP resep dihitung dari kolom ini oleh calculate_recipe_cost().
++   */
++  async function applyCost(ingredientId: string, tenantId: string, costPerUnit: number, onlyBranchId?: string) {
++    const supabase = createClient();
++    const targetBranches =
++      onlyBranchId
++        ? [onlyBranchId]
++        : role === "owner" || role === "super_admin"
++          ? branches.map((b) => b.id)
++          : selectedBranchId !== ALL_BRANCHES
++            ? [selectedBranchId]
++            : [];
++    if (targetBranches.length === 0) return null;
++    const { error } = await supabase.from("branch_ingredients_stock").upsert(
++      targetBranches.map((branchId) => ({
++        tenant_id: tenantId,
++        branch_id: branchId,
++        ingredient_id: ingredientId,
++        cost_price: costPerUnit,
++      })),
++      { onConflict: "branch_id,ingredient_id" }
++    );
++    return error;
++  }
++
++  async function saveIngredient(
++    payload: Partial<Ingredient> & { name: string; purchase_unit: string; inventory_unit: string },
++    extra?: { costPerUnit: number | null; initialStock: number }
++  ) {
+     setSaving(true);
+     const { profile } = await getCurrentProfile();
+     if (!profile) {
+@@ -179,7 +254,8 @@ export default function IngredientsPage() {
+         })
+         .eq("id", payload.id));
+     } else {
+-      ({ error } = await supabase.from("ingredients").insert({
++      let newId: string | null = null;
++      const res = await supabase.from("ingredients").insert({
+         tenant_id: profile.tenant_id,
+         name: payload.name,
+         category: payload.category ?? null,
+@@ -189,7 +265,29 @@ export default function IngredientsPage() {
+         low_stock_threshold: payload.low_stock_threshold ?? 0,
+         status: "active",
+         is_86: false,
+-      }));
++      }).select("id").single();
++      error = res.error;
++      newId = (res.data as { id: string } | null)?.id ?? null;
++      if (!error && newId) {
++        if (extra?.costPerUnit && extra.costPerUnit > 0) {
++          const costErr = await applyCost(newId, profile.tenant_id, extra.costPerUnit);
++          if (costErr) alert("Bahan tersimpan, tapi harga gagal disimpan: " + costErr.message);
++        }
++        if (extra && extra.initialStock > 0 && selectedBranchId !== ALL_BRANCHES) {
++          const { error: stockErr } = await supabase.rpc("adjust_ingredient_stock", {
++            p_ingredient_id: newId,
++            p_branch_id: selectedBranchId,
++            p_qty_change: extra.initialStock,
++            p_type: "PURCHASE",
++            p_note: "Stok awal",
++          });
++          if (stockErr) alert("Bahan tersimpan, tapi stok awal gagal disimpan: " + stockErr.message);
++        }
++      }
++    }
++    if (payload.id && !error && extra?.costPerUnit && extra.costPerUnit > 0) {
++      const costErr = await applyCost(payload.id, profile.tenant_id, extra.costPerUnit);
++      if (costErr) alert("Perubahan tersimpan, tapi harga gagal disimpan: " + costErr.message);
+     }
+     setSaving(false);
+     if (error) {
+@@ -224,7 +322,7 @@ export default function IngredientsPage() {
+     loadAll();
+   }
+ 
+-  async function doAdjustStock(ing: Ingredient, qty: number, note: string) {
++  async function doAdjustStock(ing: Ingredient, qty: number, note: string, totalPrice?: number) {
+     if (!qty || qty === 0) return;
+     if (isConsolidated) {
+       alert("Pilih 1 cabang dulu di kanan atas untuk menyesuaikan stok bahan.");
+@@ -232,6 +330,9 @@ export default function IngredientsPage() {
+     }
+     setSaving(true);
+     const supabase = createClient();
++    // Harga rata-rata tertimbang: dihitung SEBELUM stok diubah.
++    const before = branchStockFor(ing.id, ing.low_stock_threshold).qty;
++    const beforeCost = costFor(ing.id);
+     const { error } = await supabase.rpc("adjust_ingredient_stock", {
+       p_ingredient_id: ing.id,
+       p_branch_id: selectedBranchId,
+@@ -239,6 +340,14 @@ export default function IngredientsPage() {
+       p_type: qty > 0 ? "PURCHASE" : "WASTE",
+       p_note: note || (qty > 0 ? "Restock manual bahan baku" : "Penyesuaian pengurangan manual"),
+     });
++    if (!error && qty > 0 && totalPrice && totalPrice > 0) {
++      const newCost = before > 0 ? (before * beforeCost + totalPrice) / (before + qty) : totalPrice / qty;
++      const { profile } = await getCurrentProfile();
++      if (profile) {
++        const costErr = await applyCost(ing.id, profile.tenant_id, Math.round(newCost * 100) / 100, selectedBranchId as string);
++        if (costErr) alert("Stok bertambah, tapi harga gagal diperbarui: " + costErr.message);
++      }
++    }
+     setSaving(false);
+     if (error) {
+       alert("Gagal menyesuaikan stok: " + error.message);
+@@ -275,18 +384,23 @@ export default function IngredientsPage() {
+       <div className="flex flex-wrap items-center justify-between gap-3">
+         <div>
+           <h1 className="text-xl font-bold text-neutral-900 flex items-center gap-2">
+-            <Wheat size={20} className="text-primary-dark" /> Bahan Baku (Ingredients)
++            <Wheat size={20} className="text-primary-dark" /> Bahan Baku & Harga Beli
+           </h1>
+           {isDemo && <DemoBadge />}
+           <p className="text-sm text-neutral-500">
+-            Master bahan baku dasar untuk resep — stok tercatat per cabang
+-            {canSwitchBranch && !isConsolidated && selectedBranch ? ` (${selectedBranch.name})` : ""}.
++            Daftar bahan untuk resep. Isi nama, satuan, harga beli, dan stok awal sekali saja — HPP menu dihitung otomatis dari harga ini
++            {canSwitchBranch && !isConsolidated && selectedBranch ? ` (stok cabang ${selectedBranch.name})` : ""}.
+           </p>
+         </div>
+         {canWrite && (
+-          <button onClick={() => setEditing("new")} className="btn-primary flex items-center gap-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+-            <Plus size={16} /> Tambah Bahan
+-          </button>
++          <div className="flex items-center gap-2">
++            <button onClick={() => setShowTemplates(true)} className="btn-outline flex items-center gap-1.5 text-sm">
++              <Wheat size={16} /> Pakai Template
++            </button>
++            <button onClick={() => setEditing("new")} className="btn-primary flex items-center gap-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
++              <Plus size={16} /> Tambah Bahan
++            </button>
++          </div>
+         )}
+       </div>
+ 
+@@ -308,7 +422,7 @@ export default function IngredientsPage() {
+ 
+       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+         <div className="card p-5">
+-          <p className="text-sm text-neutral-500">Nilai Inventori Bahan (stok × HPP)</p>
++          <p className="text-sm text-neutral-500">Nilai Stok Bahan (stok × harga)</p>
+           <p className="text-2xl font-bold text-neutral-900 mt-1">{formatRupiah(inventoryValue)}</p>
+         </div>
+         <div className="card p-5">
+@@ -351,7 +465,7 @@ export default function IngredientsPage() {
+               <th className="p-3 font-medium">Kategori</th>
+               <th className="p-3 font-medium">Unit</th>
+               <th className="p-3 font-medium">Stok Cabang</th>
+-              <th className="p-3 font-medium">HPP / unit</th>
++              <th className="p-3 font-medium">Harga / satuan</th>
+               <th className="p-3 font-medium">Status</th>
+               <th className="p-3 font-medium"></th>
+             </tr>
+@@ -374,7 +488,13 @@ export default function IngredientsPage() {
+                       {qty} {ing.inventory_unit}
+                     </span>
+                   </td>
+-                  <td className="p-3">{formatRupiah(costFor(ing.id))}</td>
++                  <td className="p-3">
++                    {costFor(ing.id) > 0 ? (
++                      formatRupiah(costFor(ing.id))
++                    ) : (
++                      <span className="text-warning text-xs font-medium">Harga belum diisi</span>
++                    )}
++                  </td>
+                   <td className="p-3">
+                     <span className={ing.status === "active" ? "badge-active" : "bg-neutral-100 text-neutral-500 text-xs font-medium px-2 py-0.5 rounded-full"}>
+                       {ing.status === "active" ? "Aktif" : "Diarsipkan"}
+@@ -387,7 +507,7 @@ export default function IngredientsPage() {
+                           onClick={() => setRestocking(ing)}
+                           disabled={isConsolidated}
+                           className="text-primary-dark hover:bg-primary-light rounded-lg p-1.5 mr-1 disabled:opacity-30"
+-                          title="Sesuaikan Stok"
++                          title="Tambah stok / catat belanja"
+                         >
+                           <PackagePlus size={16} />
+                         </button>
+@@ -434,13 +554,45 @@ export default function IngredientsPage() {
+           ingredient={editing === "new" ? null : editing}
+           units={units}
+           saving={saving}
++          currentCost={editing === "new" ? 0 : costFor(editing.id)}
++          canSetStock={!isConsolidated}
+           onClose={() => setEditing(null)}
+           onSave={saveIngredient}
+         />
+       )}
+ 
++      {showTemplates && (
++        <Modal title="Template Bahan Baku" onClose={() => setShowTemplates(false)}>
++          <p className="text-sm text-neutral-600">
++            Pilih jenis usaha. Bahan umum langsung ditambahkan (tanpa harga), lalu Anda tinggal mengisi harga beli. Bahan yang namanya sudah ada tidak akan dobel.
++          </p>
++          <div className="space-y-2">
++            {INGREDIENT_TEMPLATES.map((pack) => (
++              <button
++                key={pack.id}
++                disabled={templateBusy}
++                onClick={() => applyTemplate(pack.id)}
++                className="w-full text-left rounded-xl border border-neutral-200 p-3 hover:bg-neutral-50 disabled:opacity-50"
++              >
++                <p className="text-sm font-semibold text-neutral-900">
++                  {pack.label} <span className="text-xs font-normal text-neutral-400">· {pack.items.length} bahan</span>
++                </p>
++                <p className="text-xs text-neutral-500">{pack.description}</p>
++              </button>
++            ))}
++          </div>
++        </Modal>
++      )}
++
+       {restocking && (
+-        <AdjustStockModal ingredient={restocking} saving={saving} onClose={() => setRestocking(null)} onSubmit={doAdjustStock} />
++        <AdjustStockModal
++          ingredient={restocking}
++          saving={saving}
++          currentQty={branchStockFor(restocking.id, restocking.low_stock_threshold).qty}
++          currentCost={costFor(restocking.id)}
++          onClose={() => setRestocking(null)}
++          onSubmit={doAdjustStock}
++        />
+       )}
+ 
+       {archiveTarget && (
+@@ -462,23 +614,43 @@ function IngredientModal({
+   ingredient,
+   units,
+   saving,
++  currentCost,
++  canSetStock,
+   onClose,
+   onSave,
+ }: {
+   ingredient: Ingredient | null;
+   units: Unit[];
+   saving: boolean;
++  currentCost: number;
++  canSetStock: boolean;
+   onClose: () => void;
+-  onSave: (payload: Partial<Ingredient> & { name: string; purchase_unit: string; inventory_unit: string }) => void;
++  onSave: (
++    payload: Partial<Ingredient> & { name: string; purchase_unit: string; inventory_unit: string },
++    extra?: { costPerUnit: number | null; initialStock: number }
++  ) => void;
+ }) {
++  const isNew = !ingredient;
+   const [name, setName] = useState(ingredient?.name ?? "");
++  // Satuan pakai = satuan yang dipakai di resep & stok (mis. gram, ml, pcs).
++  const [inventoryUnit, setInventoryUnit] = useState(ingredient?.inventory_unit ?? units[0]?.code ?? "");
++  // "Beli seharga Rp X untuk Y satuan" — cara paling gampang mengisi harga,
++  // tanpa perlu paham konversi unit. Harga per satuan = X / Y.
++  const [priceInput, setPriceInput] = useState(currentCost > 0 ? String(currentCost) : "");
++  const [priceQtyInput, setPriceQtyInput] = useState("1");
++  const [initialStockInput, setInitialStockInput] = useState("");
+   const [category, setCategory] = useState(ingredient?.category ?? "");
+   const [purchaseUnit, setPurchaseUnit] = useState(ingredient?.purchase_unit ?? units[0]?.code ?? "");
+-  const [inventoryUnit, setInventoryUnit] = useState(ingredient?.inventory_unit ?? units[0]?.code ?? "");
+   const [ratioInput, setRatioInput] = useState(ingredient?.purchase_to_inventory_ratio ? String(ingredient.purchase_to_inventory_ratio) : "");
+   const [thresholdInput, setThresholdInput] = useState(String(ingredient?.low_stock_threshold ?? 0));
++  const advancedDefault = !!ingredient && (ingredient.purchase_unit !== ingredient.inventory_unit || !!ingredient.purchase_to_inventory_ratio);
++  const [showAdvanced, setShowAdvanced] = useState(advancedDefault);
+ 
+-  const canSubmit = name.trim() && purchaseUnit && inventoryUnit;
++  const price = priceInput === "" ? 0 : Number(stripNumberDots(priceInput));
++  const priceQty = priceQtyInput === "" ? 0 : Number(priceQtyInput);
++  const costPerUnit = price > 0 && priceQty > 0 ? price / priceQty : null;
++  const unitName = units.find((u) => u.code === inventoryUnit)?.name ?? inventoryUnit;
++  const canSubmit = name.trim() && inventoryUnit;
+ 
+   return (
+     <Modal
+@@ -488,22 +660,29 @@ function IngredientModal({
+         <button
+           disabled={saving || !canSubmit}
+           onClick={() =>
+-            onSave({
+-              id: ingredient?.id,
+-              name: name.trim(),
+-              category: category.trim() || null,
+-              purchase_unit: purchaseUnit,
+-              inventory_unit: inventoryUnit,
+-              purchase_to_inventory_ratio: ratioInput ? Number(ratioInput) : null,
+-              low_stock_threshold: thresholdInput === "" ? 0 : Number(thresholdInput),
+-              status: ingredient?.status,
+-              is_86: ingredient?.is_86,
+-            })
++            onSave(
++              {
++                id: ingredient?.id,
++                name: name.trim(),
++                category: category.trim() || null,
++                // Mode sederhana: satuan beli = satuan pakai (tanpa konversi).
++                purchase_unit: showAdvanced ? purchaseUnit : inventoryUnit,
++                inventory_unit: inventoryUnit,
++                purchase_to_inventory_ratio: showAdvanced && ratioInput ? Number(ratioInput) : null,
++                low_stock_threshold: thresholdInput === "" ? 0 : Number(thresholdInput),
++                status: ingredient?.status,
++                is_86: ingredient?.is_86,
++              },
++              {
++                costPerUnit: costPerUnit ? Math.round(costPerUnit * 100) / 100 : null,
++                initialStock: initialStockInput === "" ? 0 : Number(initialStockInput),
++              }
++            )
+           }
+           className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-50"
+         >
+           {saving && <Loader2 className="animate-spin" size={16} />}
+-          Simpan
++          {isNew ? "Simpan Bahan" : "Simpan Perubahan"}
+         </button>
+       }
+     >
+@@ -511,49 +690,106 @@ function IngredientModal({
+         <label className="text-sm font-medium text-neutral-700 mb-1 block">Nama Bahan</label>
+         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Contoh: Biji Kopi Arabika" className="input-field" />
+       </div>
++
+       <div>
+-        <label className="text-sm font-medium text-neutral-700 mb-1 block">Kategori (opsional)</label>
+-        <input value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Contoh: food, beverage, packaging" className="input-field" />
++        <label className="text-sm font-medium text-neutral-700 mb-1 block">Satuan yang dipakai di resep</label>
++        <select value={inventoryUnit} onChange={(e) => setInventoryUnit(e.target.value)} className="input-field">
++          {units.map((u) => (
++            <option key={u.code} value={u.code}>
++              {u.name}
++            </option>
++          ))}
++        </select>
++        <p className="text-xs text-neutral-400 mt-1">Pilih satuan terkecil yang Anda takar, mis. gram untuk kopi, ml untuk susu, pcs untuk cup.</p>
+       </div>
+-      <div className="grid grid-cols-2 gap-3">
+-        <div>
+-          <label className="text-sm font-medium text-neutral-700 mb-1 block">Unit Beli</label>
+-          <select value={purchaseUnit} onChange={(e) => setPurchaseUnit(e.target.value)} className="input-field">
+-            {units.map((u) => (
+-              <option key={u.code} value={u.code}>
+-                {u.name}
+-              </option>
+-            ))}
+-          </select>
++
++      <div className="rounded-xl bg-neutral-50 p-3 space-y-2">
++        <p className="text-sm font-medium text-neutral-700">Harga beli (untuk hitung HPP otomatis)</p>
++        <div className="flex flex-wrap items-center gap-2 text-sm text-neutral-600">
++          <span>Beli seharga Rp</span>
++          <input
++            type="text"
++            inputMode="numeric"
++            value={formatNumberWithDots(priceInput)}
++            onChange={(e) => setPriceInput(stripNumberDots(e.target.value).replace(/[^0-9]/g, ""))}
++            placeholder="150.000"
++            className="input-field w-32"
++          />
++          <span>untuk</span>
++          <input
++            type="text"
++            inputMode="decimal"
++            value={priceQtyInput}
++            onChange={(e) => setPriceQtyInput(e.target.value.replace(/[^0-9.]/g, ""))}
++            className="input-field w-20"
++          />
++          <span>{unitName}</span>
+         </div>
++        {costPerUnit ? (
++          <p className="text-xs text-primary-dark font-medium">
++            = {formatRupiah(costPerUnit)} per {unitName}. Harga ini dipakai untuk menghitung HPP menu.
++          </p>
++        ) : (
++          <p className="text-xs text-neutral-400">Contoh: kopi 1 kg seharga Rp 150.000 → isi 150.000 untuk 1000 gram.</p>
++        )}
++      </div>
++
++      {isNew && (
+         <div>
+-          <label className="text-sm font-medium text-neutral-700 mb-1 block">Unit Stok (dasar)</label>
+-          <select value={inventoryUnit} onChange={(e) => setInventoryUnit(e.target.value)} className="input-field">
+-            {units.map((u) => (
+-              <option key={u.code} value={u.code}>
+-                {u.name}
+-              </option>
+-            ))}
+-          </select>
++          <label className="text-sm font-medium text-neutral-700 mb-1 block">Stok awal ({unitName}) — opsional</label>
++          <input
++            type="text"
++            inputMode="decimal"
++            value={initialStockInput}
++            onChange={(e) => setInitialStockInput(e.target.value.replace(/[^0-9.]/g, ""))}
++            placeholder="Contoh: 5000"
++            disabled={!canSetStock}
++            className="input-field disabled:opacity-50"
++          />
++          {!canSetStock && (
++            <p className="text-xs text-neutral-400 mt-1">Pilih 1 cabang di kanan atas dulu kalau mau mengisi stok awal, atau isi nanti lewat tombol tambah stok.</p>
++          )}
+         </div>
+-      </div>
+-      <div>
+-        <label className="text-sm font-medium text-neutral-700 mb-1 block">Rasio Konversi Manual (opsional)</label>
+-        <input
+-          type="text"
+-          inputMode="decimal"
+-          value={ratioInput}
+-          onChange={(e) => setRatioInput(e.target.value.replace(/[^0-9.]/g, ""))}
+-          placeholder="Kosongkan jika pakai konversi unit standar"
+-          className="input-field"
+-        />
+-        <p className="text-xs text-neutral-400 mt-1">
+-          Isi HANYA kalau rasio beli↔stok bahan ini beda dari konversi unit standar (mis. supplier tertentu jual &quot;1 box = 24 pcs&quot;).
+-          Kalau kosong, sistem pakai tabel konversi unit yang sudah ada.
+-        </p>
+-      </div>
++      )}
++
++      <button type="button" onClick={() => setShowAdvanced((v) => !v)} className="text-xs text-primary-dark font-medium">
++        {showAdvanced ? "Sembunyikan pengaturan lanjutan" : "Pengaturan lanjutan (kategori, satuan beli berbeda, batas stok menipis)"}
++      </button>
++
++      {showAdvanced && (
++        <div className="space-y-3 border-t border-neutral-100 pt-3">
++          <div>
++            <label className="text-sm font-medium text-neutral-700 mb-1 block">Kategori (opsional)</label>
++            <input value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Contoh: food, beverage, packaging" className="input-field" />
++          </div>
++          <div>
++            <label className="text-sm font-medium text-neutral-700 mb-1 block">Satuan beli (kalau beda dengan satuan resep)</label>
++            <select value={purchaseUnit} onChange={(e) => setPurchaseUnit(e.target.value)} className="input-field">
++              {units.map((u) => (
++                <option key={u.code} value={u.code}>
++                  {u.name}
++                </option>
++              ))}
++            </select>
++          </div>
++          <div>
++            <label className="text-sm font-medium text-neutral-700 mb-1 block">Rasio konversi manual (opsional)</label>
++            <input
++              type="text"
++              inputMode="decimal"
++              value={ratioInput}
++              onChange={(e) => setRatioInput(e.target.value.replace(/[^0-9.]/g, ""))}
++              placeholder="Kosongkan jika pakai konversi unit standar"
++              className="input-field"
++            />
++            <p className="text-xs text-neutral-400 mt-1">
++              Isi hanya kalau 1 satuan beli isinya tidak standar (mis. 1 box = 24 pcs).
++            </p>
++          </div>
++        </div>
++      )}
+       <div>
+-        <label className="text-sm font-medium text-neutral-700 mb-1 block">Batas Stok Menipis</label>
++        <label className="text-sm font-medium text-neutral-700 mb-1 block">Ingatkan saya kalau stok tinggal</label>
+         <input
+           type="text"
+           inputMode="numeric"
+@@ -569,32 +805,44 @@ function IngredientModal({
+ function AdjustStockModal({
+   ingredient,
+   saving,
++  currentQty,
++  currentCost,
+   onClose,
+   onSubmit,
+ }: {
+   ingredient: Ingredient;
+   saving: boolean;
++  currentQty: number;
++  currentCost: number;
+   onClose: () => void;
+-  onSubmit: (ing: Ingredient, qty: number, note: string) => void;
++  onSubmit: (ing: Ingredient, qty: number, note: string, totalPrice?: number) => void;
+ }) {
+   const [qtyInput, setQtyInput] = useState("");
+   const [direction, setDirection] = useState<"in" | "out">("in");
+   const [note, setNote] = useState("");
++  const [totalPriceInput, setTotalPriceInput] = useState("");
+   const rawQty = qtyInput === "" ? 0 : Number(qtyInput);
+   const signedQty = direction === "in" ? rawQty : -rawQty;
++  const totalPrice = totalPriceInput === "" ? 0 : Number(stripNumberDots(totalPriceInput));
++  const newCost =
++    direction === "in" && rawQty > 0 && totalPrice > 0
++      ? currentQty > 0
++        ? (currentQty * currentCost + totalPrice) / (currentQty + rawQty)
++        : totalPrice / rawQty
++      : null;
+ 
+   return (
+     <Modal
+-      title={`Sesuaikan Stok — ${ingredient.name}`}
++      title={`Tambah / Kurangi Stok — ${ingredient.name}`}
+       onClose={onClose}
+       footer={
+         <button
+           disabled={saving || rawQty <= 0}
+-          onClick={() => onSubmit(ingredient, signedQty, note)}
++          onClick={() => onSubmit(ingredient, signedQty, note, direction === "in" ? totalPrice : undefined)}
+           className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-50"
+         >
+           {saving && <Loader2 className="animate-spin" size={16} />}
+-          Simpan Penyesuaian
++          Simpan
+         </button>
+       }
+     >
+@@ -603,13 +851,13 @@ function AdjustStockModal({
+           onClick={() => setDirection("in")}
+           className={cx("flex-1 rounded-xl py-2 text-sm font-medium border", direction === "in" ? "border-primary-dark bg-primary-light text-primary-dark" : "border-neutral-200 text-neutral-500")}
+         >
+-          Tambah Stok (Restock)
++          Belanja / Tambah Stok
+         </button>
+         <button
+           onClick={() => setDirection("out")}
+           className={cx("flex-1 rounded-xl py-2 text-sm font-medium border", direction === "out" ? "border-urgent bg-urgent-light text-urgent" : "border-neutral-200 text-neutral-500")}
+         >
+-          Kurangi (Waste/Rusak)
++          Kurangi (Rusak/Terbuang)
+         </button>
+       </div>
+       <div>
+@@ -623,6 +871,24 @@ function AdjustStockModal({
+           className="input-field"
+         />
+       </div>
++      {direction === "in" && (
++        <div>
++          <label className="text-sm font-medium text-neutral-700 mb-1 block">Total harga belanja ini (Rp) — opsional</label>
++          <input
++            type="text"
++            inputMode="numeric"
++            value={formatNumberWithDots(totalPriceInput)}
++            onChange={(e) => setTotalPriceInput(stripNumberDots(e.target.value).replace(/[^0-9]/g, ""))}
++            placeholder="Contoh: 150.000"
++            className="input-field"
++          />
++          <p className="text-xs text-neutral-400 mt-1">
++            {newCost
++              ? `Harga rata-rata baru: ${formatRupiah(newCost)} per ${ingredient.inventory_unit} (otomatis dipakai untuk HPP).`
++              : "Isi supaya harga bahan & HPP menu ikut terbarui otomatis."}
++          </p>
++        </div>
++      )}
+       <div>
+         <label className="text-sm font-medium text-neutral-700 mb-1 block">Catatan</label>
+         <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Contoh: Beli dari supplier A" className="input-field" />
+diff --git a/app/dashboard/laporan-pdf/page.tsx b/app/dashboard/laporan-pdf/page.tsx
+index 7047435..4cd29d1 100644
+--- a/app/dashboard/laporan-pdf/page.tsx
++++ b/app/dashboard/laporan-pdf/page.tsx
+@@ -1,11 +1,12 @@
+ "use client";
+ 
+ import { useEffect, useState } from "react";
++import type { ReportType } from "@/lib/reportPdf";
+ import { FileText, Download, Loader2, CalendarRange } from "lucide-react";
+ import { formatRupiah, cx } from "@/lib/utils";
+ import { createClient } from "@/lib/supabase/client";
+ import { getCurrentProfile } from "@/lib/getCurrentProfile";
+-import { getTier, HISTORY_DAYS_LIMIT, type Tier } from "@/lib/tier";
++import { getTier, HISTORY_DAYS_LIMIT, FREE_TIER_LIMITS, type Tier } from "@/lib/tier";
+ import { useBranch, ALL_BRANCHES } from "@/lib/branchContext";
+ import { Skeleton } from "@/components/Skeleton";
+ import { tenantHasNoActivity } from "@/lib/demoMode";
+@@ -40,7 +41,7 @@ function rangeToDates(range: RangeKey, customStart: string, customEnd: string) {
+ }
+ 
+ export default function LaporanPdfPage() {
+-  const { selectedBranchId, selectedBranch, canSwitchBranch } = useBranch();
++  const { selectedBranchId, canSwitchBranch, branches } = useBranch();
+   const [loading, setLoading] = useState(true);
+   const [generating, setGenerating] = useState(false);
+   const [tier, setTier] = useState<Tier>("free");
+@@ -51,6 +52,11 @@ export default function LaporanPdfPage() {
+   const [tenantId, setTenantId] = useState<string | null>(null);
+   const [minDate, setMinDate] = useState<string | null>(null);
+   const [isDemo, setIsDemo] = useState(false);
++  const [reportType, setReportType] = useState<ReportType>("full");
++  // Free Trial: export hanya 1 hari (hari ini). Dipaksa di sini, bukan cuma
++  // disembunyikan di UI, supaya state "range" tidak bisa lolos ke query.
++  const isFree = tier === "free";
++  const effectiveRange: RangeKey = isFree ? "today" : range;
+ 
+   useEffect(() => {
+     (async () => {
+@@ -88,224 +94,21 @@ export default function LaporanPdfPage() {
+     if (!tenantId) return;
+     setGenerating(true);
+     try {
+-      const supabase = createClient();
+-      const { start, end } = rangeToDates(range, customStart, customEnd);
+-
+-      const [{ data: txRows }, { data: itemRows }, { data: opnameRows }] = await Promise.all([
+-        (() => {
+-          let q = supabase
+-            .from("transactions")
+-            .select("id, total_amount, payment_method, created_at, cashier_id, profiles(full_name)")
+-            .eq("tenant_id", tenantId)
+-            .gte("created_at", start.toISOString())
+-            .lte("created_at", end.toISOString())
+-            .limit(10000);
+-          if (selectedBranchId !== ALL_BRANCHES) q = q.eq("branch_id", selectedBranchId);
+-          return q;
+-        })(),
+-        (() => {
+-          let q = supabase
+-            .from("transaction_items")
+-            .select("qty, subtotal, product_id, products(name, cost_price), transactions!inner(created_at, tenant_id, branch_id)")
+-            .eq("transactions.tenant_id", tenantId)
+-            .gte("transactions.created_at", start.toISOString())
+-            .lte("transactions.created_at", end.toISOString())
+-            .limit(10000);
+-          if (selectedBranchId !== ALL_BRANCHES) q = q.eq("transactions.branch_id", selectedBranchId);
+-          return q;
+-        })(),
+-        // Kerugian stok opname (migration_011) periode yang sama — dipotong
+-        // dari laba kotor supaya "Keuntungan Bersih" di laporan benar-benar
+-        // memperhitungkan bahan basi/rusak/selisih, bukan cuma omzet-HPP.
+-        (() => {
+-          let q = supabase
+-            .from("stock_opname_logs")
+-            .select("loss_value")
+-            .eq("tenant_id", tenantId)
+-            .gte("created_at", start.toISOString())
+-            .lte("created_at", end.toISOString())
+-            .limit(10000);
+-          if (selectedBranchId !== ALL_BRANCHES) q = q.eq("branch_id", selectedBranchId);
+-          return q;
+-        })(),
+-      ]);
+-
+-      const transactions = isDemo ? DEMO_REPORT_TX : (txRows ?? []);
+-      const items = isDemo ? DEMO_REPORT_ITEMS : (itemRows ?? []);
+-      const totalOpnameLoss = (isDemo ? DEMO_REPORT_OPNAME : (opnameRows ?? [])).reduce((s: number, r: any) => s + Number(r.loss_value), 0);
+-
+-      // --- Ringkasan ---
+-      const totalOmzet = transactions.reduce((s: number, t: any) => s + Number(t.total_amount), 0);
+-      const totalOrders = transactions.length;
+-      const avgPerOrder = totalOrders > 0 ? Math.round(totalOmzet / totalOrders) : 0;
+-      const totalHpp = items.reduce((s: number, it: any) => s + Number(it.qty) * Number(it.products?.cost_price ?? 0), 0);
+-      const grossProfit = totalOmzet - totalHpp;
+-      const netProfit = grossProfit - totalOpnameLoss;
+-
+-      // --- Omzet harian ---
+-      const dailyMap = new Map<string, { orders: number; revenue: number }>();
+-      for (const t of transactions as any[]) {
+-        const day = new Date(t.created_at).toISOString().slice(0, 10);
+-        const e = dailyMap.get(day) ?? { orders: 0, revenue: 0 };
+-        e.orders += 1;
+-        e.revenue += Number(t.total_amount);
+-        dailyMap.set(day, e);
+-      }
+-      const dailyRows = Array.from(dailyMap.entries())
+-        .sort(([a], [b]) => a.localeCompare(b))
+-        .map(([day, v]) => [day, String(v.orders), formatRupiah(v.revenue)]);
+-
+-      // --- Menu terlaris ---
+-      const productMap = new Map<string, { qty: number; revenue: number }>();
+-      for (const it of items as any[]) {
+-        const name = it.products?.name ?? "Produk";
+-        const e = productMap.get(name) ?? { qty: 0, revenue: 0 };
+-        e.qty += Number(it.qty);
+-        e.revenue += Number(it.subtotal);
+-        productMap.set(name, e);
+-      }
+-      const topProducts = Array.from(productMap.entries())
+-        .sort(([, a], [, b]) => b.qty - a.qty)
+-        .slice(0, 10)
+-        .map(([name, v]) => [name, String(v.qty), formatRupiah(v.revenue)]);
+-
+-      // --- Metode pembayaran ---
+-      const paymentMap = new Map<string, { count: number; revenue: number }>();
+-      for (const t of transactions as any[]) {
+-        const method = (t.payment_method ?? "cash").toUpperCase();
+-        const e = paymentMap.get(method) ?? { count: 0, revenue: 0 };
+-        e.count += 1;
+-        e.revenue += Number(t.total_amount);
+-        paymentMap.set(method, e);
+-      }
+-      const paymentRows = Array.from(paymentMap.entries()).map(([method, v]) => [
+-        method, String(v.count), formatRupiah(v.revenue),
+-      ]);
+-
+-      // --- Kinerja kasir ---
+-      const cashierMap = new Map<string, { orders: number; revenue: number }>();
+-      for (const t of transactions as any[]) {
+-        const name = t.profiles?.full_name ?? "Kasir";
+-        const e = cashierMap.get(name) ?? { orders: 0, revenue: 0 };
+-        e.orders += 1;
+-        e.revenue += Number(t.total_amount);
+-        cashierMap.set(name, e);
+-      }
+-      const cashierRows = Array.from(cashierMap.entries())
+-        .sort(([, a], [, b]) => b.revenue - a.revenue)
+-        .map(([name, v]) => [name, String(v.orders), formatRupiah(v.revenue)]);
+-
+-      const { default: jsPDF } = await import("jspdf");
+-      const { default: autoTable } = await import("jspdf-autotable");
+-
+-      const doc = new jsPDF({ unit: "pt", format: "a4" });
+-      const pageWidth = doc.internal.pageSize.getWidth();
+-      const margin = 40;
+-      let y = 50;
+-
+-      doc.setFontSize(16);
+-      doc.setFont("helvetica", "bold");
+-      doc.text(cafeName, margin, y);
+-      y += 20;
+-      doc.setFontSize(11);
+-      doc.setFont("helvetica", "normal");
+-      doc.text("Laporan Penjualan Otomatis — caPOS", margin, y);
+-      y += 16;
+-      doc.setFontSize(9);
+-      doc.setTextColor(100);
+-      doc.text(
+-        `Periode: ${toISODate(start)} s/d ${toISODate(end)}  ·  Dibuat: ${new Date().toLocaleString("id-ID")}` +
+-          (canSwitchBranch ? `  ·  Cabang: ${selectedBranchId === ALL_BRANCHES ? "Semua Cabang (Konsolidasi)" : selectedBranch?.name ?? "-"}` : ""),
+-        margin, y
+-      );
+-      doc.setTextColor(0);
+-      y += 24;
+-
+-      autoTable(doc, {
+-        startY: y,
+-        margin: { left: margin, right: margin },
+-        theme: "grid",
+-        styles: { fontSize: 9 },
+-        head: [["Total Omzet", "Total Transaksi", "Rata-rata/Transaksi", "Laba Kotor", "Kerugian Opname", "Keuntungan Bersih"]],
+-        body: [[
+-          formatRupiah(totalOmzet), String(totalOrders), formatRupiah(avgPerOrder),
+-          formatRupiah(grossProfit), totalOpnameLoss > 0 ? `- ${formatRupiah(totalOpnameLoss)}` : formatRupiah(0), formatRupiah(netProfit),
+-        ]],
+-        headStyles: { fillColor: [16, 185, 129] },
+-      });
+-      y = (doc as any).lastAutoTable.finalY + 24;
+-
+-      doc.setFontSize(11);
+-      doc.setFont("helvetica", "bold");
+-      doc.text("Omzet Harian", margin, y);
+-      y += 6;
+-      autoTable(doc, {
+-        startY: y,
+-        margin: { left: margin, right: margin },
+-        styles: { fontSize: 9 },
+-        head: [["Tanggal", "Jumlah Transaksi", "Omzet"]],
+-        body: dailyRows.length ? dailyRows : [["-", "-", "-"]],
+-        headStyles: { fillColor: [16, 185, 129] },
+-      });
+-      y = (doc as any).lastAutoTable.finalY + 24;
+-
+-      if (y > 650) { doc.addPage(); y = 50; }
+-      doc.setFontSize(11);
+-      doc.setFont("helvetica", "bold");
+-      doc.text("Menu Terlaris", margin, y);
+-      y += 6;
+-      autoTable(doc, {
+-        startY: y,
+-        margin: { left: margin, right: margin },
+-        styles: { fontSize: 9 },
+-        head: [["Menu", "Terjual (pcs)", "Omzet"]],
+-        body: topProducts.length ? topProducts : [["-", "-", "-"]],
+-        headStyles: { fillColor: [16, 185, 129] },
+-      });
+-      y = (doc as any).lastAutoTable.finalY + 24;
+-
+-      if (y > 650) { doc.addPage(); y = 50; }
+-      doc.setFontSize(11);
+-      doc.setFont("helvetica", "bold");
+-      doc.text("Metode Pembayaran", margin, y);
+-      y += 6;
+-      autoTable(doc, {
+-        startY: y,
+-        margin: { left: margin, right: margin },
+-        styles: { fontSize: 9 },
+-        head: [["Metode", "Jumlah Transaksi", "Total"]],
+-        body: paymentRows.length ? paymentRows : [["-", "-", "-"]],
+-        headStyles: { fillColor: [16, 185, 129] },
++      const { start, end } = rangeToDates(effectiveRange, customStart, customEnd);
++      const { generateReportPdf } = await import("@/lib/reportPdf");
++      await generateReportPdf({
++        supabase: createClient(),
++        tenantId,
++        cafeName,
++        type: reportType,
++        start,
++        end,
++        branchId: selectedBranchId,
++        branches: branches.map((b) => ({ id: b.id, name: b.name })),
++        showBranchLabel: canSwitchBranch,
++        isDemo,
++        note: isFree ? `Paket Free Trial: laporan dibatasi ${FREE_TIER_LIMITS.exportDays} hari (hari ini).` : undefined,
+       });
+-      y = (doc as any).lastAutoTable.finalY + 24;
+-
+-      if (y > 650) { doc.addPage(); y = 50; }
+-      doc.setFontSize(11);
+-      doc.setFont("helvetica", "bold");
+-      doc.text("Kinerja Kasir", margin, y);
+-      y += 6;
+-      autoTable(doc, {
+-        startY: y,
+-        margin: { left: margin, right: margin },
+-        styles: { fontSize: 9 },
+-        head: [["Kasir", "Jumlah Transaksi", "Omzet"]],
+-        body: cashierRows.length ? cashierRows : [["-", "-", "-"]],
+-        headStyles: { fillColor: [16, 185, 129] },
+-      });
+-
+-      const pageCount = doc.internal.pages.length - 1;
+-      for (let i = 1; i <= pageCount; i++) {
+-        doc.setPage(i);
+-        doc.setFontSize(8);
+-        doc.setTextColor(150);
+-        doc.text(
+-          `Dibuat otomatis oleh caPOS — halaman ${i}/${pageCount}`,
+-          pageWidth / 2, doc.internal.pageSize.getHeight() - 20,
+-          { align: "center" }
+-        );
+-      }
+-
+-      doc.save(`laporan-capos-${toISODate(start)}-sd-${toISODate(end)}.pdf`);
+     } catch (err: any) {
+       alert("Gagal membuat PDF: " + (err?.message ?? "Terjadi kesalahan"));
+     } finally {
+@@ -336,28 +139,51 @@ export default function LaporanPdfPage() {
+         <h1 className="text-xl font-bold text-neutral-900">Laporan PDF Otomatis</h1>
+         {isDemo && <DemoBadge />}
+         <p className="text-sm text-neutral-500">
+-          Satu klik: rekap omzet, laba kotor (HPP), kerugian stok opname, keuntungan bersih, menu terlaris,
+-          metode pembayaran, dan kinerja kasir langsung jadi file PDF rapi.
+-          {canSwitchBranch && ` Sesuai cabang yang dipilih di navbar (${selectedBranchId === ALL_BRANCHES ? "Semua Cabang" : selectedBranch?.name ?? "-"}).`}
++          Satu klik jadi PDF rapi, lengkap dengan analitik pertumbuhan dan grafik batang per cabang. Pilih jenis laporan:
++          Omzet Saja (ringkas) atau Lengkap (plus HPP, menu terlaris, pembayaran, kasir).
++          {canSwitchBranch && ` Sesuai cabang yang dipilih di navbar (${selectedBranchId === ALL_BRANCHES ? "Semua Cabang" : branches.find((b) => b.id === selectedBranchId)?.name ?? "-"}).`}
+         </p>
+       </div>
+ 
+       <div className="card p-5 space-y-4">
++        <div>
++          <label className="text-sm font-medium text-neutral-700 mb-2 block">Jenis Laporan</label>
++          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
++            {([
++              ["omzet", "Omzet Saja", "Ringkas: omzet, pertumbuhan, grafik per jam/hari, dan pertumbuhan tiap cabang."],
++              ["full", "Lengkap", "Semua isi Omzet Saja + laba kotor (HPP), menu terlaris, metode pembayaran, kinerja kasir."],
++            ] as [ReportType, string, string][]).map(([key, label, desc]) => (
++              <button
++                key={key}
++                type="button"
++                onClick={() => setReportType(key)}
++                className={cx(
++                  "text-left rounded-xl border p-3",
++                  reportType === key ? "border-primary bg-primary-light/40" : "border-neutral-200 hover:bg-neutral-50"
++                )}
++              >
++                <p className="text-sm font-semibold text-neutral-900">{label}</p>
++                <p className="text-xs text-neutral-500 mt-0.5">{desc}</p>
++              </button>
++            ))}
++          </div>
++        </div>
++
+         <div>
+           <label className="text-sm font-medium text-neutral-700 mb-2 block">Pilih Periode</label>
+           <div className="flex flex-wrap gap-1 bg-neutral-100 rounded-lg p-1 w-fit">
+-            {([
++            {(([
+               ["today", "Hari Ini"],
+               ["7", "7 Hari"],
+               ["month", "Bulan Ini"],
+               ["custom", "Custom"],
+-            ] as [RangeKey, string][]).map(([key, label]) => (
++            ] as [RangeKey, string][]).filter(([key]) => !isFree || key === "today")).map(([key, label]) => (
+               <button
+                 key={key}
+                 onClick={() => setRange(key)}
+                 className={cx(
+                   "px-3 py-1.5 rounded-md text-sm font-medium",
+-                  range === key ? "bg-white shadow-sm text-neutral-900" : "text-neutral-500"
++                  effectiveRange === key ? "bg-white shadow-sm text-neutral-900" : "text-neutral-500"
+                 )}
+               >
+                 {label}
+@@ -366,7 +192,7 @@ export default function LaporanPdfPage() {
+           </div>
+         </div>
+ 
+-        {range === "custom" && (
++        {effectiveRange === "custom" && (
+           <div className="flex flex-wrap items-center gap-3">
+             <div className="flex items-center gap-2">
+               <CalendarRange size={16} className="text-neutral-400" />
+@@ -391,10 +217,16 @@ export default function LaporanPdfPage() {
+           </div>
+         )}
+ 
+-        {minDate && (
+-          <p className="text-xs text-neutral-400">
+-            Paket Free Trial hanya bisa membuat laporan mulai {minDate}. Upgrade untuk riwayat lebih panjang.
++        {isFree ? (
++          <p className="text-xs text-warning">
++            Paket Free Trial hanya bisa mengunduh laporan {FREE_TIER_LIMITS.exportDays} hari (hari ini). Upgrade ke Pro untuk laporan 7 hari, bulanan, atau rentang tanggal sendiri.
+           </p>
++        ) : (
++          minDate && (
++            <p className="text-xs text-neutral-400">
++              Laporan bisa dibuat mulai {minDate}. Upgrade untuk riwayat lebih panjang.
++            </p>
++          )
+         )}
+ 
+         <button
+@@ -403,7 +235,7 @@ export default function LaporanPdfPage() {
+           className="btn-primary flex items-center gap-2"
+         >
+           {generating ? <Loader2 className="animate-spin" size={16} /> : <Download size={16} />}
+-          {generating ? "Membuat PDF..." : "Buat & Unduh Laporan PDF"}
++          {generating ? "Membuat PDF..." : `Unduh Laporan ${reportType === "full" ? "Lengkap" : "Omzet"} (PDF)`}
+         </button>
+       </div>
+ 
+diff --git a/app/dashboard/menu/page.tsx b/app/dashboard/menu/page.tsx
+index 9894a47..422912b 100644
+--- a/app/dashboard/menu/page.tsx
++++ b/app/dashboard/menu/page.tsx
+@@ -2,7 +2,7 @@
+ 
+ import { useEffect, useState } from "react";
+ import Link from "next/link";
+-import { Plus, Pencil, ImagePlus, Loader2, Lock, WifiOff } from "lucide-react";
++import { Plus, Pencil, ImagePlus, Loader2, Lock, WifiOff, Wheat, Store } from "lucide-react";
+ import { formatRupiah, formatNumberWithDots, stripNumberDots, cx } from "@/lib/utils";
+ import { createClient } from "@/lib/supabase/client";
+ import { getCurrentProfile } from "@/lib/getCurrentProfile";
+@@ -11,6 +11,7 @@ import { getTier, FREE_TIER_LIMITS, TIER_LABEL, type Tier } from "@/lib/tier";
+ import { db } from "@/lib/dexie";
+ import { SYNC_COMPLETE_EVENT } from "@/lib/offlineSync";
+ import Modal from "@/components/Modal";
++import { useBranch } from "@/lib/branchContext";
+ import type { Product } from "@/lib/types";
+ import { Skeleton, SkeletonCardGrid } from "@/components/Skeleton";
+ import { tenantHasNoActivity } from "@/lib/demoMode";
+@@ -20,7 +21,14 @@ import { DEMO_PRODUCTS } from "@/lib/demoData";
+ const CATEGORIES = ["Kopi", "Non-Kopi", "Makanan", "Dessert"];
+ 
+ export default function MenuPage() {
++  const { branches, canSwitchBranch } = useBranch();
+   const [menu, setMenu] = useState<Product[]>([]);
++  // product_id → set cabang yang TIDAK menjual menu itu (tidak ada baris = dijual di semua cabang).
++  const [hiddenAt, setHiddenAt] = useState<Map<string, Set<string>>>(new Map());
++  const [branchModalProduct, setBranchModalProduct] = useState<Product | null>(null);
++  const [branchSaving, setBranchSaving] = useState(false);
++  const activeBranches = branches.filter((b) => b.is_active);
++  const showBranchControl = canSwitchBranch && activeBranches.length > 1;
+   const [tenantId, setTenantId] = useState<string | null>(null);
+   const [tier, setTier] = useState<Tier>("free");
+   const [loading, setLoading] = useState(true);
+@@ -33,6 +41,9 @@ export default function MenuPage() {
+   // + perubahan yang masih tertunda, bukan data server yang terverifikasi.
+   const [isOffline, setIsOffline] = useState(false);
+   const [isDemo, setIsDemo] = useState(false);
++  // null = belum dicek. Dipakai untuk mengingatkan Owner agar mengisi Bahan
++  // Baku sebelum/sambil menambah menu (resep & HPP butuh bahan baku).
++  const [ingredientCount, setIngredientCount] = useState<number | null>(null);
+ 
+   async function loadMenu() {
+     setLoading(true);
+@@ -59,6 +70,24 @@ export default function MenuPage() {
+ 
+       if (error) throw error;
+ 
++      const { count: ingCount } = await supabase
++        .from("ingredients")
++        .select("id", { count: "exact", head: true })
++        .eq("tenant_id", profile.tenant_id)
++        .eq("status", "active");
++      setIngredientCount(ingCount ?? 0);
++
++      const { data: bpaRows } = await supabase
++        .from("branch_product_availability")
++        .select("branch_id, product_id")
++        .eq("tenant_id", profile.tenant_id)
++        .eq("is_available", false);
++      const hidden = new Map<string, Set<string>>();
++      for (const r of (bpaRows as { branch_id: string; product_id: string }[]) ?? []) {
++        hidden.set(r.product_id, (hidden.get(r.product_id) ?? new Set<string>()).add(r.branch_id));
++      }
++      setHiddenAt(hidden);
++
+       const fresh = (data as Product[]) ?? [];
+       setMenu(fresh);
+       setTier(profile.role === "super_admin" ? "supreme" : getTier(sub));
+@@ -168,6 +197,34 @@ export default function MenuPage() {
+     });
+   }
+ 
++  /** Simpan cabang mana saja yang menjual menu ini (centang = dijual). */
++  async function saveBranchAvailability(product: Product, soldAt: Set<string>) {
++    if (!tenantId) return;
++    setBranchSaving(true);
++    const supabase = createClient();
++    const rows = activeBranches.map((b) => ({
++      tenant_id: tenantId,
++      branch_id: b.id,
++      product_id: product.id,
++      is_available: soldAt.has(b.id),
++      updated_at: new Date().toISOString(),
++    }));
++    const { error } = await supabase.from("branch_product_availability").upsert(rows, { onConflict: "branch_id,product_id" });
++    setBranchSaving(false);
++    if (error) {
++      alert("Gagal menyimpan: " + error.message + "\n(Pastikan migration_020 sudah dijalankan di Supabase.)");
++      return;
++    }
++    setHiddenAt((prev) => {
++      const next = new Map(prev);
++      const hiddenSet = new Set(activeBranches.filter((b) => !soldAt.has(b.id)).map((b) => b.id));
++      if (hiddenSet.size === 0) next.delete(product.id);
++      else next.set(product.id, hiddenSet);
++      return next;
++    });
++    setBranchModalProduct(null);
++  }
++
+   async function toggleAvailability(product: Product) {
+     const next = !product.is_available;
+     setMenu((prev) => prev.map((m) => (m.id === product.id ? { ...m, is_available: next } : m)));
+@@ -308,10 +365,10 @@ export default function MenuPage() {
+     <div className="space-y-6">
+       <div className="flex items-center justify-between">
+         <div>
+-          <h1 className="text-xl font-bold text-neutral-900">Kelola Menu & Stok</h1>
++          <h1 className="text-xl font-bold text-neutral-900">Daftar Menu</h1>
+           {isDemo && <DemoBadge />}
+           <p className="text-sm text-neutral-500">
+-            Tambah, edit foto, dan atur ketersediaan menu
++            Tambah menu, ubah harga/foto, dan atur tersedia atau habis
+             {tier === "free" && <> — {menu.length}/{FREE_TIER_LIMITS.maxMenu} menu terpakai (paket {TIER_LABEL.free})</>}
+           </p>
+         </div>
+@@ -320,6 +377,21 @@ export default function MenuPage() {
+         </button>
+       </div>
+ 
++      {ingredientCount === 0 && (
++        <div className="card p-4 flex items-center justify-between gap-3 border-warning bg-warning-light">
++          <div className="flex items-start gap-3">
++            <Wheat size={18} className="text-warning shrink-0 mt-0.5" />
++            <p className="text-sm text-neutral-800">
++              <span className="font-semibold">Bahan baku belum ditambahkan.</span> Menu tetap bisa dibuat, tetapi
++              resep, HPP, dan pengurangan stok otomatis baru berfungsi setelah bahan baku diisi.
++            </p>
++          </div>
++          <Link href="/dashboard/ingredients" className="btn-primary text-sm whitespace-nowrap">
++            Tambah Bahan Baku
++          </Link>
++        </div>
++      )}
++
+       {isOffline && (
+         <div className="card p-4 flex items-center gap-3 border-warning bg-warning-light">
+           <WifiOff size={18} className="text-warning shrink-0" />
+@@ -374,6 +446,19 @@ export default function MenuPage() {
+             >
+               {product.is_available ? "Tersedia" : "Habis / Nonaktif"}
+             </button>
++
++            {showBranchControl && !isDemo && !product.id.startsWith("local-") && (
++              <button
++                onClick={() => setBranchModalProduct(product)}
++                className="mt-1.5 w-full flex items-center justify-center gap-1 text-[11px] text-neutral-500 hover:text-primary-dark py-1"
++                title="Atur cabang mana saja yang menjual menu ini"
++              >
++                <Store size={11} />
++                {(hiddenAt.get(product.id)?.size ?? 0) === 0
++                  ? "Dijual di semua cabang"
++                  : `Dijual di ${activeBranches.length - (hiddenAt.get(product.id)?.size ?? 0)} dari ${activeBranches.length} cabang`}
++              </button>
++            )}
+           </div>
+         ))}
+         {menu.length === 0 && (
+@@ -392,6 +477,17 @@ export default function MenuPage() {
+           existingCategories={Array.from(new Set(menu.map((m) => m.category).filter(Boolean)))}
+         />
+       )}
++
++      {branchModalProduct && (
++        <BranchAvailabilityModal
++          product={branchModalProduct}
++          branches={activeBranches.map((b) => ({ id: b.id, name: b.name }))}
++          hiddenBranchIds={hiddenAt.get(branchModalProduct.id) ?? new Set()}
++          saving={branchSaving}
++          onClose={() => setBranchModalProduct(null)}
++          onSave={(soldAt) => saveBranchAvailability(branchModalProduct, soldAt)}
++        />
++      )}
+     </div>
+   );
+ }
+@@ -557,3 +653,53 @@ function ProductForm({
+     </Modal>
+   );
+ }
++
++function BranchAvailabilityModal({
++  product,
++  branches,
++  hiddenBranchIds,
++  saving,
++  onClose,
++  onSave,
++}: {
++  product: Product;
++  branches: { id: string; name: string }[];
++  hiddenBranchIds: Set<string>;
++  saving: boolean;
++  onClose: () => void;
++  onSave: (soldAt: Set<string>) => void;
++}) {
++  const [soldAt, setSoldAt] = useState<Set<string>>(new Set(branches.filter((b) => !hiddenBranchIds.has(b.id)).map((b) => b.id)));
++  const toggle = (id: string) =>
++    setSoldAt((prev) => {
++      const next = new Set(prev);
++      if (next.has(id)) next.delete(id);
++      else next.add(id);
++      return next;
++    });
++  return (
++    <Modal
++      title={`Dijual di cabang mana? — ${product.name}`}
++      onClose={onClose}
++      footer={
++        <button disabled={saving} onClick={() => onSave(soldAt)} className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-50">
++          {saving && <Loader2 className="animate-spin" size={16} />}
++          Simpan
++        </button>
++      }
++    >
++      <p className="text-sm text-neutral-600">
++        Hilangkan centang pada cabang yang <strong>tidak menjual</strong> menu ini. Menu akan otomatis tidak muncul di Kasir cabang itu.
++      </p>
++      <div className="space-y-1">
++        {branches.map((b) => (
++          <label key={b.id} className="flex items-center gap-2 rounded-xl border border-neutral-200 px-3 py-2 text-sm cursor-pointer hover:bg-neutral-50">
++            <input type="checkbox" checked={soldAt.has(b.id)} onChange={() => toggle(b.id)} />
++            <Store size={14} className="text-neutral-400" />
++            <span>{b.name}</span>
++          </label>
++        ))}
++      </div>
++    </Modal>
++  );
++}
+diff --git a/app/dashboard/page.tsx b/app/dashboard/page.tsx
+index 829c496..32324d5 100644
+--- a/app/dashboard/page.tsx
++++ b/app/dashboard/page.tsx
+@@ -11,7 +11,7 @@ import * as XLSX from "xlsx";
+ import { formatRupiah } from "@/lib/utils";
+ import { createClient } from "@/lib/supabase/client";
+ import { getCurrentProfile } from "@/lib/getCurrentProfile";
+-import { getTier, hasSalesHealth, type Tier } from "@/lib/tier";
++import { getTier, hasSalesHealth, FREE_TIER_LIMITS, type Tier } from "@/lib/tier";
+ import { useBranch, ALL_BRANCHES } from "@/lib/branchContext";
+ import { Skeleton, SkeletonStatGrid } from "@/components/Skeleton";
+ import { tenantHasNoActivity } from "@/lib/demoMode";
+@@ -36,12 +36,13 @@ interface RecentTx {
+ }
+ 
+ export default function ReportsPage() {
+-  const { selectedBranchId, selectedBranch, canSwitchBranch } = useBranch();
++  const { selectedBranchId, selectedBranch, canSwitchBranch, branches } = useBranch();
+   const [chartModel, setChartModel] = useState<"bar" | "line">("bar");
+   const [loading, setLoading] = useState(true);
+   const [tier, setTier] = useState<Tier>("free");
+   const [cafeName, setCafeName] = useState("Kafe Anda");
+   const [isDemo, setIsDemo] = useState(false);
++  const [pdfBusy, setPdfBusy] = useState(false);
+ 
+   const [omzetData, setOmzetData] = useState<OmzetPoint[]>([]);
+   const [peakHours, setPeakHours] = useState<PeakPoint[]>([]);
+@@ -244,10 +245,48 @@ export default function ReportsPage() {
+     })();
+   }, [selectedBranchId]);
+ 
++  // PDF Omzet (ringkas) — Free Trial: 1 hari (hari ini); Pro/Supreme: 7 hari
++  // terakhir. Isinya analitik pertumbuhan + grafik batang per cabang.
++  async function exportPdfOmzet() {
++    setPdfBusy(true);
++    try {
++      const { profile } = await getCurrentProfile();
++      if (!profile) return;
++      const days = tier === "free" ? FREE_TIER_LIMITS.exportDays : 7;
++      const start = new Date();
++      start.setDate(start.getDate() - (days - 1));
++      start.setHours(0, 0, 0, 0);
++      const end = new Date();
++      end.setHours(23, 59, 59, 999);
++      const { generateReportPdf } = await import("@/lib/reportPdf");
++      await generateReportPdf({
++        supabase: createClient(),
++        tenantId: profile.tenant_id,
++        cafeName,
++        type: "omzet",
++        start,
++        end,
++        branchId: selectedBranchId,
++        branches: branches.map((b) => ({ id: b.id, name: b.name })),
++        showBranchLabel: canSwitchBranch,
++        isDemo,
++        note: tier === "free" ? `Paket Free Trial: laporan dibatasi ${FREE_TIER_LIMITS.exportDays} hari (hari ini).` : undefined,
++      });
++    } catch (err: any) {
++      alert("Gagal membuat PDF: " + (err?.message ?? "Terjadi kesalahan"));
++    } finally {
++      setPdfBusy(false);
++    }
++  }
++
+   function exportCSV() {
++    // Free Trial: hanya data hari ini (baris terakhir = hari ini).
++    const exportRows = tier === "free" ? omzetData.slice(-FREE_TIER_LIMITS.exportDays) : omzetData;
++    const exportOmzet = exportRows.reduce((s, d) => s + d.omzet, 0);
++    const exportOrders = exportRows.reduce((s, d) => s + d.orders, 0);
+     const header = "Tanggal,Hari,Omzet (Rp),Jumlah Transaksi\n";
+-    const rows = omzetData.map((d) => `${d.date},${d.day},${d.omzet},${d.orders}`).join("\n");
+-    const totalRow = `\nTotal,,${totalOmzet},${totalOrders}`;
++    const rows = exportRows.map((d) => `${d.date},${d.day},${d.omzet},${d.orders}`).join("\n");
++    const totalRow = `\nTotal,,${exportOmzet},${exportOrders}`;
+     const csv = "\uFEFF" + header + rows + totalRow;
+     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+     const url = URL.createObjectURL(blob);
+@@ -335,14 +374,17 @@ export default function ReportsPage() {
+               <button onClick={exportExcel} className="btn-outline flex items-center gap-1.5 text-sm" title="Excel lengkap: Ringkasan, Omzet Harian, Menu Terlaris (+ Jam Ramai untuk Supreme)">
+                 <Download size={14} /> Excel Lengkap
+               </button>
+-              <button onClick={() => window.print()} className="btn-outline flex items-center gap-1.5 text-sm">
+-                <Printer size={14} /> PDF
++              <button onClick={exportPdfOmzet} disabled={pdfBusy} className="btn-outline flex items-center gap-1.5 text-sm disabled:opacity-50" title="PDF Omzet: analitik pertumbuhan + grafik batang per cabang">
++                <Printer size={14} /> {pdfBusy ? "Membuat..." : "PDF Omzet"}
+               </button>
+             </>
+           ) : (
+             <>
++              <button onClick={exportPdfOmzet} disabled={pdfBusy} className="btn-outline flex items-center gap-1.5 text-sm disabled:opacity-50" title="PDF Omzet hari ini: analitik pertumbuhan + grafik batang">
++                <Printer size={14} /> {pdfBusy ? "Membuat..." : "PDF Omzet (hari ini)"}
++              </button>
+               <button onClick={exportCSV} className="btn-outline flex items-center gap-1.5 text-sm" title="CSV sederhana: rekap omzet harian">
+-                <Download size={14} /> Export CSV
++                <Download size={14} /> {tier === "free" ? "Export CSV (hari ini)" : "Export CSV"}
+               </button>
+               <Link href="/dashboard/subscription" className="text-xs text-primary hover:underline whitespace-nowrap">
+                 Upgrade untuk Excel Lengkap
+diff --git a/app/dashboard/recipes/page.tsx b/app/dashboard/recipes/page.tsx
+index d1818f1..ac8953a 100644
+--- a/app/dashboard/recipes/page.tsx
++++ b/app/dashboard/recipes/page.tsx
+@@ -1,6 +1,7 @@
+ "use client";
+ 
+ import { useEffect, useMemo, useState } from "react";
++import Link from "next/link";
+ import { ChefHat, Plus, Trash2, Loader2, CheckCircle2, XCircle, Calculator } from "lucide-react";
+ import { formatRupiah, cx } from "@/lib/utils";
+ import { createClient } from "@/lib/supabase/client";
+@@ -41,6 +42,10 @@ export default function RecipesPage() {
+   const [calculating, setCalculating] = useState(false);
+   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
+   const [isDemo, setIsDemo] = useState(false);
++  // ingredient_id → harga per satuan (rata-rata cabang yang sudah punya harga).
++  // Dipakai HANYA untuk estimasi langsung saat menyusun resep; angka resmi
++  // tetap dari RPC calculate_recipe_cost.
++  const [costMap, setCostMap] = useState<Map<string, number>>(new Map());
+ 
+   const canWrite = isManagerOrOwner(role);
+ 
+@@ -53,10 +58,16 @@ export default function RecipesPage() {
+     }
+     setRole(profile.role);
+     const supabase = createClient();
+-    const [{ data: prodData }, { data: ingData }] = await Promise.all([
++    const [{ data: prodData }, { data: ingData }, { data: costData }] = await Promise.all([
+       supabase.from("products").select("*").eq("tenant_id", profile.tenant_id).order("name", { ascending: true }),
+       supabase.from("ingredients").select("*").eq("tenant_id", profile.tenant_id).eq("status", "active").order("name", { ascending: true }),
++      supabase.from("branch_ingredients_stock").select("ingredient_id, cost_price").eq("tenant_id", profile.tenant_id),
+     ]);
++    const costAcc = new Map<string, number[]>();
++    for (const r of (costData as { ingredient_id: string; cost_price: number }[]) ?? []) {
++      if (Number(r.cost_price) > 0) costAcc.set(r.ingredient_id, [...(costAcc.get(r.ingredient_id) ?? []), Number(r.cost_price)]);
++    }
++    setCostMap(new Map(Array.from(costAcc.entries()).map(([id, arr]) => [id, arr.reduce((a, b) => a + b, 0) / arr.length])));
+     const freshProducts = (prodData as Product[]) ?? [];
+     const freshIngredients = (ingData as Ingredient[]) ?? [];
+     setProducts(freshProducts);
+@@ -158,7 +169,7 @@ export default function RecipesPage() {
+   function addItemRow() {
+     const first = ingredients[0];
+     if (!first) {
+-      alert("Belum ada bahan baku aktif. Tambahkan bahan dulu di halaman Bahan Baku.");
++      alert("Belum ada bahan baku aktif. Tambahkan bahan dulu di halaman Bahan Baku & Harga Beli.");
+       return;
+     }
+     setItems((prev) => [...prev, { ingredient_id: first.id, quantity: "", unit: first.inventory_unit, wastage_percentage: "0", notes: "" }]);
+@@ -267,6 +278,32 @@ export default function RecipesPage() {
+ 
+   const selectedProduct = useMemo(() => products.find((p) => p.id === selectedProductId) ?? null, [products, selectedProductId]);
+ 
++  // Estimasi HPP langsung (tanpa perlu klik tombol / menyimpan dulu).
++  const live = useMemo(() => {
++    let base = 0;
++    let withWaste = 0;
++    const missing: string[] = [];
++    for (const it of items) {
++      const q = Number(it.quantity) || 0;
++      if (q <= 0) continue;
++      const c = costMap.get(it.ingredient_id) ?? 0;
++      const w = Number(it.wastage_percentage) || 0;
++      base += q * c;
++      withWaste += q * (1 + w / 100) * c;
++      if (c <= 0) {
++        const nm = ingredients.find((i) => i.id === it.ingredient_id)?.name;
++        if (nm && !missing.includes(nm)) missing.push(nm);
++      }
++    }
++    const y = Math.max(1, Number(yieldQty || 1));
++    const perPortion = base / y;
++    const price = Number(selectedProduct?.price ?? 0);
++    const margin = price > 0 ? ((price - perPortion) / price) * 100 : null;
++    // Saran harga: harga jual agar margin kotor 40%, dibulatkan ke atas per Rp 500.
++    const suggested = perPortion > 0 ? Math.ceil(perPortion / 0.6 / 500) * 500 : 0;
++    return { perPortion, perPortionWaste: withWaste / y, missing, price, margin, suggested, hasItems: items.some((it) => Number(it.quantity) > 0) };
++  }, [items, costMap, yieldQty, ingredients, selectedProduct]);
++
+   if (loading) {
+     return (
+       <div className="space-y-6">
+@@ -283,10 +320,10 @@ export default function RecipesPage() {
+     <div className="space-y-6">
+       <div>
+         <h1 className="text-xl font-bold text-neutral-900 flex items-center gap-2">
+-          <ChefHat size={20} className="text-primary-dark" /> Resep & HPP
++          <ChefHat size={20} className="text-primary-dark" /> Resep & HPP Menu
+         </h1>
+         {isDemo && <DemoBadge />}
+-        <p className="text-sm text-neutral-500">Susun resep bahan baku per menu/varian — HPP dihitung otomatis dari harga bahan.</p>
++        <p className="text-sm text-neutral-500">Pilih menu, masukkan bahan & takarannya — HPP dan margin langsung terhitung otomatis dari harga beli bahan.</p>
+       </div>
+ 
+       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+@@ -407,7 +444,10 @@ export default function RecipesPage() {
+                           className="input-field w-20 text-sm"
+                         />
+                         <span className="text-xs text-neutral-400">% waste</span>
+-                        <button onClick={() => setItems(items.filter((_, i) => i !== idx))} type="button" className="text-neutral-400 hover:text-urgent ml-auto">
++                        <span className="text-xs text-neutral-500 ml-auto">
++                          {formatRupiah((Number(it.quantity) || 0) * (costMap.get(it.ingredient_id) ?? 0))}
++                        </span>
++                        <button onClick={() => setItems(items.filter((_, i) => i !== idx))} type="button" className="text-neutral-400 hover:text-urgent">
+                           <Trash2 size={14} />
+                         </button>
+                       </div>
+@@ -417,6 +457,35 @@ export default function RecipesPage() {
+                 </div>
+               </div>
+ 
++              {live.hasItems && (
++                <div className="rounded-xl bg-primary-light/40 border border-primary/20 p-3 space-y-1">
++                  <p className="text-sm text-neutral-700">
++                    Estimasi HPP per porsi: <span className="font-bold text-neutral-900">{formatRupiah(live.perPortion)}</span>
++                    {live.perPortionWaste > live.perPortion + 0.5 && (
++                      <span className="text-xs text-neutral-500"> (≈ {formatRupiah(live.perPortionWaste)} jika waste ikut dihitung)</span>
++                    )}
++                  </p>
++                  {live.price > 0 && live.margin !== null && (
++                    <p className="text-xs text-neutral-600">
++                      Harga jual {formatRupiah(live.price)} → untung kotor {formatRupiah(live.price - live.perPortion)} per porsi (margin{" "}
++                      <span className={cx("font-semibold", live.margin < 30 ? "text-urgent" : "text-primary-dark")}>{Math.round(live.margin)}%</span>)
++                    </p>
++                  )}
++                  {live.suggested > 0 && live.missing.length === 0 && (
++                    <p className="text-xs text-neutral-600">
++                      Saran: harga jual <span className="font-semibold">{formatRupiah(live.suggested)}</span> untuk margin sekitar 40%
++                      {live.price > 0 && live.price < live.suggested ? " — harga sekarang masih di bawah saran." : "."}
++                    </p>
++                  )}
++                  {live.missing.length > 0 && (
++                    <p className="text-xs text-warning">
++                      Harga belum diisi untuk: {live.missing.join(", ")}. HPP akan terlalu rendah —{" "}
++                      <Link href="/dashboard/ingredients" className="underline font-medium">isi di Bahan Baku & Harga Beli</Link>.
++                    </p>
++                  )}
++                </div>
++              )}
++
+               <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-neutral-100">
+                 <button
+                   disabled={saving}
+@@ -429,7 +498,7 @@ export default function RecipesPage() {
+                 {activeRecipe && (
+                   <button onClick={previewCost} disabled={calculating} className="btn-outline flex items-center gap-2 text-sm">
+                     {calculating ? <Loader2 className="animate-spin" size={16} /> : <Calculator size={16} />}
+-                    Hitung HPP
++                    Cek HPP tersimpan
+                   </button>
+                 )}
+                 {costPreview !== null && (
+diff --git a/app/dashboard/settings/receipt/page.tsx b/app/dashboard/settings/receipt/page.tsx
+index 6715a8a..4a48b4a 100644
+--- a/app/dashboard/settings/receipt/page.tsx
++++ b/app/dashboard/settings/receipt/page.tsx
+@@ -10,6 +10,11 @@ import { Button } from '@/components/ui/Button';
+ import { Skeleton } from '@/components/Skeleton';
+ import { getCurrentProfile } from '@/lib/getCurrentProfile';
+ import { createClient } from '@/lib/supabase/client';
++import Link from 'next/link';
++import Receipt from '@/components/Receipt';
++import { buildSampleReceiptData } from '@/lib/sampleReceipt';
++import { resetHideBrandingCache } from '@/lib/useHideBranding';
++import { computeCharges, resetChargeSettingsCache, DEFAULT_SERVICE_LABEL, DEFAULT_TAX_LABEL } from '@/lib/charges';
+ 
+ // migration_018: tenants.receipt_header_text & receipt_footer_text baru
+ // (tenants.receipt_paper_width sudah ada sejak migration_16, tapi belum
+@@ -20,6 +25,22 @@ interface ReceiptState {
+   paperWidth: '58mm' | '80mm';
+   headerText: string;
+   footerText: string;
++  showWifi: boolean;
++  wifiSsid: string;
++  wifiPassword: string;
++  hideBranding: boolean;
++  servicePct: string;
++  taxPct: string;
++  taxInclusive: boolean;
++  serviceLabel: string;
++  taxLabel: string;
++}
++
++/** Persen 0–100, maksimal 2 desimal (sesuai NUMERIC(5,2) di database). */
++function parsePct(v: string): number {
++  const n = Number(String(v).replace(',', '.'));
++  if (!Number.isFinite(n)) return 0;
++  return Math.min(100, Math.max(0, Math.round(n * 100) / 100));
+ }
+ 
+ export default function ReceiptSettingsPage() {
+@@ -31,7 +52,18 @@ export default function ReceiptSettingsPage() {
+     paperWidth: '58mm',
+     headerText: '',
+     footerText: '',
++    showWifi: false,
++    wifiSsid: '',
++    wifiPassword: '',
++    hideBranding: false,
++    servicePct: '0',
++    taxPct: '0',
++    taxInclusive: false,
++    serviceLabel: DEFAULT_SERVICE_LABEL,
++    taxLabel: DEFAULT_TAX_LABEL,
+   });
++  const [cafeName, setCafeName] = useState('Kafe Anda');
++  const [isSupreme, setIsSupreme] = useState(false);
+   const [status, setStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+ 
+   useEffect(() => {
+@@ -47,7 +79,7 @@ export default function ReceiptSettingsPage() {
+       const supabase = createClient();
+       const { data: tenant } = await supabase
+         .from('tenants')
+-        .select('receipt_paper_width, receipt_header_text, receipt_footer_text')
++        .select('name, receipt_paper_width, receipt_header_text, receipt_footer_text, show_wifi_on_receipt, wifi_ssid, wifi_password, receipt_hide_branding, service_charge_pct, tax_pct, tax_inclusive, service_label, tax_label')
+         .eq('id', profile.tenant_id)
+         .single();
+ 
+@@ -56,7 +88,23 @@ export default function ReceiptSettingsPage() {
+           paperWidth: (tenant.receipt_paper_width as '58mm' | '80mm') ?? '58mm',
+           headerText: tenant.receipt_header_text ?? '',
+           footerText: tenant.receipt_footer_text ?? '',
++          showWifi: !!tenant.show_wifi_on_receipt,
++          wifiSsid: tenant.wifi_ssid ?? '',
++          wifiPassword: tenant.wifi_password ?? '',
++          hideBranding: !!tenant.receipt_hide_branding,
++          servicePct: String(tenant.service_charge_pct ?? 0),
++          taxPct: String(tenant.tax_pct ?? 0),
++          taxInclusive: !!tenant.tax_inclusive,
++          serviceLabel: tenant.service_label || DEFAULT_SERVICE_LABEL,
++          taxLabel: tenant.tax_label || DEFAULT_TAX_LABEL,
+         });
++        if (tenant.name) setCafeName(tenant.name);
++      }
++      if (profile.role === 'super_admin') {
++        setIsSupreme(true);
++      } else {
++        const { data: tier } = await supabase.rpc('tenant_tier', { p_tenant_id: profile.tenant_id });
++        setIsSupreme(tier === 'supreme');
+       }
+       setLoading(false);
+     })();
+@@ -74,6 +122,16 @@ export default function ReceiptSettingsPage() {
+         receipt_paper_width: receiptData.paperWidth,
+         receipt_header_text: receiptData.headerText.trim() || null,
+         receipt_footer_text: receiptData.footerText.trim() || null,
++        show_wifi_on_receipt: receiptData.showWifi,
++        wifi_ssid: receiptData.wifiSsid.trim() || null,
++        wifi_password: receiptData.wifiPassword.trim() || null,
++        // Hanya Supreme yang boleh true (ditegakkan juga oleh trigger di database).
++        receipt_hide_branding: isSupreme ? receiptData.hideBranding : false,
++        service_charge_pct: parsePct(receiptData.servicePct),
++        tax_pct: parsePct(receiptData.taxPct),
++        tax_inclusive: receiptData.taxInclusive,
++        service_label: receiptData.serviceLabel.trim().slice(0, 30) || DEFAULT_SERVICE_LABEL,
++        tax_label: receiptData.taxLabel.trim().slice(0, 30) || DEFAULT_TAX_LABEL,
+       })
+       .eq('id', tenantId);
+ 
+@@ -82,6 +140,8 @@ export default function ReceiptSettingsPage() {
+       setStatus({ type: 'error', message: 'Gagal menyimpan: ' + error.message });
+       return;
+     }
++    resetHideBrandingCache();
++    resetChargeSettingsCache();
+     setStatus({ type: 'success', message: 'Pengaturan kwitansi tersimpan. Struk berikutnya di kasir akan memakai ini.' });
+   }
+ 
+@@ -141,6 +201,133 @@ export default function ReceiptSettingsPage() {
+         </div>
+       </SettingsCard>
+ 
++      <SettingsCard title="Biaya Layanan & Pajak" description="Dihitung otomatis di kasir, struk, dan laporan. Isi 0 jika tidak dipakai">
++        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
++          <Input
++            label="Nama biaya layanan di struk"
++            value={receiptData.serviceLabel}
++            maxLength={30}
++            onChange={(e) => setReceiptData({ ...receiptData, serviceLabel: e.target.value })}
++            placeholder="Contoh: Service Charge, Biaya Layanan"
++            disabled={!canEdit}
++          />
++          <Input
++            label="Biaya layanan (%)"
++            inputMode="decimal"
++            value={receiptData.servicePct}
++            onChange={(e) => setReceiptData({ ...receiptData, servicePct: e.target.value.replace(/[^0-9.,]/g, '') })}
++            placeholder="Contoh: 5"
++            disabled={!canEdit}
++          />
++          <Input
++            label="Nama pajak di struk"
++            value={receiptData.taxLabel}
++            maxLength={30}
++            onChange={(e) => setReceiptData({ ...receiptData, taxLabel: e.target.value })}
++            placeholder="Contoh: PPN, PB1, Pajak Restoran"
++            disabled={!canEdit}
++          />
++          <Input
++            label="Pajak (%)"
++            inputMode="decimal"
++            value={receiptData.taxPct}
++            onChange={(e) => setReceiptData({ ...receiptData, taxPct: e.target.value.replace(/[^0-9.,]/g, '') })}
++            placeholder="Contoh: 10 (PB1) atau 11 (PPN)"
++            disabled={!canEdit}
++          />
++        </div>
++        <div className="mt-3 space-y-2 text-sm text-neutral-700">
++          <label className="flex items-start gap-2">
++            <input type="radio" name="taxMode" checked={!receiptData.taxInclusive} onChange={() => setReceiptData({ ...receiptData, taxInclusive: false })} disabled={!canEdit} className="mt-0.5" />
++            <span><strong>Ditambahkan</strong> di atas harga menu (pelanggan membayar lebih besar dari harga menu).</span>
++          </label>
++          <label className="flex items-start gap-2">
++            <input type="radio" name="taxMode" checked={receiptData.taxInclusive} onChange={() => setReceiptData({ ...receiptData, taxInclusive: true })} disabled={!canEdit} className="mt-0.5" />
++            <span><strong>Sudah termasuk</strong> di harga menu (total tidak berubah; struk hanya merinci bagian pajaknya).</span>
++          </label>
++        </div>
++        {(() => {
++          const demo = computeCharges(100000, { servicePct: parsePct(receiptData.servicePct), taxPct: parsePct(receiptData.taxPct), taxInclusive: receiptData.taxInclusive, serviceLabel: receiptData.serviceLabel, taxLabel: receiptData.taxLabel });
++          return (
++            <p className="text-xs text-neutral-500 mt-3">
++              Contoh pesanan Rp 100.000 → {receiptData.serviceLabel.trim() || DEFAULT_SERVICE_LABEL} Rp {demo.service.toLocaleString('id-ID')}, {receiptData.taxLabel.trim() || DEFAULT_TAX_LABEL} Rp {demo.tax.toLocaleString('id-ID')}
++              {receiptData.taxInclusive ? ' (sudah termasuk)' : ''}, <strong>total Rp {demo.total.toLocaleString('id-ID')}</strong>.
++              Urutan hitung: (harga − diskon) + service, lalu pajak dihitung dari hasilnya.
++            </p>
++          );
++        })()}
++      </SettingsCard>
++
++      <SettingsCard title="WiFi di Struk" description="Tampilkan nama & password WiFi kafe di bagian bawah struk">
++        <div className="grid grid-cols-1 gap-4">
++          <label className="flex items-center gap-2 text-sm text-neutral-700">
++            <input
++              type="checkbox"
++              checked={receiptData.showWifi}
++              onChange={(e) => setReceiptData({ ...receiptData, showWifi: e.target.checked })}
++              disabled={!canEdit}
++            />
++            Cetak info WiFi di struk
++          </label>
++          {receiptData.showWifi && (
++            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
++              <Input
++                label="Nama WiFi (SSID)"
++                value={receiptData.wifiSsid}
++                onChange={(e) => setReceiptData({ ...receiptData, wifiSsid: e.target.value })}
++                placeholder="Contoh: Kopi-Palu-WiFi"
++                disabled={!canEdit}
++              />
++              <Input
++                label="Password WiFi"
++                value={receiptData.wifiPassword}
++                onChange={(e) => setReceiptData({ ...receiptData, wifiPassword: e.target.value })}
++                placeholder="Contoh: kopi1234"
++                disabled={!canEdit}
++              />
++            </div>
++          )}
++        </div>
++      </SettingsCard>
++
++      <SettingsCard title="Branding caPOS" description="Baris “powered by caPOS — Studio D13” di bawah struk">
++        <label className={'flex items-start gap-2 text-sm ' + (isSupreme ? 'text-neutral-700' : 'text-neutral-400')}>
++          <input
++            type="checkbox"
++            className="mt-0.5"
++            checked={isSupreme && receiptData.hideBranding}
++            onChange={(e) => setReceiptData({ ...receiptData, hideBranding: e.target.checked })}
++            disabled={!canEdit || !isSupreme}
++          />
++          <span>Sembunyikan tulisan “powered by caPOS” di struk (fitur khusus paket Supreme)</span>
++        </label>
++        {!isSupreme && (
++          <p className="text-xs text-neutral-500 mt-2">
++            Fitur ini hanya untuk paket Supreme.{' '}
++            <Link href="/dashboard/subscription" className="text-primary-dark underline font-medium">
++              Lihat paket
++            </Link>
++          </p>
++        )}
++      </SettingsCard>
++
++      <SettingsCard title="Pratinjau Struk" description="Contoh tampilan sesuai pengaturan di atas (belum disimpan sampai Anda menekan Simpan)">
++        <div className="rounded-2xl bg-neutral-100 p-3 flex justify-center overflow-x-auto">
++          <Receipt
++            data={buildSampleReceiptData({
++              cafeName,
++              headerText: receiptData.headerText || null,
++              footerText: receiptData.footerText || null,
++              showWifi: receiptData.showWifi,
++              wifiSsid: receiptData.wifiSsid,
++              wifiPassword: receiptData.wifiPassword,
++              width: receiptData.paperWidth,
++              hideBranding: isSupreme && receiptData.hideBranding,
++            })}
++          />
++        </div>
++      </SettingsCard>
++
+       {canEdit && (
+         <div className="flex justify-end">
+           <Button variant="primary" onClick={handleSave} loading={saving}>
+diff --git a/app/dashboard/stock/page.tsx b/app/dashboard/stock/page.tsx
+index f2cd609..8b77694 100644
+--- a/app/dashboard/stock/page.tsx
++++ b/app/dashboard/stock/page.tsx
+@@ -219,7 +219,7 @@ export default function StockPage() {
+     <div className="space-y-6">
+       <div className="flex flex-wrap items-center justify-between gap-3">
+         <div>
+-          <h1 className="text-xl font-bold text-neutral-900">Stok & HPP</h1>
++          <h1 className="text-xl font-bold text-neutral-900">Stok Produk Jadi</h1>
+           {isDemo && <DemoBadge />}
+           <p className="text-sm text-neutral-500">
+             Atur HPP (harga pokok) tiap menu, aktifkan pelacakan stok bahan, dan pantau stok menipis
+diff --git a/app/globals.css b/app/globals.css
+index 88aa1ed..6a99dcd 100644
+--- a/app/globals.css
++++ b/app/globals.css
+@@ -112,10 +112,19 @@
+   body * {
+     visibility: hidden;
+   }
+-  #receipt-print, #receipt-print * {
++  /* Default: struk customer. Tiket kitchen hanya saat body[data-print-target="kitchen"]. */
++  body:not([data-print-target="kitchen"]) #receipt-print,
++  body:not([data-print-target="kitchen"]) #receipt-print *,
++  body[data-print-target="kitchen"] #kitchen-print,
++  body[data-print-target="kitchen"] #kitchen-print * {
+     visibility: visible;
+   }
+-  #receipt-print {
++  body[data-print-target="kitchen"] #receipt-print,
++  body:not([data-print-target="kitchen"]) #kitchen-print {
++    display: none !important;
++  }
++  #receipt-print,
++  #kitchen-print {
+     position: absolute;
+     left: 0;
+     top: 0;
+diff --git a/app/pos/page.tsx b/app/pos/page.tsx
+index e587d96..a9d0933 100644
+--- a/app/pos/page.tsx
++++ b/app/pos/page.tsx
+@@ -7,6 +7,8 @@ import { DEMO_PRODUCTS } from "@/lib/demoData";
+ import { Search, Plus, Minus, Trash2, Printer, ScanLine, Loader2 } from "lucide-react";
+ import PosNavbar from "@/components/PosNavbar";
+ import Receipt, { type ReceiptData } from "@/components/Receipt";
++import KitchenTicket from "@/components/receipt/KitchenTicket";
++import { computeCharges, useChargeSettings, hasCharges } from "@/lib/charges";
+ import Modal from "@/components/Modal";
+ import CashierQuickActions from "@/components/CashierQuickActions";
+ import AccessDeniedNotice from "@/components/AccessDeniedNotice";
+@@ -24,7 +26,7 @@ import { createClient } from "@/lib/supabase/client";
+ import { getCurrentProfile } from "@/lib/getCurrentProfile";
+ import { db } from "@/lib/dexie";
+ import { useProductAvailabilityChannel } from "@/lib/useProductAvailabilityChannel";
+-import { formatRupiah, generateInvoiceNumber, formatNumberWithDots, stripNumberDots, cx, printReceipt } from "@/lib/utils";
++import { formatRupiah, generateInvoiceNumber, formatNumberWithDots, stripNumberDots, cx, printReceipt, printCustomerAndKitchen } from "@/lib/utils";
+ import type { CartItem, KitchenStation, OrderWithItems, Product, ProductVariant, ModifierGroup, Modifier } from "@/lib/types";
+ 
+ import { toast } from "@/components/Toast";
+@@ -130,6 +132,25 @@ export default function PosPage() {
+   // kalkulasi kembalian otomatis + tombol preset (Requirement 2).
+   const [cashReceived, setCashReceived] = useState("");
+   const [receipt, setReceipt] = useState<ReceiptData | null>(null);
++  // Preferensi kasir: cetak otomatis 2 lembar (customer + kitchen) tiap transaksi selesai.
++  const [autoPrintBoth, setAutoPrintBoth] = useState(false);
++  useEffect(() => {
++    try {
++      setAutoPrintBoth(localStorage.getItem("capos:autoPrintBoth") === "1");
++    } catch {}
++  }, []);
++  function toggleAutoPrintBoth(v: boolean) {
++    setAutoPrintBoth(v);
++    try {
++      localStorage.setItem("capos:autoPrintBoth", v ? "1" : "0");
++    } catch {}
++  }
++  useEffect(() => {
++    if (!receipt || !autoPrintBoth) return;
++    const t = setTimeout(() => printCustomerAndKitchen(receipt.width), 500);
++    return () => clearTimeout(t);
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [receipt]);
+   const [cashierName, setCashierName] = useState("Kasir");
+   const [cashierEmail, setCashierEmail] = useState<string | null>(null);
+   const [roleLabel, setRoleLabel] = useState("Kasir");
+@@ -348,6 +369,20 @@ export default function PosPage() {
+           // branch_stock untuk cabang ini, dianggap stoknya 0 (bukan
+           // unlimited) supaya tidak bisa terjual tanpa batas.
+           let merged = data as StockAwareProduct[];
++          // Menu yang dimatikan untuk cabang ini (Daftar Menu → "Dijual di cabang mana?").
++          // Tidak ada baris = dijual. Kalau tabelnya belum ada (migration_020 belum
++          // dijalankan), error diabaikan dan semua menu tetap tampil seperti biasa.
++          if (effectiveBranchId) {
++            const { data: hiddenRows } = await supabase
++              .from("branch_product_availability")
++              .select("product_id")
++              .eq("branch_id", effectiveBranchId)
++              .eq("is_available", false);
++            if (hiddenRows && hiddenRows.length > 0) {
++              const hiddenIds = new Set((hiddenRows as { product_id: string }[]).map((r) => r.product_id));
++              merged = merged.filter((p) => !hiddenIds.has(p.id));
++            }
++          }
+           if (effectiveBranchId) {
+             const { data: stockRows } = await supabase
+               .from("branch_stock")
+@@ -691,7 +726,14 @@ export default function PosPage() {
+   // adalah inti alur checkout yang sudah stabil dan di luar 3 modul yang
+   // diminta (Subscription/Onboarding/Membership).
+   const discountAmount = memberDiscountAmount + voucherDiscountPreview + pointsDiscountAmount;
+-  const total = Math.max(0, subtotal - discountAmount);
++  // Biaya layanan & pajak (Pengaturan → Kwitansi). `total` = yang harus dibayar
++  // pelanggan (sudah termasuk service/pajak bila aktif) sehingga kembalian,
++  // QRIS, dan struk otomatis memakai angka yang sama. Server menghitung ulang
++  // dengan rumus identik (calc_charges, migration_021).
++  const chargeSettings = useChargeSettings();
++  const netTotal = Math.max(0, subtotal - discountAmount);
++  const charges = computeCharges(netTotal, chargeSettings);
++  const total = charges.total;
+ 
+   async function applyVoucherCode() {
+     setVoucherError(null);
+@@ -975,6 +1017,13 @@ export default function PosPage() {
+       cashierName,
+       items: cart,
+       total,
++      serviceAmount: charges.service || undefined,
++      servicePct: chargeSettings.servicePct || undefined,
++      taxAmount: charges.tax || undefined,
++      taxPct: chargeSettings.taxPct || undefined,
++      taxInclusive: chargeSettings.taxInclusive,
++      serviceLabel: chargeSettings.serviceLabel,
++      taxLabel: chargeSettings.taxLabel,
+       discount: discountAmount,
+       paymentMethod,
+       createdAt: txPayload.created_at,
+@@ -1010,7 +1059,9 @@ export default function PosPage() {
+   // layar ini tidak dipakai untuk order yang sudah dikirim ke dapur).
+   function handleOpenBillPaid(_transactionId: string, order: OrderWithItems) {
+     setShowOpenBills(false);
+-    const total = order.order_items.reduce((sum, i) => sum + i.subtotal, 0);
++    const openBase = Math.max(0, order.order_items.reduce((sum, i) => sum + i.subtotal, 0) - (order.manual_discount_amount ?? 0));
++    const openCharges = computeCharges(openBase, chargeSettings);
++    const total = openCharges.total;
+     setReceipt({
+       cafeName: cafeSettings.name,
+       cafeLogoUrl: cafeSettings.logoUrl,
+@@ -1026,7 +1077,14 @@ export default function PosPage() {
+         modifiers: i.modifier_selections ?? [],
+       })) as unknown as ReceiptData["items"],
+       total,
+-      discount: 0,
++      serviceAmount: openCharges.service || undefined,
++      servicePct: chargeSettings.servicePct || undefined,
++      taxAmount: openCharges.tax || undefined,
++      taxPct: chargeSettings.taxPct || undefined,
++      taxInclusive: chargeSettings.taxInclusive,
++      serviceLabel: chargeSettings.serviceLabel,
++      taxLabel: chargeSettings.taxLabel,
++      discount: order.manual_discount_amount ?? 0,
+       paymentMethod: "lihat rincian di kasir",
+       createdAt: new Date().toISOString(),
+       showWifi: cafeSettings.showWifi,
+@@ -1292,6 +1350,13 @@ export default function PosPage() {
+             discountPct={discountPct}
+             discountAmount={discountAmount}
+             total={total}
++            serviceAmount={charges.service}
++            taxAmount={charges.tax}
++            servicePct={chargeSettings.servicePct}
++            taxPct={chargeSettings.taxPct}
++            taxInclusive={chargeSettings.taxInclusive}
++            serviceLabel={chargeSettings.serviceLabel}
++            taxLabel={chargeSettings.taxLabel}
+             onCheckout={() => setShowCheckout(true)}
+             onSendToKitchen={() => setShowSendToKitchen(true)}
+             quickPayDisabled={cartHasConfiguredItems}
+@@ -1346,6 +1411,13 @@ export default function PosPage() {
+             discountPct={discountPct}
+             discountAmount={discountAmount}
+             total={total}
++            serviceAmount={charges.service}
++            taxAmount={charges.tax}
++            servicePct={chargeSettings.servicePct}
++            taxPct={chargeSettings.taxPct}
++            taxInclusive={chargeSettings.taxInclusive}
++            serviceLabel={chargeSettings.serviceLabel}
++            taxLabel={chargeSettings.taxLabel}
+             onCheckout={() => {
+               setShowCartSheet(false);
+               setShowCheckout(true);
+@@ -1556,16 +1628,43 @@ export default function PosPage() {
+           onClose={() => setReceipt(null)}
+           maxWidth="sm:max-w-xs"
+           footer={
+-            <div className="flex gap-2">
+-              <button onClick={() => printReceipt(receipt.width)} className="btn-primary flex-1 flex items-center justify-center gap-2">
+-                <Printer size={16} /> Cetak Struk
++            <div className="flex flex-col gap-2">
++              <button onClick={() => printCustomerAndKitchen(receipt.width)} className="btn-primary w-full flex items-center justify-center gap-2">
++                <Printer size={16} /> Cetak 2 Struk (Customer + Kitchen)
+               </button>
++              <div className="flex gap-2">
++                <button onClick={() => printReceipt(receipt.width, "customer")} className="btn-outline flex-1 text-sm">
++                  Struk Customer
++                </button>
++                <button onClick={() => printReceipt(receipt.width, "kitchen")} className="btn-outline flex-1 text-sm">
++                  Tiket Kitchen
++                </button>
++              </div>
++              <label className="flex items-start gap-2 text-xs text-neutral-600 cursor-pointer">
++                <input type="checkbox" checked={autoPrintBoth} onChange={(e) => toggleAutoPrintBoth(e.target.checked)} className="mt-0.5" />
++                <span>Cetak otomatis 2 struk setiap transaksi selesai (di perangkat ini)</span>
++              </label>
+               <button onClick={() => setReceipt(null)} className="btn-outline">Tutup</button>
+             </div>
+           }
+         >
+-          <div className="bg-neutral-100 -m-5 p-4">
+-            <Receipt data={receipt} />
++          <div className="bg-neutral-100 -m-5 p-4 space-y-4">
++            <div>
++              <p className="text-[11px] font-semibold text-neutral-500 mb-1 text-center">1. STRUK CUSTOMER</p>
++              <Receipt data={receipt} />
++            </div>
++            <div>
++              <p className="text-[11px] font-semibold text-neutral-500 mb-1 text-center">2. TIKET KITCHEN</p>
++              <KitchenTicket
++                data={{
++                  invoiceNumber: receipt.invoiceNumber,
++                  cashierName: receipt.cashierName,
++                  createdAt: receipt.createdAt,
++                  items: receipt.items,
++                  width: receipt.width,
++                }}
++              />
++            </div>
+           </div>
+         </Modal>
+       )}
+@@ -1649,6 +1748,13 @@ function CartPanel({
+   discountPct,
+   discountAmount,
+   total,
++  serviceAmount = 0,
++  taxAmount = 0,
++  servicePct = 0,
++  taxPct = 0,
++  taxInclusive = false,
++  serviceLabel = "Service",
++  taxLabel = "Pajak",
+   onCheckout,
+   onSendToKitchen,
+   quickPayDisabled = false,
+@@ -1679,6 +1785,14 @@ function CartPanel({
+   discountPct: number;
+   discountAmount: number;
+   total: number;
++  /** Biaya layanan & pajak (0 = nonaktif). */
++  serviceAmount?: number;
++  taxAmount?: number;
++  servicePct?: number;
++  taxPct?: number;
++  taxInclusive?: boolean;
++  serviceLabel?: string;
++  taxLabel?: string;
+   onCheckout: () => void;
+   onSendToKitchen: () => void;
+   /** true kalau keranjang berisi item bervarian/modifier — jalur Bayar Langsung dimatikan untuk transaksi ini. */
+@@ -1839,10 +1953,25 @@ function CartPanel({
+               <span>-{formatRupiah(pointsDiscountAmount)}</span>
+             </div>
+           )}
++          {serviceAmount > 0 && (
++            <div className="flex justify-between text-neutral-600">
++              <span>{serviceLabel}{servicePct ? ` ${servicePct}%` : ""}</span>
++              <span>{formatRupiah(serviceAmount)}</span>
++            </div>
++          )}
++          {taxAmount > 0 && !taxInclusive && (
++            <div className="flex justify-between text-neutral-600">
++              <span>{taxLabel}{taxPct ? ` ${taxPct}%` : ""}</span>
++              <span>{formatRupiah(taxAmount)}</span>
++            </div>
++          )}
+           <div className="flex justify-between font-bold text-neutral-900 text-base pt-1">
+             <span>Total</span>
+             <span>{formatRupiah(total)}</span>
+           </div>
++          {taxAmount > 0 && taxInclusive && (
++            <p className="text-[11px] text-neutral-400 text-right">Sudah termasuk {taxLabel}{taxPct ? ` ${taxPct}%` : ""}: {formatRupiah(taxAmount)}</p>
++          )}
+         </div>
+ 
+         {/* Jalur utama F&B (Phase 2): kirim ke dapur dulu, lalu bayar
+diff --git a/components/DashboardSidebar.tsx b/components/DashboardSidebar.tsx
+index f8382db..794f237 100644
+--- a/components/DashboardSidebar.tsx
++++ b/components/DashboardSidebar.tsx
+@@ -86,20 +86,21 @@ const NAV_GROUPS: { label: string; items: { href: string; label: string; icon: a
+     ],
+   },
+   {
+-    label: "Katalog Produk",
++    // Urutan mengikuti alur setup: isi bahan → buat menu → susun resep (HPP).
++    label: "Menu & Resep",
+     items: [
+-      { href: "/dashboard/menu", label: "Kelola Menu & Stok", icon: Coffee },
+-      { href: "/dashboard/variants", label: "Varian Produk", icon: Layers },
+-      { href: "/dashboard/modifiers", label: "Modifier", icon: SlidersHorizontal },
+-      { href: "/dashboard/recipes", label: "Resep & HPP", icon: ChefHat },
+-      { href: "/dashboard/ingredients", label: "Bahan Baku", icon: Wheat },
++      { href: "/dashboard/ingredients", label: "Bahan Baku & Harga Beli", icon: Wheat },
++      { href: "/dashboard/menu", label: "Daftar Menu", icon: Coffee },
++      { href: "/dashboard/recipes", label: "Resep & HPP Menu", icon: ChefHat },
++      { href: "/dashboard/variants", label: "Varian (Ukuran/Penyajian)", icon: Layers },
++      { href: "/dashboard/modifiers", label: "Topping & Pilihan Tambahan", icon: SlidersHorizontal },
+     ],
+   },
+   {
+     label: "Inventori",
+     items: [
+-      { href: "/dashboard/stock", label: "Stok & HPP", icon: PackageSearch },
+-      { href: "/dashboard/stock-opname", label: "Stok Opname", icon: ClipboardList },
++      { href: "/dashboard/stock", label: "Stok Produk Jadi", icon: PackageSearch },
++      { href: "/dashboard/stock-opname", label: "Hitung Stok Fisik (Opname)", icon: ClipboardList },
+     ],
+   },
+   {
+diff --git a/components/Receipt.tsx b/components/Receipt.tsx
+index 5cadde7..aa5194a 100644
+--- a/components/Receipt.tsx
++++ b/components/Receipt.tsx
+@@ -2,6 +2,7 @@
+ 
+ import { formatRupiah } from "@/lib/utils";
+ import type { CartItem } from "@/lib/types";
++import { useHideBranding } from "@/lib/useHideBranding";
+ 
+ export interface ReceiptData {
+   cafeName: string;
+@@ -23,6 +24,18 @@ export interface ReceiptData {
+   /** Teks custom di footer, sebelum baris "powered by caPOS" — diatur di /dashboard/settings/receipt. */
+   footerText?: string | null;
+   width: "58mm" | "80mm";
++  /** Sembunyikan watermark caPOS. Kosongkan untuk otomatis dari pengaturan tenant (hanya Supreme). */
++  hideBranding?: boolean;
++  /** Biaya layanan & pajak (opsional; kosong = tidak ditampilkan). */
++  serviceAmount?: number;
++  servicePct?: number;
++  taxAmount?: number;
++  taxPct?: number;
++  /** true = pajak sudah termasuk di harga (hanya dipecah di struk). */
++  taxInclusive?: boolean;
++  /** Nama kustom biaya (mis. "PPN", "PB1"); kosong = "Service"/"Pajak". */
++  serviceLabel?: string;
++  taxLabel?: string;
+   /** Uang diterima & kembalian (khusus metode "cash") — Requirement 2. */
+   cashReceived?: number;
+   changeDue?: number;
+@@ -30,6 +43,7 @@ export interface ReceiptData {
+ 
+ export default function Receipt({ data }: { data: ReceiptData }) {
+   const subtotal = data.items.reduce((sum, i) => sum + (i.unitPrice ?? i.price) * i.qty, 0);
++  const hideBranding = useHideBranding(data.hideBranding);
+ 
+   return (
+     <div
+@@ -78,10 +92,27 @@ export default function Receipt({ data }: { data: ReceiptData }) {
+           <span>-{formatRupiah(data.discount)}</span>
+         </div>
+       )}
++      {(data.serviceAmount ?? 0) > 0 && (
++        <div className="flex justify-between">
++          <span>{data.serviceLabel || "Service"}{data.servicePct ? ` ${data.servicePct}%` : ""}</span>
++          <span>{formatRupiah(data.serviceAmount ?? 0)}</span>
++        </div>
++      )}
++      {(data.taxAmount ?? 0) > 0 && !data.taxInclusive && (
++        <div className="flex justify-between">
++          <span>{data.taxLabel || "Pajak"}{data.taxPct ? ` ${data.taxPct}%` : ""}</span>
++          <span>{formatRupiah(data.taxAmount ?? 0)}</span>
++        </div>
++      )}
+       <div className="flex justify-between font-bold text-sm mt-1">
+         <span>TOTAL</span>
+         <span>{formatRupiah(data.total)}</span>
+       </div>
++      {(data.taxAmount ?? 0) > 0 && data.taxInclusive && (
++        <p className="text-[10px] mt-0.5">
++          Sudah termasuk {(data.taxLabel || "Pajak").toLowerCase() === "pajak" ? "pajak" : data.taxLabel}{data.taxPct ? ` ${data.taxPct}%` : ""}: {formatRupiah(data.taxAmount ?? 0)}
++        </p>
++      )}
+       <p className="mt-1">Bayar: {data.paymentMethod.toUpperCase()}</p>
+       {typeof data.cashReceived === "number" && (
+         <div className="flex justify-between">
+@@ -109,7 +140,7 @@ export default function Receipt({ data }: { data: ReceiptData }) {
+         </>
+       )}
+ 
+-      <p className="text-center mt-2 text-[9px]">powered by caPOS — Studio D13</p>
++      {!hideBranding && <p className="text-center mt-2 text-[9px]">powered by caPOS — Studio D13</p>}
+     </div>
+   );
+ }
+diff --git a/components/onboarding/app-tour.tsx b/components/onboarding/app-tour.tsx
+index 573a179..302fcd9 100644
+--- a/components/onboarding/app-tour.tsx
++++ b/components/onboarding/app-tour.tsx
+@@ -23,21 +23,53 @@ const TOUR_STEPS: Step[] = [
+     title: "Selamat Datang di caPOS",
+     description: "Tur singkat ini mengenalkan setiap menu di sidebar. Klik Lanjut untuk menjelajah, atau Lewati tur kapan saja.",
+   },
++  // ===== Panduan setup awal (urutan yang disarankan) =====
++  {
++    target: "nav:/dashboard/ingredients",
++    title: "Langkah 1: Isi Bahan Baku & Harga Beli",
++    description:
++      "Mulai dari sini. Klik Tambah Bahan, isi nama, satuan (gram/ml/pcs), harga beli, dan stok awal — cukup satu form. Harga ini jadi dasar HPP, dan stok berkurang otomatis setiap ada penjualan.",
++  },
++  {
++    target: "nav:/dashboard/menu",
++    title: "Langkah 2: Tambah Menu",
++    description:
++      "Setelah bahan baku ada, klik Tambah Menu: isi nama, kategori, harga jual, dan foto. Kalau bahan baku belum diisi, aplikasi akan mengingatkan Anda di halaman ini.",
++  },
++  {
++    target: "nav:/dashboard/recipes",
++    title: "Langkah 3: Susun Resep & Lihat HPP",
++    description:
++      "Pilih menu, tambahkan bahan beserta takarannya per porsi. HPP per porsi dan margin langsung muncul otomatis; stok bahan juga berkurang sendiri tiap menu terjual.",
++  },
++  {
++    target: "nav:/dashboard/ingredients",
++    title: "Langkah 4: Cek Stok Bahan",
++    description:
++      "Pastikan stok tiap bahan sudah sesuai kondisi di dapur. Bahan yang menipis akan ditandai supaya Anda bisa belanja tepat waktu.",
++  },
++  {
++    target: "pos-quick-access",
++    title: "Langkah 5: Transaksi Pertama",
++    description:
++      "Buka Halaman Kasir (POS), pilih menu, lalu selesaikan pembayaran. Selama belum ada transaksi, beberapa halaman menampilkan DATA CONTOH (bertanda label Contoh) supaya tidak terlihat kosong. Begitu transaksi pertama selesai, semua data contoh hilang otomatis dan hanya data asli Anda yang tampil.",
++  },
++  // ===== Penjelasan tiap menu di sidebar =====
+   // Ringkasan
+   { target: "nav:/dashboard", title: "Laporan & Omzet", description: "Ringkasan performa kafe: omzet, jumlah transaksi, dan grafik tren pada periode terpilih." },
+   { target: "nav:/dashboard/laporan-pdf", title: "Laporan PDF Otomatis", description: "Buat dan unduh laporan penjualan berformat PDF sesuai rentang tanggal." },
+   { target: "nav:/dashboard/target", title: "Target Bulanan", description: "Tetapkan target omzet bulanan dan pantau tingkat pencapaiannya." },
+   { target: "nav:/dashboard/transactions", title: "Riwayat Transaksi", description: "Daftar semua transaksi: cari, lihat detail, dan cetak ulang struk." },
+   { target: "nav:/dashboard/cancellations", title: "Log Pembatalan", description: "Catatan transaksi yang dibatalkan (void) beserta alasannya." },
+-  // Katalog Produk
+-  { target: "nav:/dashboard/menu", title: "Kelola Menu & Stok", description: "Tambah atau ubah menu, harga, kategori, dan status ketersediaan." },
+-  { target: "nav:/dashboard/variants", title: "Varian Produk", description: "Atur varian menu (ukuran, penyajian) beserta selisih harganya." },
+-  { target: "nav:/dashboard/modifiers", title: "Modifier", description: "Grup pilihan tambahan seperti topping atau level gula untuk menu." },
+-  { target: "nav:/dashboard/recipes", title: "Resep & HPP", description: "Resep tiap menu sekaligus perhitungan Harga Pokok Penjualan." },
+-  { target: "nav:/dashboard/ingredients", title: "Bahan Baku", description: "Master bahan baku beserta satuan dan harga belinya." },
++  // Menu & Resep
++  { target: "nav:/dashboard/ingredients", title: "Bahan Baku & Harga Beli", description: "Daftar bahan beserta harga beli dan stok. Isi harga sekali, HPP menu dihitung otomatis. Tiap belanja bisa dicatat di sini agar harga rata-rata ikut terbarui." },
++  { target: "nav:/dashboard/menu", title: "Daftar Menu", description: "Tambah atau ubah menu, harga, kategori, foto, dan status tersedia/habis. Disarankan isi Bahan Baku lebih dulu agar resep dan HPP bisa langsung dibuat." },
++  { target: "nav:/dashboard/recipes", title: "Resep & HPP Menu", description: "Pilih menu, masukkan bahan dan takarannya. HPP per porsi dan margin langsung terhitung otomatis, tanpa perlu klik hitung." },
++  { target: "nav:/dashboard/variants", title: "Varian (Ukuran/Penyajian)", description: "Atur varian menu (mis. Regular/Large, Panas/Dingin) beserta selisih harganya." },
++  { target: "nav:/dashboard/modifiers", title: "Topping & Pilihan Tambahan", description: "Grup pilihan tambahan seperti topping atau level gula untuk menu." },
+   // Inventori
+-  { target: "nav:/dashboard/stock", title: "Stok & HPP", description: "Pantau stok bahan baku dan nilai persediaan saat ini." },
+-  { target: "nav:/dashboard/stock-opname", title: "Stok Opname", description: "Sensus fisik stok dan koreksi selisih hasil hitung." },
++  { target: "nav:/dashboard/stock", title: "Stok Produk Jadi", description: "Pantau stok dan harga pokok produk jadi (menu yang dijual tanpa resep)." },
++  { target: "nav:/dashboard/stock-opname", title: "Hitung Stok Fisik (Opname)", description: "Hitung stok fisik di dapur/gudang dan koreksi selisihnya dengan catatan sistem." },
+   // Purchasing
+   { target: "nav:/dashboard/purchasing/suppliers", title: "Pemasok", description: "Data supplier atau vendor tempat kafe membeli bahan." },
+   { target: "nav:/dashboard/purchasing/purchase-orders", title: "Purchase Order", description: "Buat dan kelola pesanan pembelian ke pemasok." },
+diff --git a/components/pos/OpenBillPanel.tsx b/components/pos/OpenBillPanel.tsx
+index 06d0053..47d9565 100644
+--- a/components/pos/OpenBillPanel.tsx
++++ b/components/pos/OpenBillPanel.tsx
+@@ -1,6 +1,7 @@
+ "use client";
+ 
+ import { useState } from "react";
++import { computeCharges, useChargeSettings } from "@/lib/charges";
+ import { Loader2, ArrowLeft, ArrowRightLeft, X, Ban, Pencil, Percent, Printer, Combine, SplitSquareHorizontal } from "lucide-react";
+ import Modal from "@/components/Modal";
+ import ConfirmDialog from "@/components/ConfirmDialog";
+@@ -198,7 +199,11 @@ export default function OpenBillPanel({
+   }
+ 
+   const subtotal = selectedOrder?.order_items.reduce((sum, i) => sum + i.unit_price * (i.qty - i.voided_qty), 0) ?? 0;
+-  const total = Math.max(0, subtotal - (selectedOrder?.manual_discount_amount ?? 0));
++  const chargeSettings = useChargeSettings();
++  const net = Math.max(0, subtotal - (selectedOrder?.manual_discount_amount ?? 0));
++  const charges = computeCharges(net, chargeSettings);
++  // total = yang harus dibayar (termasuk service/pajak bila aktif); server memvalidasi dengan rumus identik.
++  const total = charges.total;
+ 
+   // Void (poin 32-33, gerbang PIN Migrasi 019) — HANYA sebelum lunas
+   // (status COMPLETED/CANCELLED ditolak sendiri oleh void_order_item()/
+@@ -389,10 +394,25 @@ export default function OpenBillPanel({
+                 <span>-{formatRupiah(selectedOrder.manual_discount_amount)}</span>
+               </div>
+             )}
++            {charges.service > 0 && (
++              <div className="flex justify-between text-sm text-neutral-500">
++                <span>{chargeSettings.serviceLabel}{chargeSettings.servicePct ? ` ${chargeSettings.servicePct}%` : ""}</span>
++                <span>{formatRupiah(charges.service)}</span>
++              </div>
++            )}
++            {charges.tax > 0 && !chargeSettings.taxInclusive && (
++              <div className="flex justify-between text-sm text-neutral-500">
++                <span>{chargeSettings.taxLabel}{chargeSettings.taxPct ? ` ${chargeSettings.taxPct}%` : ""}</span>
++                <span>{formatRupiah(charges.tax)}</span>
++              </div>
++            )}
+             <div className="flex justify-between font-bold">
+               <span>Total</span>
+               <span className="text-primary">{formatRupiah(total)}</span>
+             </div>
++            {charges.tax > 0 && chargeSettings.taxInclusive && (
++              <p className="text-[11px] text-neutral-400 text-right">Sudah termasuk {chargeSettings.taxLabel}: {formatRupiah(charges.tax)}</p>
++            )}
+           </div>
+ 
+           <p className="text-xs text-neutral-500">Status pesanan: <span className="font-semibold">{selectedOrder.status}</span></p>
+diff --git a/components/pos/SplitBillModal.tsx b/components/pos/SplitBillModal.tsx
+index 2347940..1609fda 100644
+--- a/components/pos/SplitBillModal.tsx
++++ b/components/pos/SplitBillModal.tsx
+@@ -1,6 +1,7 @@
+ "use client";
+ 
+ import { useMemo, useState } from "react";
++import { computeCharges, useChargeSettings } from "@/lib/charges";
+ import { Loader2, Users, Layers, Plus, Trash2, CheckCircle2 } from "lucide-react";
+ import Modal from "@/components/Modal";
+ import { createClient } from "@/lib/supabase/client";
+@@ -147,12 +148,18 @@ export default function SplitBillModal({
+     if (activeGroupId === id) setActiveGroupId(groups[0].id);
+   }
+ 
+-  function groupTotal(g: ItemGroup) {
++  const chargeSettings = useChargeSettings();
++  // Nilai item (sebelum service/pajak) untuk satu sub-bill.
++  function groupNet(g: ItemGroup) {
+     return Object.entries(g.allocations).reduce((sum, [itemId, qty]) => {
+       const item = items.find((i) => i.id === itemId);
+       return sum + (item ? item.unit_price * qty : 0);
+     }, 0);
+   }
++  // Total yang dibayar sub-bill = nilai item + service + pajak (server memvalidasi rumus yang sama).
++  function groupTotal(g: ItemGroup) {
++    return computeCharges(groupNet(g), chargeSettings).total;
++  }
+ 
+   async function payItemGroup(group: ItemGroup) {
+     const allocations = Object.entries(group.allocations).filter(([, qty]) => qty > 0);
+diff --git a/components/receipt/KitchenTicket.tsx b/components/receipt/KitchenTicket.tsx
+new file mode 100644
+index 0000000..6c70087
+--- /dev/null
++++ b/components/receipt/KitchenTicket.tsx
+@@ -0,0 +1,74 @@
++"use client";
++
++import type { CartItem } from "@/lib/types";
++
++export interface KitchenTicketData {
++  /** Nomor order/invoice — ditulis besar supaya mudah dipanggil/dicocokkan. */
++  invoiceNumber: string;
++  cashierName: string;
++  createdAt: string;
++  items: CartItem[];
++  /** Nomor/nama meja (opsional). */
++  tableNumber?: string | number | null;
++  /** Mis. "Dine In", "Bawa Pulang" (opsional). */
++  orderTypeLabel?: string | null;
++  /** Catatan untuk dapur (opsional). */
++  note?: string | null;
++  width: "58mm" | "80mm";
++  /** Tandai sebagai cetak ulang. */
++  reprint?: boolean;
++}
++
++/**
++ * Tiket untuk dapur/bar — TANPA harga. Fokus: nomor order besar, jumlah +
++ * nama menu besar, varian/topping jelas, jam masuk. Dirender dengan
++ * id="kitchen-print" dan dicetak lewat printReceipt(width, "kitchen").
++ */
++export default function KitchenTicket({ data }: { data: KitchenTicketData }) {
++  const totalQty = data.items.reduce((s, i) => s + i.qty, 0);
++  const meta = [data.orderTypeLabel, data.tableNumber ? `Meja ${data.tableNumber}` : null].filter(Boolean).join(" · ");
++  const time = new Date(data.createdAt).toLocaleString("id-ID", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short" });
++
++  return (
++    <div
++      id="kitchen-print"
++      className="bg-white font-mono text-[12px] leading-tight p-3 mx-auto text-black"
++      style={{ width: data.width === "58mm" ? "58mm" : "80mm" }}
++    >
++      <p className="text-center font-bold text-base tracking-wide">TIKET KITCHEN</p>
++      {data.reprint && <p className="text-center font-bold">** CETAK ULANG **</p>}
++      <div className="border-t-2 border-dashed border-black my-1" />
++
++      <p className="text-center font-bold text-xl break-words">{data.invoiceNumber}</p>
++      {meta && <p className="text-center font-bold text-sm">{meta}</p>}
++      <p className="text-center text-[11px]">
++        {time} · Kasir: {data.cashierName}
++      </p>
++      <div className="border-t-2 border-dashed border-black my-1" />
++
++      {data.items.length === 0 ? (
++        <p className="text-center py-2">Tidak ada item</p>
++      ) : (
++        data.items.map((item) => {
++          const config = [item.variantName, ...(item.modifiers ?? []).map((m) => m.name)].filter(Boolean);
++          return (
++            <div key={item.cartItemId ?? item.id} className="mb-2">
++              <p className="font-bold text-sm break-words">
++                {item.qty}x {item.name}
++              </p>
++              {config.length > 0 && <p className="pl-4 text-[12px] font-semibold break-words">+ {config.join(", ")}</p>}
++            </div>
++          );
++        })
++      )}
++
++      <div className="border-t-2 border-dashed border-black my-1" />
++      {data.note && (
++        <p className="font-bold break-words mb-1">
++          CATATAN: <span className="font-normal">{data.note}</span>
++        </p>
++      )}
++      <p className="text-center font-bold">Total: {totalQty} item</p>
++    </div>
++  );
++}
+diff --git a/components/receipt/Receipt.tsx b/components/receipt/Receipt.tsx
+index f41f89c..b43638b 100644
+--- a/components/receipt/Receipt.tsx
++++ b/components/receipt/Receipt.tsx
+@@ -4,6 +4,7 @@ import { useState } from "react";
+ import { formatRupiah } from "@/lib/utils";
+ import { getOrderTypeLabel, computeReceiptTotals, type ReceiptOrderType } from "@/lib/receipt";
+ import type { CartItem } from "@/lib/types";
++import { useHideBranding } from "@/lib/useHideBranding";
+ 
+ export interface ReceiptData {
+   // --- Identitas kafe ---
+@@ -51,6 +52,8 @@ export interface ReceiptData {
+   footerNote?: string;
+ 
+   width: "58mm" | "80mm";
++  /** Sembunyikan watermark caPOS. Kosongkan untuk otomatis dari pengaturan tenant (hanya Supreme). */
++  hideBranding?: boolean;
+ }
+ 
+ function ItemConfigLine({ item }: { item: CartItem }) {
+@@ -61,6 +64,7 @@ function ItemConfigLine({ item }: { item: CartItem }) {
+ 
+ export default function Receipt({ data }: { data: ReceiptData }) {
+   const [logoFailed, setLogoFailed] = useState(false);
++  const hideBranding = useHideBranding(data.hideBranding);
+   const { subtotal, discount, serviceAmount, taxAmount, total } = computeReceiptTotals({
+     items: data.items,
+     discount: data.discount,
+@@ -185,7 +189,7 @@ export default function Receipt({ data }: { data: ReceiptData }) {
+         </>
+       )}
+ 
+-      <p className="text-center mt-2 text-[9px]">powered by caPOS — Studio D13</p>
++      {!hideBranding && <p className="text-center mt-2 text-[9px]">powered by caPOS — Studio D13</p>}
+     </div>
+   );
+ }
+diff --git a/components/receipt/index.ts b/components/receipt/index.ts
+index 3af0bd4..9c078fd 100644
+--- a/components/receipt/index.ts
++++ b/components/receipt/index.ts
+@@ -1,3 +1,4 @@
+ export { default as Receipt, type ReceiptData } from "./Receipt";
+ export { default as ReceiptPreviewModal } from "./ReceiptPreviewModal";
+-export { printReceipt, getOrderTypeLabel, computeReceiptTotals } from "@/lib/receipt";
++export { default as KitchenTicket, type KitchenTicketData } from "./KitchenTicket";
++export { printReceipt, printCustomerAndKitchen, getOrderTypeLabel, computeReceiptTotals } from "@/lib/receipt";
+diff --git a/lib/charges.ts b/lib/charges.ts
+new file mode 100644
+index 0000000..40cb6a9
+--- /dev/null
++++ b/lib/charges.ts
+@@ -0,0 +1,118 @@
++"use client";
++
++import { useEffect, useState } from "react";
++import { createClient } from "@/lib/supabase/client";
++import { getCurrentProfile } from "@/lib/getCurrentProfile";
++
++/**
++ * Biaya layanan (service charge) & pajak. Rumus IDENTIK dengan fungsi
++ * calc_charges() di database (migration_021) — server tetap yang menentukan
++ * total sebenarnya; ini hanya untuk pratinjau layar & struk.
++ *
++ *   dasar   = subtotal - diskon
++ *   service = dasar x service%
++ *   pajak   = (dasar + service) x pajak%         (mode ditambahkan)
++ *   total   = dasar + service + pajak
++ *   Mode "sudah termasuk": pajak = (dasar + service) x p/(100+p), total = dasar + service
++ *
++ * Persentase dibatasi 2 desimal (NUMERIC(5,2) di DB) dan dihitung dengan
++ * bilangan bulat agar pembulatannya sama persis dengan database.
++ */
++export interface ChargeSettings {
++  servicePct: number;
++  taxPct: number;
++  taxInclusive: boolean;
++  /** Nama yang tampil di kasir/struk/laporan, mis. "Service Charge", "PPN", "PB1". */
++  serviceLabel: string;
++  taxLabel: string;
++}
++
++export interface ChargeBreakdown {
++  base: number;
++  service: number;
++  tax: number;
++  total: number;
++}
++
++export const DEFAULT_SERVICE_LABEL = "Service";
++export const DEFAULT_TAX_LABEL = "Pajak";
++
++export const NO_CHARGES: ChargeSettings = {
++  servicePct: 0,
++  taxPct: 0,
++  taxInclusive: false,
++  serviceLabel: DEFAULT_SERVICE_LABEL,
++  taxLabel: DEFAULT_TAX_LABEL,
++};
++
++export function computeCharges(base: number, s: ChargeSettings): ChargeBreakdown {
++  const b = Math.max(0, Math.round(base));
++  const sp = Math.round((s.servicePct || 0) * 100); // persen x 100 (integer)
++  const tp = Math.round((s.taxPct || 0) * 100);
++  const service = Math.round((b * sp) / 10000);
++  const taxable = b + service;
++  if (s.taxInclusive) {
++    const tax = Math.round((taxable * tp) / (10000 + tp));
++    return { base: b, service, tax, total: taxable };
++  }
++  const tax = Math.round((taxable * tp) / 10000);
++  return { base: b, service, tax, total: taxable + tax };
++}
++
++export function hasCharges(s: ChargeSettings) {
++  return s.servicePct > 0 || s.taxPct > 0;
++}
++
++let cached: ChargeSettings | null = null;
++let inflight: Promise<ChargeSettings> | null = null;
++
++async function load(): Promise<ChargeSettings> {
++  try {
++    const { profile } = await getCurrentProfile();
++    if (!profile) return NO_CHARGES;
++    const supabase = createClient();
++    // Kolom nama (migration_022) bisa belum ada → ulangi tanpa kolom itu agar persen tetap terbaca.
++    const first = await supabase
++      .from("tenants")
++      .select("service_charge_pct, tax_pct, tax_inclusive, service_label, tax_label")
++      .eq("id", profile.tenant_id)
++      .single();
++    let data = first.data;
++    if (first.error) {
++      ({ data } = await supabase.from("tenants").select("service_charge_pct, tax_pct, tax_inclusive").eq("id", profile.tenant_id).single());
++    }
++    if (!data) return NO_CHARGES;
++    const d = data as Record<string, unknown>;
++    return {
++      servicePct: Number(d.service_charge_pct ?? 0),
++      taxPct: Number(d.tax_pct ?? 0),
++      taxInclusive: !!d.tax_inclusive,
++      serviceLabel: String(d.service_label ?? "").trim() || DEFAULT_SERVICE_LABEL,
++      taxLabel: String(d.tax_label ?? "").trim() || DEFAULT_TAX_LABEL,
++    };
++  } catch {
++    return NO_CHARGES; // kolom belum ada (migration_021 belum dijalankan) / offline → tanpa biaya
++  }
++}
++
++export function resetChargeSettingsCache() {
++  cached = null;
++  inflight = null;
++}
++
++/** Pengaturan biaya tenant (di-cache selama sesi halaman). */
++export function useChargeSettings(): ChargeSettings {
++  const [settings, setSettings] = useState<ChargeSettings>(cached ?? NO_CHARGES);
++  useEffect(() => {
++    if (cached) {
++      setSettings(cached);
++      return;
++    }
++    inflight = inflight ?? load();
++    inflight.then((v) => {
++      cached = v;
++      setSettings(v);
++    });
++  }, []);
++  return settings;
++}
+diff --git a/lib/ingredientTemplates.ts b/lib/ingredientTemplates.ts
+new file mode 100644
+index 0000000..d1e07c9
+--- /dev/null
++++ b/lib/ingredientTemplates.ts
+@@ -0,0 +1,85 @@
++/**
++ * Template bahan baku siap pakai untuk setup awal. Owner memilih jenis usaha,
++ * bahan umum langsung terdaftar (tanpa harga), lalu tinggal mengisi harga beli
++ * di halaman Bahan Baku & Harga Beli. Kode satuan mengikuti tabel `units`
++ * (gram, ml, pcs).
++ */
++export interface IngredientTemplateItem {
++  name: string;
++  unit: "gram" | "ml" | "pcs";
++  category: string;
++}
++
++export interface IngredientTemplatePack {
++  id: string;
++  label: string;
++  description: string;
++  items: IngredientTemplateItem[];
++}
++
++export const INGREDIENT_TEMPLATES: IngredientTemplatePack[] = [
++  {
++    id: "kopi",
++    label: "Kedai Kopi",
++    description: "Kopi, susu, sirup, dan kemasan dasar",
++    items: [
++      { name: "Biji Kopi Arabika", unit: "gram", category: "beverage" },
++      { name: "Biji Kopi Robusta", unit: "gram", category: "beverage" },
++      { name: "Susu Segar", unit: "ml", category: "beverage" },
++      { name: "Susu Kental Manis", unit: "ml", category: "beverage" },
++      { name: "Creamer", unit: "gram", category: "beverage" },
++      { name: "Gula Pasir", unit: "gram", category: "food" },
++      { name: "Gula Aren Cair", unit: "ml", category: "beverage" },
++      { name: "Sirup Karamel", unit: "ml", category: "beverage" },
++      { name: "Sirup Vanila", unit: "ml", category: "beverage" },
++      { name: "Bubuk Coklat", unit: "gram", category: "beverage" },
++      { name: "Bubuk Matcha", unit: "gram", category: "beverage" },
++      { name: "Es Batu", unit: "gram", category: "beverage" },
++      { name: "Air Mineral", unit: "ml", category: "beverage" },
++      { name: "Cup Plastik", unit: "pcs", category: "packaging" },
++      { name: "Tutup Cup", unit: "pcs", category: "packaging" },
++      { name: "Sedotan", unit: "pcs", category: "packaging" },
++    ],
++  },
++  {
++    id: "minuman",
++    label: "Minuman (Teh, Boba, Jus)",
++    description: "Teh, topping, buah, dan kemasan",
++    items: [
++      { name: "Teh Hitam", unit: "gram", category: "beverage" },
++      { name: "Teh Hijau", unit: "gram", category: "beverage" },
++      { name: "Gula Pasir", unit: "gram", category: "food" },
++      { name: "Sirup Gula", unit: "ml", category: "beverage" },
++      { name: "Susu Segar", unit: "ml", category: "beverage" },
++      { name: "Bubuk Taro", unit: "gram", category: "beverage" },
++      { name: "Boba/Tapioka Pearl", unit: "gram", category: "food" },
++      { name: "Jelly", unit: "gram", category: "food" },
++      { name: "Lemon", unit: "pcs", category: "food" },
++      { name: "Buah Segar (Campur)", unit: "gram", category: "food" },
++      { name: "Es Batu", unit: "gram", category: "beverage" },
++      { name: "Cup Plastik", unit: "pcs", category: "packaging" },
++      { name: "Tutup Cup", unit: "pcs", category: "packaging" },
++      { name: "Sedotan", unit: "pcs", category: "packaging" },
++    ],
++  },
++  {
++    id: "makanan",
++    label: "Makanan Ringan & Kafe",
++    description: "Tepung, telur, mentega, dan bahan dapur umum",
++    items: [
++      { name: "Tepung Terigu", unit: "gram", category: "food" },
++      { name: "Telur Ayam", unit: "pcs", category: "food" },
++      { name: "Mentega", unit: "gram", category: "food" },
++      { name: "Minyak Goreng", unit: "ml", category: "food" },
++      { name: "Gula Pasir", unit: "gram", category: "food" },
++      { name: "Garam", unit: "gram", category: "food" },
++      { name: "Keju Cheddar", unit: "gram", category: "food" },
++      { name: "Kentang", unit: "gram", category: "food" },
++      { name: "Roti Burger/Bun", unit: "pcs", category: "food" },
++      { name: "Daging Ayam", unit: "gram", category: "food" },
++      { name: "Saus Sambal", unit: "ml", category: "food" },
++      { name: "Mayonaise", unit: "gram", category: "food" },
++      { name: "Kotak Makanan", unit: "pcs", category: "packaging" },
++    ],
++  },
++];
+diff --git a/lib/receipt.ts b/lib/receipt.ts
+index 2fc4d31..0897a25 100644
+--- a/lib/receipt.ts
++++ b/lib/receipt.ts
+@@ -39,7 +39,15 @@ export function getOrderTypeLabel(orderType?: ReceiptOrderType | null): string |
+  * Dipakai oleh setiap tempat yang merender <Receipt/> (id="receipt-print"):
+  * CheckoutSuccess, Open Bill, riwayat transaksi, dsb.
+  */
+-export function printReceipt(width: "58mm" | "80mm" = "80mm") {
++export type PrintTarget = "customer" | "kitchen";
++
++/**
++ * target "customer" → mencetak <Receipt/> (id="receipt-print").
++ * target "kitchen"  → mencetak <KitchenTicket/> (id="kitchen-print").
++ * Pilihan ditandai lewat body[data-print-target]; aturan @media print di
++ * globals.css hanya menampilkan elemen yang sesuai target.
++ */
++export function printReceipt(width: "58mm" | "80mm" = "80mm", target: PrintTarget = "customer") {
+   if (typeof document === "undefined") return; // guard SSR
+   const styleId = "dynamic-receipt-page-size";
+   let styleTag = document.getElementById(styleId) as HTMLStyleElement | null;
+@@ -49,9 +57,31 @@ export function printReceipt(width: "58mm" | "80mm" = "80mm") {
+     document.head.appendChild(styleTag);
+   }
+   styleTag.textContent = `@media print { @page { size: ${width} auto; margin: 0; } }`;
++  document.body.dataset.printTarget = target;
++  const cleanup = () => {
++    delete document.body.dataset.printTarget;
++    window.removeEventListener("afterprint", cleanup);
++  };
++  window.addEventListener("afterprint", cleanup);
+   window.print();
+ }
+ 
++/**
++ * Cetak 2 lembar berurutan dari satu transaksi: struk customer, lalu tiket
++ * kitchen. Tiket kitchen dicetak setelah dialog/cetak pertama selesai
++ * (event afterprint) supaya tidak saling menimpa. Kalau browser memakai
++ * kiosk-printing (tanpa dialog), kedua lembar keluar otomatis berurutan.
++ */
++export function printCustomerAndKitchen(width: "58mm" | "80mm" = "80mm") {
++  if (typeof window === "undefined") return;
++  const onAfter = () => {
++    window.removeEventListener("afterprint", onAfter);
++    setTimeout(() => printReceipt(width, "kitchen"), 400);
++  };
++  window.addEventListener("afterprint", onAfter);
++  printReceipt(width, "customer");
++}
++
+ export interface ReceiptTotals {
+   subtotal: number;
+   discount: number;
+diff --git a/lib/reportPdf.ts b/lib/reportPdf.ts
+new file mode 100644
+index 0000000..729712d
+--- /dev/null
++++ b/lib/reportPdf.ts
+@@ -0,0 +1,549 @@
++import { formatRupiah } from "@/lib/utils";
++import { DEMO_REPORT_TX, DEMO_REPORT_ITEMS, DEMO_REPORT_OPNAME } from "@/lib/demoData";
++
++/**
++ * Generator PDF bersama untuk DUA jenis laporan:
++ *  - "omzet": ringkas — omzet, analitik pertumbuhan, grafik batang, pertumbuhan cabang.
++ *  - "full" : lengkap — semua di atas + laba kotor/HPP, kerugian opname, menu terlaris,
++ *             metode pembayaran, dan kinerja kasir.
++ *
++ * Kedua jenis SELALU memuat analitik pertumbuhan (dibanding periode sebelumnya
++ * dengan panjang sama) dan grafik batang per cabang, supaya owner bisa melihat
++ * cabang mana yang tumbuh atau turun. Grafik digambar dengan primitif jsPDF
++ * (rect/line/text), jadi tidak butuh canvas atau library tambahan.
++ */
++export type ReportType = "omzet" | "full";
++
++export interface ReportOptions {
++  supabase: any;
++  tenantId: string;
++  cafeName: string;
++  type: ReportType;
++  start: Date;
++  end: Date;
++  /** ID cabang, atau "all" untuk konsolidasi semua cabang. */
++  branchId: string;
++  branches: { id: string; name: string }[];
++  /** Tampilkan label cabang di header (hanya untuk akun yang bisa ganti cabang). */
++  showBranchLabel: boolean;
++  isDemo: boolean;
++  /** Catatan kecil di header, mis. batas paket Free Trial. */
++  note?: string;
++}
++
++type RGB = [number, number, number];
++const GREEN: RGB = [16, 185, 129];
++const GREY: RGB = [180, 190, 200];
++
++const localKey = (d: Date) => {
++  const p = (n: number) => String(n).padStart(2, "0");
++  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
++};
++
++function fmtShort(n: number) {
++  const a = Math.abs(n);
++  if (a >= 1e9) return `${(n / 1e9).toFixed(1).replace(/\.0$/, "")}M`;
++  if (a >= 1e6) return `${(n / 1e6).toFixed(1).replace(/\.0$/, "")}jt`;
++  if (a >= 1e3) return `${Math.round(n / 1e3)}rb`;
++  return String(Math.round(n));
++}
++
++function growth(cur: number, prev: number): number | null {
++  if (prev <= 0) return cur > 0 ? null : 0; // null = "Baru" (tidak ada pembanding)
++  return ((cur - prev) / prev) * 100;
++}
++
++function fmtGrowth(g: number | null, curIsZero = false) {
++  if (g === null) return "Baru";
++  if (g === 0 && curIsZero) return "-";
++  return `${g >= 0 ? "+" : ""}${g.toFixed(1)}%`;
++}
++
++function niceMax(v: number) {
++  const pow = Math.pow(10, Math.floor(Math.log10(v)));
++  const m = v / pow;
++  return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * pow;
++}
++
++function ensure(doc: any, y: number, need: number) {
++  if (y + need > doc.internal.pageSize.getHeight() - 40) {
++    doc.addPage();
++    return 50;
++  }
++  return y;
++}
++
++/** Grafik batang (grouped bars). Mengembalikan posisi y setelah grafik. */
++function drawBars(
++  doc: any,
++  o: {
++    x: number;
++    y: number;
++    w: number;
++    h: number;
++    title: string;
++    labels: string[];
++    series: { name: string; color: RGB; values: number[] }[];
++    labelEvery?: number;
++  }
++): number {
++  const { x, y, w, h, title, labels, series } = o;
++  doc.setFont("helvetica", "bold");
++  doc.setFontSize(11);
++  doc.setTextColor(0);
++  doc.text(title, x, y);
++
++  // Legenda (kanan atas)
++  if (series.length > 1) {
++    let lx = x + w;
++    doc.setFont("helvetica", "normal");
++    doc.setFontSize(8);
++    for (const s of [...series].reverse()) {
++      const tw = doc.getTextWidth(s.name);
++      lx -= tw;
++      doc.setTextColor(90);
++      doc.text(s.name, lx, y);
++      lx -= 10;
++      doc.setFillColor(...s.color);
++      doc.rect(lx, y - 6, 7, 7, "F");
++      lx -= 10;
++    }
++  }
++
++  const top = y + 12;
++  const plotH = h - 34;
++  const left = x + 40;
++  const plotW = w - 40;
++  const maxVal = niceMax(Math.max(1, ...series.flatMap((s) => s.values)));
++
++  doc.setFontSize(7);
++  doc.setTextColor(120);
++  doc.setLineWidth(0.4);
++  for (let i = 0; i <= 4; i++) {
++    const gy = top + plotH - (plotH * i) / 4;
++    doc.setDrawColor(228);
++    doc.line(left, gy, left + plotW, gy);
++    doc.text(fmtShort((maxVal * i) / 4), left - 4, gy + 2, { align: "right" });
++  }
++
++  const n = Math.max(1, labels.length);
++  const groupW = plotW / n;
++  const barW = Math.min(30, (groupW * 0.72) / series.length);
++  const every = o.labelEvery ?? Math.max(1, Math.ceil(n / 12));
++  for (let i = 0; i < n; i++) {
++    series.forEach((s, k) => {
++      const v = s.values[i] ?? 0;
++      const bh = (v / maxVal) * plotH;
++      if (bh > 0) {
++        const bx = left + groupW * i + (groupW - barW * series.length) / 2 + barW * k;
++        doc.setFillColor(...s.color);
++        doc.rect(bx, top + plotH - bh, barW, bh, "F");
++      }
++    });
++    if (i % every === 0) {
++      doc.setFontSize(7);
++      doc.setTextColor(100);
++      doc.text(labels[i] ?? "", left + groupW * i + groupW / 2, top + plotH + 11, { align: "center" });
++    }
++  }
++  doc.setTextColor(0);
++  return y + h;
++}
++
++/** Grafik batang horizontal (peringkat). */
++function drawHBars(doc: any, o: { x: number; y: number; w: number; title: string; rows: { label: string; value: number }[] }): number {
++  const { x, w, title, rows } = o;
++  let y = o.y;
++  doc.setFont("helvetica", "bold");
++  doc.setFontSize(11);
++  doc.setTextColor(0);
++  doc.text(title, x, y);
++  y += 10;
++  const maxVal = Math.max(1, ...rows.map((r) => r.value));
++  const labelW = 120;
++  const barMax = w - labelW - 60;
++  doc.setFont("helvetica", "normal");
++  doc.setFontSize(8);
++  for (const r of rows) {
++    y += 15;
++    doc.setTextColor(60);
++    doc.text(r.label.length > 24 ? r.label.slice(0, 23) + "…" : r.label, x, y);
++    const bw = (r.value / maxVal) * barMax;
++    doc.setFillColor(...GREEN);
++    if (bw > 0) doc.rect(x + labelW, y - 7, bw, 9, "F");
++    doc.setTextColor(90);
++    doc.text(String(r.value), x + labelW + bw + 4, y);
++  }
++  doc.setTextColor(0);
++  return y + 14;
++}
++
++async function fetchTx(opts: ReportOptions, start: Date, end: Date, full: boolean) {
++  const { supabase, tenantId, branchId } = opts;
++  const base = full ? "id, total_amount, payment_method, created_at, cashier_id, branch_id, profiles(full_name)" : "id, total_amount, created_at, branch_id";
++  const run = async (cols: string) => {
++    let q = supabase
++      .from("transactions")
++      .select(cols)
++      .eq("tenant_id", tenantId)
++      .gte("created_at", start.toISOString())
++      .lte("created_at", end.toISOString())
++      .limit(10000);
++    if (branchId !== "all") q = q.eq("branch_id", branchId);
++    return q;
++  };
++  // Kolom service_amount/tax_amount ada sejak migration_021; kalau belum
++  // dijalankan, ulangi tanpa kolom itu supaya laporan tetap jadi.
++  const withCharges = await run(base + ", service_amount, tax_amount");
++  if (!withCharges.error) return (withCharges.data ?? []) as any[];
++  const plain = await run(base);
++  return (plain.data ?? []) as any[];
++}
++
++export async function generateReportPdf(opts: ReportOptions): Promise<void> {
++  const { supabase, tenantId, cafeName, type, start, end, branchId, branches, isDemo } = opts;
++  const full = type === "full";
++
++  // Periode pembanding: rentang sama panjang tepat sebelum periode ini.
++  const span = end.getTime() - start.getTime();
++  const prevEnd = new Date(start.getTime() - 1);
++  const prevStart = new Date(prevEnd.getTime() - span);
++
++  const [txRows, prevRows, itemRows, opnameRows] = await Promise.all([
++    isDemo ? Promise.resolve(DEMO_REPORT_TX) : fetchTx(opts, start, end, full),
++    isDemo ? Promise.resolve([] as any[]) : fetchTx(opts, prevStart, prevEnd, false),
++    isDemo || !full
++      ? Promise.resolve(isDemo ? DEMO_REPORT_ITEMS : [])
++      : (() => {
++          let q = supabase
++            .from("transaction_items")
++            .select("qty, subtotal, product_id, products(name, cost_price), transactions!inner(created_at, tenant_id, branch_id)")
++            .eq("transactions.tenant_id", tenantId)
++            .gte("transactions.created_at", start.toISOString())
++            .lte("transactions.created_at", end.toISOString())
++            .limit(10000);
++          if (branchId !== "all") q = q.eq("transactions.branch_id", branchId);
++          return q.then((r: any) => r.data ?? []);
++        })(),
++    isDemo || !full
++      ? Promise.resolve(isDemo ? DEMO_REPORT_OPNAME : [])
++      : (() => {
++          let q = supabase
++            .from("stock_opname_logs")
++            .select("loss_value")
++            .eq("tenant_id", tenantId)
++            .gte("created_at", start.toISOString())
++            .lte("created_at", end.toISOString())
++            .limit(10000);
++          if (branchId !== "all") q = q.eq("branch_id", branchId);
++          return q.then((r: any) => r.data ?? []);
++        })(),
++  ]);
++
++  // Nama kustom service/pajak (migration_022); gagal/kolom belum ada → nama default.
++  let serviceLabel = "Service";
++  let taxLabel = "Pajak";
++  try {
++    const { data: lab, error: labErr } = await supabase.from("tenants").select("service_label, tax_label").eq("id", tenantId).single();
++    if (!labErr && lab) {
++      serviceLabel = String((lab as any).service_label ?? "").trim() || serviceLabel;
++      taxLabel = String((lab as any).tax_label ?? "").trim() || taxLabel;
++    }
++  } catch {}
++
++  const transactions: any[] = txRows;
++  const items: any[] = itemRows;
++
++  // ---------- Angka utama ----------
++  const sum = (rows: any[]) => rows.reduce((s, t) => s + Number(t.total_amount), 0);
++  const totalOmzet = sum(transactions);
++  const totalOrders = transactions.length;
++  const avg = totalOrders > 0 ? Math.round(totalOmzet / totalOrders) : 0;
++  const prevOmzet = sum(prevRows);
++  const prevOrders = prevRows.length;
++  const prevAvg = prevOrders > 0 ? Math.round(prevOmzet / prevOrders) : 0;
++  const totalService = transactions.reduce((sum, t) => sum + Number(t.service_amount ?? 0), 0);
++  const totalTax = transactions.reduce((sum, t) => sum + Number(t.tax_amount ?? 0), 0);
++  const totalOpnameLoss = (opnameRows as any[]).reduce((s, r) => s + Number(r.loss_value), 0);
++  const totalHpp = items.reduce((s, it) => s + Number(it.qty) * Number(it.products?.cost_price ?? 0), 0);
++  const grossProfit = totalOmzet - totalHpp;
++  const netProfit = grossProfit - totalOpnameLoss;
++
++  const gOmzet = growth(totalOmzet, prevOmzet);
++  const gOrders = growth(totalOrders, prevOrders);
++  const gAvg = growth(avg, prevAvg);
++
++  // ---------- Deret waktu (per jam untuk 1 hari, per hari untuk lebih) ----------
++  const singleDay = localKey(start) === localKey(end);
++  let tLabels: string[] = [];
++  let tValues: number[] = [];
++  let peakText = "";
++  if (singleDay) {
++    tLabels = Array.from({ length: 24 }, (_, h) => String(h).padStart(2, "0"));
++    tValues = Array(24).fill(0);
++    for (const t of transactions) tValues[new Date(t.created_at).getHours()] += Number(t.total_amount);
++    const maxV = Math.max(...tValues);
++    if (maxV > 0) {
++      const h = tValues.indexOf(maxV);
++      peakText = `Jam paling ramai: ${String(h).padStart(2, "0")}.00–${String(h + 1).padStart(2, "0")}.00 (${formatRupiah(maxV)})`;
++    }
++  } else {
++    const dayMap = new Map<string, number>();
++    for (const t of transactions) {
++      const k = localKey(new Date(t.created_at));
++      dayMap.set(k, (dayMap.get(k) ?? 0) + Number(t.total_amount));
++    }
++    const cursor = new Date(start);
++    cursor.setHours(0, 0, 0, 0);
++    let guard = 0;
++    while (cursor <= end && guard++ < 93) {
++      const k = localKey(cursor);
++      tLabels.push(k.slice(8) + "/" + k.slice(5, 7));
++      tValues.push(dayMap.get(k) ?? 0);
++      cursor.setDate(cursor.getDate() + 1);
++    }
++    const maxV = Math.max(0, ...tValues);
++    if (maxV > 0) peakText = `Hari omzet tertinggi: ${tLabels[tValues.indexOf(maxV)]} (${formatRupiah(maxV)})`;
++  }
++
++  // ---------- Pertumbuhan per cabang ----------
++  const nameOf = (id: string | null | undefined) => branches.find((b) => b.id === id)?.name ?? (isDemo ? "Cabang Utama (contoh)" : "Cabang");
++  const branchKeys = new Set<string>();
++  for (const t of [...transactions, ...prevRows]) branchKeys.add(t.branch_id ?? "_");
++  if (branchId !== "all") branchKeys.add(branchId);
++  if (branchId === "all") for (const b of branches) branchKeys.add(b.id);
++  const branchRows = Array.from(branchKeys)
++    .map((key) => {
++      const cur = transactions.filter((t) => (t.branch_id ?? "_") === key);
++      const prv = prevRows.filter((t) => (t.branch_id ?? "_") === key);
++      return {
++        name: key === "_" ? nameOf(null) : nameOf(key),
++        cur: sum(cur),
++        prev: sum(prv),
++        curOrders: cur.length,
++        prevOrders: prv.length,
++      };
++    })
++    .sort((a, b) => b.cur - a.cur);
++
++  // ---------- Menu / pembayaran / kasir (laporan lengkap) ----------
++  const productMap = new Map<string, { qty: number; revenue: number }>();
++  for (const it of items) {
++    const name = it.products?.name ?? "Produk";
++    const e = productMap.get(name) ?? { qty: 0, revenue: 0 };
++    e.qty += Number(it.qty);
++    e.revenue += Number(it.subtotal);
++    productMap.set(name, e);
++  }
++  const topProducts = Array.from(productMap.entries()).sort(([, a], [, b]) => b.qty - a.qty).slice(0, 10);
++
++  const paymentMap = new Map<string, { count: number; revenue: number }>();
++  for (const t of transactions) {
++    const m = (t.payment_method ?? "cash").toUpperCase();
++    const e = paymentMap.get(m) ?? { count: 0, revenue: 0 };
++    e.count += 1;
++    e.revenue += Number(t.total_amount);
++    paymentMap.set(m, e);
++  }
++  const cashierMap = new Map<string, { orders: number; revenue: number }>();
++  for (const t of transactions) {
++    const name = t.profiles?.full_name ?? "Kasir";
++    const e = cashierMap.get(name) ?? { orders: 0, revenue: 0 };
++    e.orders += 1;
++    e.revenue += Number(t.total_amount);
++    cashierMap.set(name, e);
++  }
++
++  // ---------- Gambar PDF ----------
++  const { default: jsPDF } = await import("jspdf");
++  const { default: autoTable } = await import("jspdf-autotable");
++  const doc: any = new jsPDF({ unit: "pt", format: "a4" });
++  const pageWidth = doc.internal.pageSize.getWidth();
++  const margin = 40;
++  const contentW = pageWidth - margin * 2;
++  let y = 50;
++
++  const sectionTitle = (text: string) => {
++    y = ensure(doc, y, 60);
++    doc.setFontSize(11);
++    doc.setFont("helvetica", "bold");
++    doc.setTextColor(0);
++    doc.text(text, margin, y);
++    y += 6;
++  };
++  const table = (head: string[][], body: string[][]) => {
++    autoTable(doc, {
++      startY: y,
++      margin: { left: margin, right: margin },
++      styles: { fontSize: 9 },
++      theme: "grid",
++      head,
++      body: body.length ? body : [head[0].map(() => "-")],
++      headStyles: { fillColor: GREEN },
++    });
++    y = doc.lastAutoTable.finalY + 22;
++  };
++
++  doc.setFontSize(16);
++  doc.setFont("helvetica", "bold");
++  doc.text(cafeName, margin, y);
++  y += 20;
++  doc.setFontSize(11);
++  doc.setFont("helvetica", "normal");
++  doc.text(full ? "Laporan Lengkap — caPOS" : "Laporan Omzet — caPOS", margin, y);
++  y += 16;
++  doc.setFontSize(9);
++  doc.setTextColor(100);
++  const branchLabel = opts.showBranchLabel ? `  ·  Cabang: ${branchId === "all" ? "Semua Cabang (Konsolidasi)" : nameOf(branchId)}` : "";
++  doc.text(`Periode: ${localKey(start)} s/d ${localKey(end)}  ·  Dibuat: ${new Date().toLocaleString("id-ID")}${branchLabel}`, margin, y);
++  y += 12;
++  if (opts.note) {
++    doc.setTextColor(180, 83, 9);
++    doc.text(opts.note, margin, y);
++    y += 12;
++  }
++  doc.setTextColor(0);
++  y += 10;
++
++  // Ringkasan
++  if (full) {
++    table(
++      [["Total Omzet", "Total Transaksi", "Rata-rata/Transaksi", "Laba Kotor", "Kerugian Opname", "Keuntungan Bersih"]],
++      [[formatRupiah(totalOmzet), String(totalOrders), formatRupiah(avg), formatRupiah(grossProfit), totalOpnameLoss > 0 ? `- ${formatRupiah(totalOpnameLoss)}` : formatRupiah(0), formatRupiah(netProfit)]]
++    );
++  } else {
++    table(
++      [["Total Omzet", "Total Transaksi", "Rata-rata/Transaksi", "Pertumbuhan Omzet"]],
++      [[formatRupiah(totalOmzet), String(totalOrders), formatRupiah(avg), fmtGrowth(gOmzet, totalOmzet === 0)]]
++    );
++  }
++
++  // Analitik pertumbuhan
++  sectionTitle(singleDay ? "Analitik Pertumbuhan (dibanding hari sebelumnya)" : "Analitik Pertumbuhan (dibanding periode sebelumnya)");
++  table(
++    [["Metrik", "Periode Ini", "Periode Lalu", "Perubahan"]],
++    [
++      ["Omzet", formatRupiah(totalOmzet), formatRupiah(prevOmzet), fmtGrowth(gOmzet, totalOmzet === 0)],
++      ["Jumlah Transaksi", String(totalOrders), String(prevOrders), fmtGrowth(gOrders, totalOrders === 0)],
++      ["Rata-rata per Transaksi", formatRupiah(avg), formatRupiah(prevAvg), fmtGrowth(gAvg, avg === 0)],
++    ]
++  );
++  doc.setFont("helvetica", "normal");
++  doc.setFontSize(9);
++  doc.setTextColor(70);
++  const insight =
++    gOmzet === null
++      ? "Belum ada data periode sebelumnya sebagai pembanding."
++      : gOmzet >= 0
++        ? `Omzet naik ${gOmzet.toFixed(1)}% dibanding periode sebelumnya.`
++        : `Omzet turun ${Math.abs(gOmzet).toFixed(1)}% dibanding periode sebelumnya.`;
++  doc.text(insight + (peakText ? `  ${peakText}.` : ""), margin, y - 10, { maxWidth: contentW });
++  doc.setTextColor(0);
++  y += 8;
++
++  if (totalService > 0 || totalTax > 0) {
++    sectionTitle(`Rincian ${serviceLabel} & ${taxLabel}`);
++    table(
++      [["Keterangan", "Jumlah"]],
++      [
++        ["Total dibayar pelanggan", formatRupiah(totalOmzet)],
++        [serviceLabel, formatRupiah(totalService)],
++        [taxLabel, formatRupiah(totalTax)],
++        [`Penjualan bersih (tanpa ${serviceLabel} & ${taxLabel})`, formatRupiah(totalOmzet - totalService - totalTax)],
++      ]
++    );
++  }
++
++  // Grafik 1: omzet per jam / per hari
++  y = ensure(doc, y, 190);
++  y = drawBars(doc, {
++    x: margin,
++    y,
++    w: contentW,
++    h: 170,
++    title: singleDay ? "Grafik Omzet per Jam" : "Grafik Omzet per Hari",
++    labels: tLabels,
++    series: [{ name: "Omzet", color: GREEN, values: tValues }],
++    labelEvery: singleDay ? 3 : undefined,
++  }) + 14;
++
++  // Grafik 2: pertumbuhan per cabang
++  sectionTitle("Pertumbuhan per Cabang");
++  table(
++    [["Cabang", "Omzet Ini", "Omzet Lalu", "Pertumbuhan", "Transaksi Ini", "Transaksi Lalu"]],
++    branchRows.map((b) => [b.name, formatRupiah(b.cur), formatRupiah(b.prev), fmtGrowth(growth(b.cur, b.prev), b.cur === 0), String(b.curOrders), String(b.prevOrders)])
++  );
++  if (branchRows.length > 0) {
++    y = ensure(doc, y, 190);
++    y = drawBars(doc, {
++      x: margin,
++      y,
++      w: contentW,
++      h: 170,
++      title: "Grafik Omzet per Cabang: Periode Ini vs Periode Lalu",
++      labels: branchRows.map((b) => (b.name.length > 14 ? b.name.slice(0, 13) + "…" : b.name)),
++      series: [
++        { name: "Periode lalu", color: GREY, values: branchRows.map((b) => b.prev) },
++        { name: "Periode ini", color: GREEN, values: branchRows.map((b) => b.cur) },
++      ],
++      labelEvery: 1,
++    }) + 14;
++  }
++
++  // Rincian harian
++  if (!singleDay) {
++    sectionTitle("Omzet Harian");
++    const dayAgg = new Map<string, { orders: number; revenue: number }>();
++    for (const t of transactions) {
++      const k = localKey(new Date(t.created_at));
++      const e = dayAgg.get(k) ?? { orders: 0, revenue: 0 };
++      e.orders += 1;
++      e.revenue += Number(t.total_amount);
++      dayAgg.set(k, e);
++    }
++    table(
++      [["Tanggal", "Jumlah Transaksi", "Omzet"]],
++      Array.from(dayAgg.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([d, v]) => [d, String(v.orders), formatRupiah(v.revenue)])
++    );
++  }
++
++  if (full) {
++    sectionTitle("Menu Terlaris");
++    table(
++      [["Menu", "Terjual (pcs)", "Omzet"]],
++      topProducts.map(([name, v]) => [name, String(v.qty), formatRupiah(v.revenue)])
++    );
++    if (topProducts.length > 0) {
++      y = ensure(doc, y, 20 + Math.min(5, topProducts.length) * 15 + 20);
++      y = drawHBars(doc, {
++        x: margin,
++        y,
++        w: contentW,
++        title: "Grafik 5 Menu Terlaris (pcs)",
++        rows: topProducts.slice(0, 5).map(([name, v]) => ({ label: name, value: v.qty })),
++      }) + 10;
++    }
++
++    sectionTitle("Metode Pembayaran");
++    table(
++      [["Metode", "Jumlah Transaksi", "Total"]],
++      Array.from(paymentMap.entries()).map(([m, v]) => [m, String(v.count), formatRupiah(v.revenue)])
++    );
++
++    sectionTitle("Kinerja Kasir");
++    table(
++      [["Kasir", "Jumlah Transaksi", "Omzet"]],
++      Array.from(cashierMap.entries()).sort(([, a], [, b]) => b.revenue - a.revenue).map(([n, v]) => [n, String(v.orders), formatRupiah(v.revenue)])
++    );
++  }
++
++  const pageCount = doc.internal.pages.length - 1;
++  for (let i = 1; i <= pageCount; i++) {
++    doc.setPage(i);
++    doc.setFontSize(8);
++    doc.setTextColor(150);
++    doc.text(`Dibuat otomatis oleh caPOS — halaman ${i}/${pageCount}`, pageWidth / 2, doc.internal.pageSize.getHeight() - 20, { align: "center" });
++  }
++
++  doc.save(`${full ? "laporan-lengkap" : "laporan-omzet"}-capos-${localKey(start)}-sd-${localKey(end)}.pdf`);
++}
+diff --git a/lib/tier.ts b/lib/tier.ts
+index 9b1ebf9..55707f8 100644
+--- a/lib/tier.ts
++++ b/lib/tier.ts
+@@ -30,6 +30,8 @@ export const FREE_TIER_LIMITS = {
+   maxCashiers: 2,
+   maxMenu: 10,
+   historyDays: 14,
++  /** Export laporan (PDF/CSV) untuk Free Trial dibatasi 1 hari (hari ini saja). */
++  exportDays: 1,
+ };
+ 
+ /** Batas riwayat (hari) per tier — dipakai halaman Riwayat Transaksi & Laporan. */
+diff --git a/lib/useHideBranding.ts b/lib/useHideBranding.ts
+new file mode 100644
+index 0000000..d0f99cd
+--- /dev/null
++++ b/lib/useHideBranding.ts
+@@ -0,0 +1,55 @@
++"use client";
++
++import { useEffect, useState } from "react";
++import { createClient } from "@/lib/supabase/client";
++import { getCurrentProfile } from "@/lib/getCurrentProfile";
++
++/**
++ * Apakah watermark "powered by caPOS" disembunyikan di struk? True hanya jika
++ * (1) tenants.receipt_hide_branding aktif DAN (2) tenant masih Supreme saat
++ * ini. Syarat (2) dicek ulang di sini supaya tenant yang sudah turun paket
++ * tidak lagi memakainya walau flag lama masih tersimpan.
++ * Hasil di-cache selama sesi halaman agar tiap <Receipt/> tidak query ulang.
++ */
++let cached: boolean | null = null;
++let inflight: Promise<boolean> | null = null;
++
++async function load(): Promise<boolean> {
++  try {
++    const { profile } = await getCurrentProfile();
++    if (!profile) return false;
++    const supabase = createClient();
++    const { data: tenant } = await supabase.from("tenants").select("receipt_hide_branding").eq("id", profile.tenant_id).single();
++    if (!tenant?.receipt_hide_branding) return false;
++    if (profile.role === "super_admin") return true;
++    const { data: tier } = await supabase.rpc("tenant_tier", { p_tenant_id: profile.tenant_id });
++    return tier === "supreme";
++  } catch {
++    return false; // gagal/offline → tampilkan watermark (default aman)
++  }
++}
++
++export function resetHideBrandingCache() {
++  cached = null;
++  inflight = null;
++}
++
++export function useHideBranding(explicit?: boolean): boolean {
++  const [value, setValue] = useState<boolean>(explicit ?? cached ?? false);
++  useEffect(() => {
++    if (explicit !== undefined) {
++      setValue(explicit);
++      return;
++    }
++    if (cached !== null) {
++      setValue(cached);
++      return;
++    }
++    inflight = inflight ?? load();
++    inflight.then((v) => {
++      cached = v;
++      setValue(v);
++    });
++  }, [explicit]);
++  return value;
++}
+diff --git a/lib/utils.ts b/lib/utils.ts
+index d68ab01..a9554e1 100644
+--- a/lib/utils.ts
++++ b/lib/utils.ts
+@@ -75,14 +75,4 @@ export function formatItemConfigLine(item: {
+  * app/pos/page.tsx, components/pos/OpenBillPanel.tsx,
+  * components/tables/TableStatusBoard.tsx.
+  */
+-export function printReceipt(width: "58mm" | "80mm" = "80mm") {
+-  const styleId = "dynamic-receipt-page-size";
+-  let styleTag = document.getElementById(styleId) as HTMLStyleElement | null;
+-  if (!styleTag) {
+-    styleTag = document.createElement("style");
+-    styleTag.id = styleId;
+-    document.head.appendChild(styleTag);
+-  }
+-  styleTag.textContent = `@media print { @page { size: ${width} auto; margin: 0; } }`;
+-  window.print();
+-}
++export { printReceipt, printCustomerAndKitchen, type PrintTarget } from "./receipt";
+diff --git a/supabase/migration_020_receipt_branding_branch_menu.sql b/supabase/migration_020_receipt_branding_branch_menu.sql
+new file mode 100644
+index 0000000..69db467
+--- /dev/null
++++ b/supabase/migration_020_receipt_branding_branch_menu.sql
+@@ -0,0 +1,108 @@
++-- =========================================================
++-- migration_020 — Watermark struk khusus Supreme + Menu per cabang
++-- Jalankan SEKALI di Supabase SQL Editor. Aman diulang (IF NOT EXISTS).
++-- Tidak mengubah fungsi checkout yang sudah ada.
++-- =========================================================
++
++-- ---------- A. Hilangkan watermark "powered by caPOS" (khusus Supreme) ----------
++ALTER TABLE tenants
++  ADD COLUMN IF NOT EXISTS receipt_hide_branding BOOLEAN NOT NULL DEFAULT false;
++
++COMMENT ON COLUMN tenants.receipt_hide_branding IS
++  'true = sembunyikan baris "powered by caPOS — Studio D13" di struk. Hanya boleh diaktifkan tenant Supreme (ditegakkan trigger enforce_hide_branding_supreme).';
++
++CREATE OR REPLACE FUNCTION enforce_hide_branding_supreme()
++RETURNS TRIGGER
++LANGUAGE plpgsql
++SECURITY DEFINER
++SET search_path = public, pg_temp
++AS $$
++BEGIN
++  IF NEW.receipt_hide_branding IS TRUE
++     AND (TG_OP = 'INSERT' OR OLD.receipt_hide_branding IS DISTINCT FROM NEW.receipt_hide_branding) THEN
++    -- super_admin boleh; selain itu tenant harus Supreme.
++    IF NOT is_super_admin() AND COALESCE(tenant_tier(NEW.id), 'free') <> 'supreme' THEN
++      RAISE EXCEPTION 'Menghilangkan watermark caPOS hanya tersedia untuk paket Supreme.';
++    END IF;
++  END IF;
++  RETURN NEW;
++END;
++$$;
++
++DROP TRIGGER IF EXISTS trg_enforce_hide_branding_supreme ON tenants;
++CREATE TRIGGER trg_enforce_hide_branding_supreme
++  BEFORE INSERT OR UPDATE OF receipt_hide_branding ON tenants
++  FOR EACH ROW EXECUTE FUNCTION enforce_hide_branding_supreme();
++
++-- ---------- B. Menu per cabang (cabang tertentu tidak menjual menu tertentu) ----------
++-- Aturan: TIDAK ada baris = menu dijual di cabang itu (perilaku lama tidak berubah).
++-- Baris dengan is_available = false = menu TIDAK dijual di cabang itu.
++CREATE TABLE IF NOT EXISTS branch_product_availability (
++  tenant_id    UUID NOT NULL REFERENCES tenants(id)  ON DELETE CASCADE,
++  branch_id    UUID NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
++  product_id   UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
++  is_available BOOLEAN NOT NULL DEFAULT true,
++  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
++  PRIMARY KEY (branch_id, product_id)
++);
++
++CREATE INDEX IF NOT EXISTS idx_bpa_tenant_branch ON branch_product_availability (tenant_id, branch_id);
++CREATE INDEX IF NOT EXISTS idx_bpa_product ON branch_product_availability (product_id);
++
++ALTER TABLE branch_product_availability ENABLE ROW LEVEL SECURITY;
++
++DROP POLICY IF EXISTS "BPA: tenant view" ON branch_product_availability;
++CREATE POLICY "BPA: tenant view" ON branch_product_availability
++  FOR SELECT USING (is_super_admin() OR tenant_id = current_tenant_id());
++
++DROP POLICY IF EXISTS "BPA: manager/owner scoped write" ON branch_product_availability;
++CREATE POLICY "BPA: manager/owner scoped write" ON branch_product_availability
++  USING (
++    tenant_id = current_tenant_id()
++    AND is_manager_or_owner()
++    AND (is_owner() OR branch_id = current_branch_id())
++  )
++  WITH CHECK (
++    tenant_id = current_tenant_id()
++    AND is_manager_or_owner()
++    AND (is_owner() OR branch_id = current_branch_id())
++  );
++
++-- Jaring pengaman server: transaksi/order untuk menu yang dimatikan di cabang
++-- itu ditolak, walau layar kasir lama masih menyimpan menunya.
++CREATE OR REPLACE FUNCTION enforce_branch_product_availability()
++RETURNS TRIGGER
++LANGUAGE plpgsql
++SECURITY DEFINER
++SET search_path = public, pg_temp
++AS $$
++DECLARE
++  v_branch UUID;
++  v_name   TEXT;
++BEGIN
++  IF TG_TABLE_NAME = 'transaction_items' THEN
++    SELECT branch_id INTO v_branch FROM transactions WHERE id = NEW.transaction_id;
++  ELSE
++    SELECT branch_id INTO v_branch FROM orders WHERE id = NEW.order_id;
++  END IF;
++
++  IF v_branch IS NOT NULL AND NEW.product_id IS NOT NULL AND EXISTS (
++    SELECT 1 FROM branch_product_availability a
++    WHERE a.branch_id = v_branch AND a.product_id = NEW.product_id AND a.is_available = false
++  ) THEN
++    SELECT name INTO v_name FROM products WHERE id = NEW.product_id;
++    RAISE EXCEPTION 'Menu "%" tidak dijual di cabang ini.', COALESCE(v_name, 'ini');
++  END IF;
++  RETURN NEW;
++END;
++$$;
++
++DROP TRIGGER IF EXISTS trg_bpa_transaction_items ON transaction_items;
++CREATE TRIGGER trg_bpa_transaction_items
++  BEFORE INSERT ON transaction_items
++  FOR EACH ROW EXECUTE FUNCTION enforce_branch_product_availability();
++
++DROP TRIGGER IF EXISTS trg_bpa_order_items ON order_items;
++CREATE TRIGGER trg_bpa_order_items
++  BEFORE INSERT ON order_items
++  FOR EACH ROW EXECUTE FUNCTION enforce_branch_product_availability();
+diff --git a/supabase/migration_021_service_tax.sql b/supabase/migration_021_service_tax.sql
+new file mode 100644
+index 0000000..fc28bfe
+--- /dev/null
++++ b/supabase/migration_021_service_tax.sql
+@@ -0,0 +1,609 @@
++-- =========================================================
++-- migration_021 — Biaya Layanan (service charge) & Pajak otomatis
++-- Jalankan SEKALI di Supabase SQL Editor SETELAH migration_020.
++--
++-- Default 0% = perilaku lama TIDAK berubah. Baru aktif setelah owner
++-- mengisi persentase di Pengaturan → Kwitansi → "Biaya Layanan & Pajak".
++--
++-- Urutan hitung (standar restoran Indonesia):
++--   dasar   = subtotal - diskon
++--   service = dasar x service%
++--   pajak   = (dasar + service) x pajak%        -- mode "ditambahkan"
++--   total   = dasar + service + pajak
++--   Mode "sudah termasuk harga": pajak = (dasar + service) x p/(100+p),
++--   total = dasar + service (pajak hanya dipecah di struk).
++--
++-- Tiga fungsi checkout di bawah adalah salinan fungsi yang ada, hanya
++-- ditambah pemanggilan calc_charges() dan kolom service_amount/tax_amount.
++-- =========================================================
++
++ALTER TABLE tenants
++  ADD COLUMN IF NOT EXISTS service_charge_pct NUMERIC(5,2) NOT NULL DEFAULT 0 CHECK (service_charge_pct >= 0 AND service_charge_pct <= 100),
++  ADD COLUMN IF NOT EXISTS tax_pct            NUMERIC(5,2) NOT NULL DEFAULT 0 CHECK (tax_pct >= 0 AND tax_pct <= 100),
++  ADD COLUMN IF NOT EXISTS tax_inclusive      BOOLEAN      NOT NULL DEFAULT false;
++
++ALTER TABLE transactions
++  ADD COLUMN IF NOT EXISTS service_amount NUMERIC NOT NULL DEFAULT 0,
++  ADD COLUMN IF NOT EXISTS tax_amount     NUMERIC NOT NULL DEFAULT 0;
++
++CREATE OR REPLACE FUNCTION calc_charges(p_tenant_id UUID, p_base NUMERIC)
++RETURNS TABLE (service_amount NUMERIC, tax_amount NUMERIC, total_amount NUMERIC)
++LANGUAGE plpgsql
++STABLE
++SECURITY DEFINER
++SET search_path = public, pg_temp
++AS $$
++DECLARE
++  v_s NUMERIC;
++  v_t NUMERIC;
++  v_incl BOOLEAN;
++  v_service NUMERIC;
++  v_tax NUMERIC;
++BEGIN
++  SELECT COALESCE(service_charge_pct, 0), COALESCE(tax_pct, 0), COALESCE(tax_inclusive, false)
++    INTO v_s, v_t, v_incl
++    FROM tenants WHERE id = p_tenant_id;
++
++  v_s := COALESCE(v_s, 0);
++  v_t := COALESCE(v_t, 0);
++  v_service := round(p_base * v_s / 100);
++
++  IF v_incl THEN
++    v_tax := round((p_base + v_service) * v_t / (100 + v_t));
++    RETURN QUERY SELECT v_service, v_tax, p_base + v_service;
++  ELSE
++    v_tax := round((p_base + v_service) * v_t / 100);
++    RETURN QUERY SELECT v_service, v_tax, p_base + v_service + v_tax;
++  END IF;
++END;
++$$;
++
++GRANT EXECUTE ON FUNCTION calc_charges(UUID, NUMERIC) TO authenticated;
++
++CREATE OR REPLACE FUNCTION "public"."checkout_order_split_by_item"("p_order_id" "uuid", "p_invoice_number" "text", "p_item_allocations" "jsonb", "p_payments" "jsonb", "p_split_label" "text" DEFAULT NULL::"text", "p_member_code" "text" DEFAULT NULL::"text") RETURNS "uuid"
++    LANGUAGE "plpgsql" SECURITY DEFINER
++    SET "search_path" TO 'public', 'pg_temp'
++    AS $$
++DECLARE
++  v_order orders%ROWTYPE;
++  v_item order_items%ROWTYPE;
++  v_alloc JSONB;
++  v_qty INT;
++  v_line_total NUMERIC;
++  v_subtotal NUMERIC := 0;
++  v_total NUMERIC;
++  v_service NUMERIC := 0;
++  v_tax NUMERIC := 0;
++  v_discount_pct NUMERIC := 0;
++  v_member_id UUID := NULL;
++  v_tx_id UUID;
++  v_pay JSONB;
++  v_payments_sum NUMERIC := 0;
++  v_branch_id UUID;
++  v_stock RECORD;
++  v_stock_qty INT;
++  v_remaining_after INT;
++BEGIN
++  SELECT * INTO v_order FROM orders WHERE id = p_order_id FOR UPDATE;
++  IF v_order.id IS NULL THEN
++    RAISE EXCEPTION 'Pesanan tidak ditemukan';
++  END IF;
++  IF NOT is_super_admin() AND v_order.tenant_id <> current_tenant_id() THEN
++    RAISE EXCEPTION 'Akses ditolak: bukan pesanan tenant Anda';
++  END IF;
++  IF v_order.status NOT IN ('READY', 'SERVED') THEN
++    RAISE EXCEPTION 'Pesanan belum siap dibayar (status saat ini: %)', v_order.status;
++  END IF;
++  IF v_order.status = 'COMPLETED' OR v_order.status = 'CANCELLED' THEN
++    RAISE EXCEPTION 'Pesanan sudah selesai/dibatalkan';
++  END IF;
++  IF p_item_allocations IS NULL OR jsonb_array_length(p_item_allocations) = 0 THEN
++    RAISE EXCEPTION 'Alokasi item split kosong';
++  END IF;
++  IF p_payments IS NULL OR jsonb_array_length(p_payments) = 0 THEN
++    RAISE EXCEPTION 'Rincian pembayaran kosong';
++  END IF;
++
++  v_branch_id := COALESCE(v_order.branch_id, main_branch_id(v_order.tenant_id));
++
++  IF p_member_code IS NOT NULL AND p_member_code <> '' THEN
++    SELECT id, discount_percentage INTO v_member_id, v_discount_pct
++    FROM memberships
++    WHERE tenant_id = v_order.tenant_id AND member_code = p_member_code AND is_active = true AND valid_until > now();
++    IF v_member_id IS NULL THEN
++      RAISE EXCEPTION 'Kode member tidak valid atau kedaluwarsa';
++    END IF;
++  END IF;
++
++  -- Pass 1: kunci & validasi semua baris alokasi dulu (all-or-nothing).
++  FOR v_alloc IN SELECT * FROM jsonb_array_elements(p_item_allocations) LOOP
++    SELECT * INTO v_item FROM order_items WHERE id = (v_alloc->>'order_item_id')::UUID AND order_id = p_order_id FOR UPDATE;
++    IF v_item.id IS NULL THEN
++      RAISE EXCEPTION 'Item pesanan tidak ditemukan di order ini';
++    END IF;
++    v_qty := (v_alloc->>'qty')::INT;
++    IF v_qty IS NULL OR v_qty <= 0 THEN
++      RAISE EXCEPTION 'Qty alokasi split tidak valid';
++    END IF;
++    IF v_qty > (v_item.qty - v_item.voided_qty - v_item.split_billed_qty) THEN
++      RAISE EXCEPTION 'SPLIT_QTY_EXCEEDS: Qty alokasi (%) melebihi sisa "%" yang belum tertagih (%)',
++        v_qty, v_item.product_name, (v_item.qty - v_item.voided_qty - v_item.split_billed_qty);
++    END IF;
++    v_subtotal := v_subtotal + (v_item.unit_price * v_qty);
++  END LOOP;
++
++  IF v_subtotal <= 0 THEN
++    RAISE EXCEPTION 'Alokasi split tidak memiliki nilai';
++  END IF;
++
++  v_total := round(v_subtotal * (1 - v_discount_pct / 100));
++
++  -- Migrasi 021: biaya service & pajak per sub-bill (default 0% = tanpa perubahan).
++  SELECT c.service_amount, c.tax_amount, c.total_amount INTO v_service, v_tax, v_total
++    FROM calc_charges(v_order.tenant_id, v_total) c;
++
++  FOR v_pay IN SELECT * FROM jsonb_array_elements(p_payments) LOOP
++    IF (v_pay->>'method') NOT IN ('cash', 'qris', 'debit', 'credit', 'ewallet', 'bank_transfer') THEN
++      RAISE EXCEPTION 'Metode pembayaran tidak valid: %', (v_pay->>'method');
++    END IF;
++    IF (v_pay->>'amount')::NUMERIC IS NULL OR (v_pay->>'amount')::NUMERIC <= 0 THEN
++      RAISE EXCEPTION 'Nominal pembayaran tidak valid';
++    END IF;
++    v_payments_sum := v_payments_sum + (v_pay->>'amount')::NUMERIC;
++  END LOOP;
++
++  IF v_payments_sum <> v_total THEN
++    RAISE EXCEPTION 'PAYMENT_MISMATCH: Total pembayaran (%) tidak sama dengan total sub-bill ini (%)', v_payments_sum, v_total;
++  END IF;
++
++  v_tx_id := gen_random_uuid();
++
++  INSERT INTO transactions (
++    id, tenant_id, cashier_id, shift_id, invoice_number, total_amount,
++    payment_method, member_id, is_offline_sync, branch_id, order_id, split_group_label,
++    service_amount, tax_amount
++  ) VALUES (
++    v_tx_id, v_order.tenant_id, v_order.cashier_id, v_order.shift_id, p_invoice_number, v_total,
++    CASE WHEN jsonb_array_length(p_payments) > 1 THEN 'mixed' ELSE (p_payments->0->>'method') END,
++    v_member_id, false, v_branch_id, p_order_id, p_split_label,
++    v_service, v_tax
++  );
++
++  FOR v_pay IN SELECT * FROM jsonb_array_elements(p_payments) LOOP
++    INSERT INTO transaction_payments (transaction_id, method, amount, reference_number, split_group_label)
++      VALUES (v_tx_id, v_pay->>'method', (v_pay->>'amount')::NUMERIC, NULLIF(v_pay->>'reference_number', ''), p_split_label);
++  END LOOP;
++
++  -- Pass 2: catat transaction_items, kurangi stok (branch_stock,
++  -- pola sama dengan checkout_order_v2), tandai split_billed_qty.
++  FOR v_alloc IN SELECT * FROM jsonb_array_elements(p_item_allocations) LOOP
++    SELECT * INTO v_item FROM order_items WHERE id = (v_alloc->>'order_item_id')::UUID;
++    v_qty := (v_alloc->>'qty')::INT;
++    v_line_total := v_item.unit_price * v_qty;
++
++    INSERT INTO transaction_items (transaction_id, product_id, qty, subtotal) VALUES (v_tx_id, v_item.product_id, v_qty, v_line_total);
++
++    SELECT track_stock INTO v_stock FROM products WHERE id = v_item.product_id;
++    IF v_stock.track_stock THEN
++      SELECT stock_qty INTO v_stock_qty FROM branch_stock WHERE branch_id = v_branch_id AND product_id = v_item.product_id FOR UPDATE;
++      IF v_stock_qty IS NULL THEN
++        v_stock_qty := 0;
++        INSERT INTO branch_stock (tenant_id, branch_id, product_id, stock_qty)
++          VALUES (v_order.tenant_id, v_branch_id, v_item.product_id, 0) ON CONFLICT (branch_id, product_id) DO NOTHING;
++      END IF;
++      IF v_stock_qty < v_qty THEN
++        RAISE EXCEPTION 'STOCK_INSUFFICIENT: Stok "%" tidak cukup (tersisa %, diminta %).', v_item.product_name, v_stock_qty, v_qty;
++      END IF;
++      UPDATE branch_stock SET stock_qty = stock_qty - v_qty, updated_at = now() WHERE branch_id = v_branch_id AND product_id = v_item.product_id;
++      INSERT INTO stock_movements (tenant_id, branch_id, product_id, type, qty_change, note, created_by)
++        VALUES (v_order.tenant_id, v_branch_id, v_item.product_id, 'sale', -v_qty,
++                'Split bill dari pesanan ' || v_order.order_number || COALESCE(' (' || p_split_label || ')', ''), v_order.cashier_id);
++    END IF;
++
++    UPDATE order_items SET split_billed_qty = split_billed_qty + v_qty WHERE id = v_item.id;
++  END LOOP;
++
++  -- Order selesai total begitu SEMUA item (dikurangi void) sudah
++  -- habis tertagih lewat split — cek ulang SETELAH update di atas.
++  SELECT COUNT(*) INTO v_remaining_after FROM order_items
++    WHERE order_id = p_order_id AND (qty - voided_qty - split_billed_qty) > 0;
++
++  IF v_remaining_after = 0 THEN
++    UPDATE orders SET status = 'COMPLETED', completed_at = now(), transaction_id = v_tx_id WHERE id = p_order_id;
++    IF v_order.order_type = 'dine_in' AND v_order.table_id IS NOT NULL THEN
++      UPDATE branch_tables SET needs_cleaning = true, cleaning_started_at = now(), bill_printed_at = NULL WHERE id = v_order.table_id;
++    END IF;
++  END IF;
++
++  INSERT INTO audit_log (tenant_id, branch_id, user_id, action, entity_type, entity_id, old_value, new_value, reason)
++    VALUES (v_order.tenant_id, v_branch_id, auth.uid(), 'SPLIT_BILL_ITEM', 'order', p_order_id, NULL,
++            jsonb_build_object('transaction_id', v_tx_id, 'amount', v_total, 'split_label', p_split_label, 'order_fully_settled', v_remaining_after = 0),
++            NULL);
++
++  RETURN v_tx_id;
++END;
++$$;
++
++CREATE OR REPLACE FUNCTION "public"."checkout_order_v2"("p_order_id" "uuid", "p_invoice_number" "text", "p_member_code" "text", "p_payments" "jsonb") RETURNS "uuid"
++    LANGUAGE "plpgsql" SECURITY DEFINER
++    SET "search_path" TO 'public', 'pg_temp'
++    AS $$
++DECLARE
++  v_order orders%ROWTYPE;
++  v_item RECORD;
++  v_pay JSONB;
++  v_subtotal NUMERIC := 0;
++  v_discount_pct NUMERIC := 0;
++  v_member_id UUID := NULL;
++  v_total NUMERIC;
++  v_service NUMERIC := 0;
++  v_tax NUMERIC := 0;
++  v_tx_id UUID;
++  v_payments_sum NUMERIC := 0;
++  v_branch_id UUID;
++  v_stock RECORD;
++  v_effective_qty INT;
++  v_effective_subtotal NUMERIC;
++BEGIN
++  SELECT * INTO v_order FROM orders WHERE id = p_order_id;
++  IF v_order.id IS NULL THEN
++    RAISE EXCEPTION 'Pesanan tidak ditemukan';
++  END IF;
++
++  IF NOT is_super_admin() AND v_order.tenant_id <> current_tenant_id() THEN
++    RAISE EXCEPTION 'Akses ditolak: bukan pesanan tenant Anda';
++  END IF;
++
++  IF v_order.status NOT IN ('READY', 'SERVED') THEN
++    RAISE EXCEPTION 'Pesanan belum siap dibayar (status saat ini: %)', v_order.status;
++  END IF;
++
++  IF v_order.transaction_id IS NOT NULL THEN
++    RAISE EXCEPTION 'Pesanan ini sudah dibayar sebelumnya';
++  END IF;
++
++  IF jsonb_array_length(p_payments) = 0 THEN
++    RAISE EXCEPTION 'Rincian pembayaran kosong';
++  END IF;
++
++  v_branch_id := COALESCE(v_order.branch_id, main_branch_id(v_order.tenant_id));
++
++  IF p_member_code IS NOT NULL AND p_member_code <> '' THEN
++    SELECT id, discount_percentage INTO v_member_id, v_discount_pct
++    FROM memberships
++    WHERE tenant_id = v_order.tenant_id
++      AND member_code = p_member_code
++      AND is_active = true
++      AND valid_until > now();
++    IF v_member_id IS NULL THEN
++      RAISE EXCEPTION 'Kode member tidak valid atau kedaluwarsa';
++    END IF;
++  END IF;
++
++  SELECT COALESCE(SUM(subtotal), 0) INTO v_subtotal FROM order_items WHERE order_id = p_order_id;
++  IF v_subtotal <= 0 THEN
++    RAISE EXCEPTION 'Pesanan tidak memiliki item';
++  END IF;
++
++  -- Migrasi 019: diskon manual (Rupiah, wajib PIN supervisor lewat
++  -- apply_manual_discount()) diterapkan SETELAH diskon persen member,
++  -- lalu dibulatkan sekali di akhir supaya tidak ada selisih pembulatan.
++  v_total := GREATEST(0, round(v_subtotal * (1 - v_discount_pct / 100)) - COALESCE(v_order.manual_discount_amount, 0));
++
++  -- Migrasi 021: biaya service & pajak (default 0% = tanpa perubahan).
++  SELECT c.service_amount, c.tax_amount, c.total_amount INTO v_service, v_tax, v_total
++    FROM calc_charges(v_order.tenant_id, v_total) c;
++
++  FOR v_pay IN SELECT * FROM jsonb_array_elements(p_payments) LOOP
++    IF (v_pay->>'method') NOT IN ('cash', 'qris', 'debit', 'credit', 'ewallet', 'bank_transfer') THEN
++      RAISE EXCEPTION 'Metode pembayaran tidak valid: %', (v_pay->>'method');
++    END IF;
++    IF (v_pay->>'amount')::NUMERIC IS NULL OR (v_pay->>'amount')::NUMERIC <= 0 THEN
++      RAISE EXCEPTION 'Nominal pembayaran tidak valid';
++    END IF;
++    v_payments_sum := v_payments_sum + (v_pay->>'amount')::NUMERIC;
++  END LOOP;
++
++  IF v_payments_sum <> v_total THEN
++    RAISE EXCEPTION 'PAYMENT_MISMATCH: Total pembayaran (%) tidak sama dengan total tagihan (%)', v_payments_sum, v_total;
++  END IF;
++
++  v_tx_id := gen_random_uuid();
++
++  INSERT INTO transactions (
++    id, tenant_id, cashier_id, shift_id, invoice_number, total_amount,
++    payment_method, member_id, is_offline_sync, branch_id, order_id,
++    service_amount, tax_amount
++  ) VALUES (
++    v_tx_id, v_order.tenant_id, v_order.cashier_id, v_order.shift_id, p_invoice_number, v_total,
++    CASE WHEN jsonb_array_length(p_payments) > 1 THEN 'mixed' ELSE (p_payments->0->>'method') END,
++    v_member_id, false, v_branch_id, p_order_id,
++    v_service, v_tax
++  );
++
++  FOR v_pay IN SELECT * FROM jsonb_array_elements(p_payments) LOOP
++    -- split_group_label (opsional, mis. "Orang 1/3") murni label kosmetik
++    -- struk untuk mode Split Bill "Split by Amount" — tidak memengaruhi
++    -- validasi nominal di atas.
++    INSERT INTO transaction_payments (transaction_id, method, amount, reference_number, split_group_label)
++      VALUES (v_tx_id, v_pay->>'method', (v_pay->>'amount')::NUMERIC, NULLIF(v_pay->>'reference_number', ''), NULLIF(v_pay->>'split_group_label', ''));
++  END LOOP;
++
++  FOR v_item IN SELECT * FROM order_items WHERE order_id = p_order_id LOOP
++    v_effective_qty := v_item.qty - v_item.voided_qty;
++    IF v_effective_qty <= 0 THEN
++      CONTINUE;
++    END IF;
++    v_effective_subtotal := v_item.unit_price * v_effective_qty;
++
++    INSERT INTO transaction_items (transaction_id, product_id, qty, subtotal)
++      VALUES (v_tx_id, v_item.product_id, v_effective_qty, v_effective_subtotal);
++
++    SELECT track_stock INTO v_stock FROM products WHERE id = v_item.product_id;
++    IF v_stock.track_stock THEN
++      DECLARE
++        v_stock_qty INT;
++      BEGIN
++        SELECT stock_qty INTO v_stock_qty FROM branch_stock
++          WHERE branch_id = v_branch_id AND product_id = v_item.product_id
++          FOR UPDATE;
++
++        IF v_stock_qty IS NULL THEN
++          v_stock_qty := 0;
++          INSERT INTO branch_stock (tenant_id, branch_id, product_id, stock_qty)
++            VALUES (v_order.tenant_id, v_branch_id, v_item.product_id, 0)
++            ON CONFLICT (branch_id, product_id) DO NOTHING;
++        END IF;
++
++        IF v_stock_qty < v_effective_qty THEN
++          RAISE EXCEPTION 'STOCK_INSUFFICIENT: Stok "%" tidak cukup di cabang ini (tersisa %, diminta %).',
++            v_item.product_name, v_stock_qty, v_effective_qty;
++        END IF;
++
++        UPDATE branch_stock SET stock_qty = stock_qty - v_effective_qty, updated_at = now()
++          WHERE branch_id = v_branch_id AND product_id = v_item.product_id;
++
++        INSERT INTO stock_movements (tenant_id, branch_id, product_id, type, qty_change, note, created_by)
++          VALUES (v_order.tenant_id, v_branch_id, v_item.product_id, 'sale', -v_effective_qty,
++                  'Otomatis dari pesanan ' || v_order.order_number, v_order.cashier_id);
++      END;
++    END IF;
++  END LOOP;
++
++  UPDATE orders SET
++    status = 'COMPLETED',
++    completed_at = now(),
++    transaction_id = v_tx_id
++  WHERE id = p_order_id;
++
++  IF v_order.order_type = 'dine_in' AND v_order.table_id IS NOT NULL THEN
++    UPDATE branch_tables SET needs_cleaning = true, cleaning_started_at = now(), bill_printed_at = NULL WHERE id = v_order.table_id;
++  END IF;
++
++
++  -- Migrasi 019 (F&B Core wiring dipertahankan dari migration_014): potong
++  -- branch_ingredients_stock berdasar recipe+modifier tiap order_item, kalau
++  -- produknya sudah punya resep terdaftar. Kalau consume_recipe() RAISE
++  -- EXCEPTION (stok bahan baku tidak cukup & tenant tidak mengizinkan stok
++  -- negatif), SELURUH transaksi ini ikut rollback bersamaan — checkout tetap
++  -- all-or-nothing.
++  PERFORM deduct_recipe_stock(p_order_id);
++
++  RETURN v_tx_id;
++END;
++$$;
++
++CREATE OR REPLACE FUNCTION "public"."checkout_transaction"("p_tenant_id" "uuid", "p_cashier_id" "uuid", "p_invoice_number" "text", "p_payment_method" "text", "p_member_code" "text", "p_items" "jsonb", "p_branch_id" "uuid" DEFAULT NULL::"uuid", "p_customer_id" "uuid" DEFAULT NULL::"uuid", "p_voucher_code" "text" DEFAULT NULL::"text", "p_promotion_id" "uuid" DEFAULT NULL::"uuid") RETURNS "uuid"
++    LANGUAGE "plpgsql" SECURITY DEFINER
++    SET "search_path" TO 'public', 'pg_temp'
++    AS $$
++DECLARE
++  v_item JSONB;
++  v_product products%ROWTYPE;
++  v_qty INT;
++  v_subtotal NUMERIC := 0;
++  v_discount_pct NUMERIC := 0;
++  v_member_id UUID := NULL;
++  v_member_discount NUMERIC := 0;
++  v_promo_voucher_discount NUMERIC := 0;
++  v_total NUMERIC;
++  v_base NUMERIC;
++  v_service NUMERIC := 0;
++  v_tax NUMERIC := 0;
++  v_tx_id UUID;
++  v_shift_id UUID;
++  v_branch_id UUID;
++  v_stock_qty NUMERIC;
++  v_pending_product_ids UUID[] := '{}';
++  v_pending_qtys INT[] := '{}';
++  v_pending_subtotals NUMERIC[] := '{}';
++  v_i INT;
++  v_voucher vouchers%ROWTYPE;
++  v_customer customers%ROWTYPE;
++  v_loyalty_points INT := 0;
++BEGIN
++  IF NOT EXISTS (
++    SELECT 1 FROM profiles WHERE id = auth.uid() AND tenant_id = p_tenant_id
++  ) THEN
++    RAISE EXCEPTION 'Akses ditolak: bukan anggota tenant ini';
++  END IF;
++
++  IF jsonb_array_length(p_items) = 0 THEN
++    RAISE EXCEPTION 'Keranjang kosong';
++  END IF;
++
++  v_branch_id := COALESCE(
++    p_branch_id,
++    (SELECT branch_id FROM profiles WHERE id = p_cashier_id),
++    main_branch_id(p_tenant_id)
++  );
++
++  v_shift_id := open_shift(p_tenant_id, p_cashier_id);
++
++  IF p_member_code IS NOT NULL AND p_member_code <> '' THEN
++    SELECT id, discount_percentage INTO v_member_id, v_discount_pct
++    FROM memberships
++    WHERE tenant_id = p_tenant_id
++      AND member_code = p_member_code
++      AND is_active = true
++      AND valid_until > now();
++    IF v_member_id IS NULL THEN
++      RAISE EXCEPTION 'Kode member tidak valid atau kedaluwarsa';
++    END IF;
++  END IF;
++
++  IF p_customer_id IS NOT NULL THEN
++    SELECT * INTO v_customer FROM customers
++      WHERE id = p_customer_id AND tenant_id = p_tenant_id AND is_active = true;
++    IF v_customer.id IS NULL THEN
++      RAISE EXCEPTION 'Pelanggan tidak ditemukan atau tidak aktif';
++    END IF;
++  END IF;
++
++  v_tx_id := gen_random_uuid();
++
++  FOR v_item IN SELECT * FROM jsonb_array_elements(p_items) LOOP
++    v_qty := (v_item->>'qty')::INT;
++    IF v_qty IS NULL OR v_qty <= 0 OR v_qty > 500 THEN
++      RAISE EXCEPTION 'Qty item tidak valid';
++    END IF;
++
++    SELECT * INTO v_product FROM products
++      WHERE id = (v_item->>'product_id')::UUID
++        AND tenant_id = p_tenant_id
++        AND is_available = true;
++
++    IF v_product.id IS NULL THEN
++      RAISE EXCEPTION 'Produk tidak ditemukan atau tidak tersedia';
++    END IF;
++
++    IF v_product.track_stock THEN
++      SELECT stock_qty INTO v_stock_qty FROM branch_stock
++        WHERE branch_id = v_branch_id AND product_id = v_product.id
++        FOR UPDATE;
++
++      IF v_stock_qty IS NULL THEN
++        v_stock_qty := 0;
++        INSERT INTO branch_stock (tenant_id, branch_id, product_id, stock_qty)
++          VALUES (p_tenant_id, v_branch_id, v_product.id, 0)
++          ON CONFLICT (branch_id, product_id) DO NOTHING;
++      END IF;
++
++      IF v_stock_qty < v_qty THEN
++        RAISE EXCEPTION 'STOCK_INSUFFICIENT: Stok "%" tidak cukup di cabang ini (tersisa %, diminta %).',
++          v_product.name, v_stock_qty, v_qty;
++      END IF;
++
++      UPDATE branch_stock SET stock_qty = stock_qty - v_qty, updated_at = now()
++        WHERE branch_id = v_branch_id AND product_id = v_product.id;
++
++      INSERT INTO stock_movements (tenant_id, branch_id, product_id, type, qty_change, note, created_by)
++        VALUES (p_tenant_id, v_branch_id, v_product.id, 'sale', -v_qty, 'Otomatis dari transaksi ' || p_invoice_number, p_cashier_id);
++    END IF;
++
++    v_subtotal := v_subtotal + (v_product.price * v_qty);
++
++    v_pending_product_ids := array_append(v_pending_product_ids, v_product.id);
++    v_pending_qtys := array_append(v_pending_qtys, v_qty);
++    v_pending_subtotals := array_append(v_pending_subtotals, v_product.price * v_qty);
++  END LOOP;
++
++  v_member_discount := round(v_subtotal * v_discount_pct / 100);
++
++  IF p_voucher_code IS NOT NULL AND p_voucher_code <> '' THEN
++    SELECT * INTO v_voucher FROM vouchers
++      WHERE tenant_id = p_tenant_id
++        AND voucher_code = p_voucher_code
++        AND is_active = true
++      FOR UPDATE;
++
++    IF v_voucher.id IS NULL THEN
++      RAISE EXCEPTION 'Voucher tidak ditemukan atau tidak aktif';
++    END IF;
++    IF v_voucher.branch_id IS NOT NULL AND v_voucher.branch_id <> v_branch_id THEN
++      RAISE EXCEPTION 'Voucher tidak berlaku untuk cabang ini';
++    END IF;
++    IF v_voucher.start_date > now() OR (v_voucher.expiry_date IS NOT NULL AND v_voucher.expiry_date < now()) THEN
++      RAISE EXCEPTION 'Voucher sudah tidak berlaku (kedaluwarsa atau belum mulai)';
++    END IF;
++    IF v_voucher.usage_limit IS NOT NULL AND v_voucher.usage_count >= v_voucher.usage_limit THEN
++      RAISE EXCEPTION 'Voucher sudah mencapai batas penggunaan';
++    END IF;
++    IF v_subtotal < v_voucher.min_purchase_amount THEN
++      RAISE EXCEPTION 'Belanja belum mencapai minimum Rp% untuk voucher ini', v_voucher.min_purchase_amount;
++    END IF;
++
++    IF v_voucher.discount_type = 'PERCENTAGE' THEN
++      v_promo_voucher_discount := round(v_subtotal * v_voucher.discount_value / 100);
++      IF v_voucher.max_discount_amount IS NOT NULL AND v_promo_voucher_discount > v_voucher.max_discount_amount THEN
++        v_promo_voucher_discount := v_voucher.max_discount_amount;
++      END IF;
++    ELSE
++      v_promo_voucher_discount := LEAST(v_voucher.discount_value, v_subtotal);
++    END IF;
++
++    UPDATE vouchers SET usage_count = usage_count + 1, updated_at = now() WHERE id = v_voucher.id;
++
++  ELSIF p_promotion_id IS NOT NULL THEN
++    v_promo_voucher_discount := apply_promotion(p_promotion_id, v_subtotal);
++  END IF;
++
++  v_total := round(v_subtotal - v_member_discount - v_promo_voucher_discount);
++  IF v_total < 0 THEN
++    v_total := 0;
++  END IF;
++
++  -- Migrasi 021: biaya service & pajak (default 0% = tanpa perubahan).
++  v_base := v_total;
++  SELECT c.service_amount, c.tax_amount, c.total_amount INTO v_service, v_tax, v_total
++    FROM calc_charges(p_tenant_id, v_base) c;
++
++  INSERT INTO transactions (
++    id, tenant_id, cashier_id, invoice_number, total_amount,
++    payment_method, member_id, is_offline_sync, shift_id, branch_id,
++    customer_id, voucher_id, promotion_id, subtotal_amount, discount_amount,
++    service_amount, tax_amount
++  ) VALUES (
++    v_tx_id, p_tenant_id, p_cashier_id, p_invoice_number, v_total,
++    p_payment_method, v_member_id, false, v_shift_id, v_branch_id,
++    p_customer_id,
++    CASE WHEN v_voucher.id IS NOT NULL THEN v_voucher.id ELSE NULL END,
++    CASE WHEN v_voucher.id IS NULL AND p_promotion_id IS NOT NULL THEN p_promotion_id ELSE NULL END,
++    v_subtotal, v_member_discount + v_promo_voucher_discount,
++    v_service, v_tax
++  );
++
++  FOR v_i IN 1..array_length(v_pending_product_ids, 1) LOOP
++    INSERT INTO transaction_items (transaction_id, product_id, qty, subtotal)
++      VALUES (v_tx_id, v_pending_product_ids[v_i], v_pending_qtys[v_i], v_pending_subtotals[v_i]);
++  END LOOP;
++
++  IF v_voucher.id IS NOT NULL THEN
++    INSERT INTO voucher_redemptions (voucher_id, transaction_id, customer_id, discount_given)
++      VALUES (v_voucher.id, v_tx_id, p_customer_id, v_promo_voucher_discount);
++  END IF;
++
++  IF p_customer_id IS NOT NULL THEN
++    v_loyalty_points := calculate_loyalty_points(p_tenant_id, v_base);
++    IF v_loyalty_points > 0 THEN
++      PERFORM earn_loyalty_points(v_tx_id, p_customer_id, v_loyalty_points);
++      UPDATE transactions SET loyalty_points_earned = v_loyalty_points WHERE id = v_tx_id;
++    END IF;
++
++    UPDATE customers
++      SET visit_count = visit_count + 1,
++          lifetime_spend = lifetime_spend + v_base,
++          last_visit_date = now(),
++          updated_at = now()
++      WHERE id = p_customer_id;
++  END IF;
++
++  -- BARU (Migrasi 019): potong branch_ingredients_stock berdasar resep
++  -- DEFAULT tiap produk (jalur ini tidak punya konsep varian/modifier).
++  -- Kalau consume_recipe() gagal (stok bahan baku kurang & tidak boleh
++  -- negatif), seluruh transaksi ini ikut rollback (all-or-nothing).
++  PERFORM deduct_recipe_stock_for_transaction(v_tx_id);
++
++  RETURN v_tx_id;
++END;
++$$;
+diff --git a/supabase/migration_022_charge_labels.sql b/supabase/migration_022_charge_labels.sql
+new file mode 100644
+index 0000000..961e1e8
+--- /dev/null
++++ b/supabase/migration_022_charge_labels.sql
+@@ -0,0 +1,10 @@
++-- =========================================================
++-- migration_022 — Nama biaya service & pajak bisa diubah (mis. "PPN", "PB1")
++-- Jalankan SEKALI di Supabase SQL Editor (setelah migration_021). Aman diulang.
++-- Hanya menambah 2 kolom teks; tidak mengubah perhitungan.
++-- =========================================================
++ALTER TABLE tenants
++  ADD COLUMN IF NOT EXISTS service_label TEXT NOT NULL DEFAULT 'Service'
++    CHECK (char_length(btrim(service_label)) BETWEEN 1 AND 30),
++  ADD COLUMN IF NOT EXISTS tax_label TEXT NOT NULL DEFAULT 'Pajak'
++    CHECK (char_length(btrim(tax_label)) BETWEEN 1 AND 30);

@@ -11,7 +11,7 @@ import * as XLSX from "xlsx";
 import { formatRupiah } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { getCurrentProfile } from "@/lib/getCurrentProfile";
-import { getTier, hasSalesHealth, type Tier } from "@/lib/tier";
+import { getTier, hasSalesHealth, FREE_TIER_LIMITS, type Tier } from "@/lib/tier";
 import { useBranch, ALL_BRANCHES } from "@/lib/branchContext";
 import { Skeleton, SkeletonStatGrid } from "@/components/Skeleton";
 import { tenantHasNoActivity } from "@/lib/demoMode";
@@ -36,12 +36,13 @@ interface RecentTx {
 }
 
 export default function ReportsPage() {
-  const { selectedBranchId, selectedBranch, canSwitchBranch } = useBranch();
+  const { selectedBranchId, selectedBranch, canSwitchBranch, branches } = useBranch();
   const [chartModel, setChartModel] = useState<"bar" | "line">("bar");
   const [loading, setLoading] = useState(true);
   const [tier, setTier] = useState<Tier>("free");
   const [cafeName, setCafeName] = useState("Kafe Anda");
   const [isDemo, setIsDemo] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   const [omzetData, setOmzetData] = useState<OmzetPoint[]>([]);
   const [peakHours, setPeakHours] = useState<PeakPoint[]>([]);
@@ -244,10 +245,48 @@ export default function ReportsPage() {
     })();
   }, [selectedBranchId]);
 
+  // PDF Omzet (ringkas) — Free Trial: 1 hari (hari ini); Pro/Supreme: 7 hari
+  // terakhir. Isinya analitik pertumbuhan + grafik batang per cabang.
+  async function exportPdfOmzet() {
+    setPdfBusy(true);
+    try {
+      const { profile } = await getCurrentProfile();
+      if (!profile) return;
+      const days = tier === "free" ? FREE_TIER_LIMITS.exportDays : 7;
+      const start = new Date();
+      start.setDate(start.getDate() - (days - 1));
+      start.setHours(0, 0, 0, 0);
+      const end = new Date();
+      end.setHours(23, 59, 59, 999);
+      const { generateReportPdf } = await import("@/lib/reportPdf");
+      await generateReportPdf({
+        supabase: createClient(),
+        tenantId: profile.tenant_id,
+        cafeName,
+        type: "omzet",
+        start,
+        end,
+        branchId: selectedBranchId,
+        branches: branches.map((b) => ({ id: b.id, name: b.name })),
+        showBranchLabel: canSwitchBranch,
+        isDemo,
+        note: tier === "free" ? `Paket Free Trial: laporan dibatasi ${FREE_TIER_LIMITS.exportDays} hari (hari ini).` : undefined,
+      });
+    } catch (err: any) {
+      alert("Gagal membuat PDF: " + (err?.message ?? "Terjadi kesalahan"));
+    } finally {
+      setPdfBusy(false);
+    }
+  }
+
   function exportCSV() {
+    // Free Trial: hanya data hari ini (baris terakhir = hari ini).
+    const exportRows = tier === "free" ? omzetData.slice(-FREE_TIER_LIMITS.exportDays) : omzetData;
+    const exportOmzet = exportRows.reduce((s, d) => s + d.omzet, 0);
+    const exportOrders = exportRows.reduce((s, d) => s + d.orders, 0);
     const header = "Tanggal,Hari,Omzet (Rp),Jumlah Transaksi\n";
-    const rows = omzetData.map((d) => `${d.date},${d.day},${d.omzet},${d.orders}`).join("\n");
-    const totalRow = `\nTotal,,${totalOmzet},${totalOrders}`;
+    const rows = exportRows.map((d) => `${d.date},${d.day},${d.omzet},${d.orders}`).join("\n");
+    const totalRow = `\nTotal,,${exportOmzet},${exportOrders}`;
     const csv = "\uFEFF" + header + rows + totalRow;
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -335,14 +374,17 @@ export default function ReportsPage() {
               <button onClick={exportExcel} className="btn-outline flex items-center gap-1.5 text-sm" title="Excel lengkap: Ringkasan, Omzet Harian, Menu Terlaris (+ Jam Ramai untuk Supreme)">
                 <Download size={14} /> Excel Lengkap
               </button>
-              <button onClick={() => window.print()} className="btn-outline flex items-center gap-1.5 text-sm">
-                <Printer size={14} /> PDF
+              <button onClick={exportPdfOmzet} disabled={pdfBusy} className="btn-outline flex items-center gap-1.5 text-sm disabled:opacity-50" title="PDF Omzet: analitik pertumbuhan + grafik batang per cabang">
+                <Printer size={14} /> {pdfBusy ? "Membuat..." : "PDF Omzet"}
               </button>
             </>
           ) : (
             <>
+              <button onClick={exportPdfOmzet} disabled={pdfBusy} className="btn-outline flex items-center gap-1.5 text-sm disabled:opacity-50" title="PDF Omzet hari ini: analitik pertumbuhan + grafik batang">
+                <Printer size={14} /> {pdfBusy ? "Membuat..." : "PDF Omzet (hari ini)"}
+              </button>
               <button onClick={exportCSV} className="btn-outline flex items-center gap-1.5 text-sm" title="CSV sederhana: rekap omzet harian">
-                <Download size={14} /> Export CSV
+                <Download size={14} /> {tier === "free" ? "Export CSV (hari ini)" : "Export CSV"}
               </button>
               <Link href="/dashboard/subscription" className="text-xs text-primary hover:underline whitespace-nowrap">
                 Upgrade untuk Excel Lengkap

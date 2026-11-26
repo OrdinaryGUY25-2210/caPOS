@@ -23,21 +23,53 @@ const TOUR_STEPS: Step[] = [
     title: "Selamat Datang di caPOS",
     description: "Tur singkat ini mengenalkan setiap menu di sidebar. Klik Lanjut untuk menjelajah, atau Lewati tur kapan saja.",
   },
+  // ===== Panduan setup awal (urutan yang disarankan) =====
+  {
+    target: "nav:/dashboard/ingredients",
+    title: "Langkah 1: Isi Bahan Baku & Harga Beli",
+    description:
+      "Mulai dari sini. Klik Tambah Bahan, isi nama, satuan (gram/ml/pcs), harga beli, dan stok awal — cukup satu form. Harga ini jadi dasar HPP, dan stok berkurang otomatis setiap ada penjualan.",
+  },
+  {
+    target: "nav:/dashboard/menu",
+    title: "Langkah 2: Tambah Menu",
+    description:
+      "Setelah bahan baku ada, klik Tambah Menu: isi nama, kategori, harga jual, dan foto. Kalau bahan baku belum diisi, aplikasi akan mengingatkan Anda di halaman ini.",
+  },
+  {
+    target: "nav:/dashboard/recipes",
+    title: "Langkah 3: Susun Resep & Lihat HPP",
+    description:
+      "Pilih menu, tambahkan bahan beserta takarannya per porsi. HPP per porsi dan margin langsung muncul otomatis; stok bahan juga berkurang sendiri tiap menu terjual.",
+  },
+  {
+    target: "nav:/dashboard/ingredients",
+    title: "Langkah 4: Cek Stok Bahan",
+    description:
+      "Pastikan stok tiap bahan sudah sesuai kondisi di dapur. Bahan yang menipis akan ditandai supaya Anda bisa belanja tepat waktu.",
+  },
+  {
+    target: "pos-quick-access",
+    title: "Langkah 5: Transaksi Pertama",
+    description:
+      "Buka Halaman Kasir (POS), pilih menu, lalu selesaikan pembayaran. Selama belum ada transaksi, beberapa halaman menampilkan DATA CONTOH (bertanda label Contoh) supaya tidak terlihat kosong. Begitu transaksi pertama selesai, semua data contoh hilang otomatis dan hanya data asli Anda yang tampil.",
+  },
+  // ===== Penjelasan tiap menu di sidebar =====
   // Ringkasan
   { target: "nav:/dashboard", title: "Laporan & Omzet", description: "Ringkasan performa kafe: omzet, jumlah transaksi, dan grafik tren pada periode terpilih." },
   { target: "nav:/dashboard/laporan-pdf", title: "Laporan PDF Otomatis", description: "Buat dan unduh laporan penjualan berformat PDF sesuai rentang tanggal." },
   { target: "nav:/dashboard/target", title: "Target Bulanan", description: "Tetapkan target omzet bulanan dan pantau tingkat pencapaiannya." },
   { target: "nav:/dashboard/transactions", title: "Riwayat Transaksi", description: "Daftar semua transaksi: cari, lihat detail, dan cetak ulang struk." },
   { target: "nav:/dashboard/cancellations", title: "Log Pembatalan", description: "Catatan transaksi yang dibatalkan (void) beserta alasannya." },
-  // Katalog Produk
-  { target: "nav:/dashboard/menu", title: "Kelola Menu & Stok", description: "Tambah atau ubah menu, harga, kategori, dan status ketersediaan." },
-  { target: "nav:/dashboard/variants", title: "Varian Produk", description: "Atur varian menu (ukuran, penyajian) beserta selisih harganya." },
-  { target: "nav:/dashboard/modifiers", title: "Modifier", description: "Grup pilihan tambahan seperti topping atau level gula untuk menu." },
-  { target: "nav:/dashboard/recipes", title: "Resep & HPP", description: "Resep tiap menu sekaligus perhitungan Harga Pokok Penjualan." },
-  { target: "nav:/dashboard/ingredients", title: "Bahan Baku", description: "Master bahan baku beserta satuan dan harga belinya." },
+  // Menu & Resep
+  { target: "nav:/dashboard/ingredients", title: "Bahan Baku & Harga Beli", description: "Daftar bahan beserta harga beli dan stok. Isi harga sekali, HPP menu dihitung otomatis. Tiap belanja bisa dicatat di sini agar harga rata-rata ikut terbarui." },
+  { target: "nav:/dashboard/menu", title: "Daftar Menu", description: "Tambah atau ubah menu, harga, kategori, foto, dan status tersedia/habis. Disarankan isi Bahan Baku lebih dulu agar resep dan HPP bisa langsung dibuat." },
+  { target: "nav:/dashboard/recipes", title: "Resep & HPP Menu", description: "Pilih menu, masukkan bahan dan takarannya. HPP per porsi dan margin langsung terhitung otomatis, tanpa perlu klik hitung." },
+  { target: "nav:/dashboard/variants", title: "Varian (Ukuran/Penyajian)", description: "Atur varian menu (mis. Regular/Large, Panas/Dingin) beserta selisih harganya." },
+  { target: "nav:/dashboard/modifiers", title: "Topping & Pilihan Tambahan", description: "Grup pilihan tambahan seperti topping atau level gula untuk menu." },
   // Inventori
-  { target: "nav:/dashboard/stock", title: "Stok & HPP", description: "Pantau stok bahan baku dan nilai persediaan saat ini." },
-  { target: "nav:/dashboard/stock-opname", title: "Stok Opname", description: "Sensus fisik stok dan koreksi selisih hasil hitung." },
+  { target: "nav:/dashboard/stock", title: "Stok Produk Jadi", description: "Pantau stok dan harga pokok produk jadi (menu yang dijual tanpa resep)." },
+  { target: "nav:/dashboard/stock-opname", title: "Hitung Stok Fisik (Opname)", description: "Hitung stok fisik di dapur/gudang dan koreksi selisihnya dengan catatan sistem." },
   // Purchasing
   { target: "nav:/dashboard/purchasing/suppliers", title: "Pemasok", description: "Data supplier atau vendor tempat kafe membeli bahan." },
   { target: "nav:/dashboard/purchasing/purchase-orders", title: "Purchase Order", description: "Buat dan kelola pesanan pembelian ke pemasok." },

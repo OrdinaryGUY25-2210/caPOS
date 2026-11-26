@@ -4,6 +4,7 @@ import { useState } from "react";
 import { formatRupiah } from "@/lib/utils";
 import { getOrderTypeLabel, computeReceiptTotals, type ReceiptOrderType } from "@/lib/receipt";
 import type { CartItem } from "@/lib/types";
+import { useHideBranding } from "@/lib/useHideBranding";
 
 export interface ReceiptData {
   // --- Identitas kafe ---
@@ -51,6 +52,8 @@ export interface ReceiptData {
   footerNote?: string;
 
   width: "58mm" | "80mm";
+  /** Sembunyikan watermark caPOS. Kosongkan untuk otomatis dari pengaturan tenant (hanya Supreme). */
+  hideBranding?: boolean;
 }
 
 function ItemConfigLine({ item }: { item: CartItem }) {
@@ -61,6 +64,7 @@ function ItemConfigLine({ item }: { item: CartItem }) {
 
 export default function Receipt({ data }: { data: ReceiptData }) {
   const [logoFailed, setLogoFailed] = useState(false);
+  const hideBranding = useHideBranding(data.hideBranding);
   const { subtotal, discount, serviceAmount, taxAmount, total } = computeReceiptTotals({
     items: data.items,
     discount: data.discount,
@@ -185,7 +189,7 @@ export default function Receipt({ data }: { data: ReceiptData }) {
         </>
       )}
 
-      <p className="text-center mt-2 text-[9px]">powered by caPOS — Studio D13</p>
+      {!hideBranding && <p className="text-center mt-2 text-[9px]">powered by caPOS — Studio D13</p>}
     </div>
   );
 }

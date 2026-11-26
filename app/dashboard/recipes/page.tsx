@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { ChefHat, Plus, Trash2, Loader2, CheckCircle2, XCircle, Calculator } from "lucide-react";
 import { formatRupiah, cx } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
@@ -41,6 +42,10 @@ export default function RecipesPage() {
   const [calculating, setCalculating] = useState(false);
   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
   const [isDemo, setIsDemo] = useState(false);
+  // ingredient_id → harga per satuan (rata-rata cabang yang sudah punya harga).
+  // Dipakai HANYA untuk estimasi langsung saat menyusun resep; angka resmi
+  // tetap dari RPC calculate_recipe_cost.
+  const [costMap, setCostMap] = useState<Map<string, number>>(new Map());
 
   const canWrite = isManagerOrOwner(role);
 
@@ -53,10 +58,16 @@ export default function RecipesPage() {
     }
     setRole(profile.role);
     const supabase = createClient();
-    const [{ data: prodData }, { data: ingData }] = await Promise.all([
+    const [{ data: prodData }, { data: ingData }, { data: costData }] = await Promise.all([
       supabase.from("products").select("*").eq("tenant_id", profile.tenant_id).order("name", { ascending: true }),
       supabase.from("ingredients").select("*").eq("tenant_id", profile.tenant_id).eq("status", "active").order("name", { ascending: true }),
+      supabase.from("branch_ingredients_stock").select("ingredient_id, cost_price").eq("tenant_id", profile.tenant_id),
     ]);
+    const costAcc = new Map<string, number[]>();
+    for (const r of (costData as { ingredient_id: string; cost_price: number }[]) ?? []) {
+      if (Number(r.cost_price) > 0) costAcc.set(r.ingredient_id, [...(costAcc.get(r.ingredient_id) ?? []), Number(r.cost_price)]);
+    }
+    setCostMap(new Map(Array.from(costAcc.entries()).map(([id, arr]) => [id, arr.reduce((a, b) => a + b, 0) / arr.length])));
     const freshProducts = (prodData as Product[]) ?? [];
     const freshIngredients = (ingData as Ingredient[]) ?? [];
     setProducts(freshProducts);
@@ -158,7 +169,7 @@ export default function RecipesPage() {
   function addItemRow() {
     const first = ingredients[0];
     if (!first) {
-      alert("Belum ada bahan baku aktif. Tambahkan bahan dulu di halaman Bahan Baku.");
+      alert("Belum ada bahan baku aktif. Tambahkan bahan dulu di halaman Bahan Baku & Harga Beli.");
       return;
     }
     setItems((prev) => [...prev, { ingredient_id: first.id, quantity: "", unit: first.inventory_unit, wastage_percentage: "0", notes: "" }]);
@@ -267,6 +278,32 @@ export default function RecipesPage() {
 
   const selectedProduct = useMemo(() => products.find((p) => p.id === selectedProductId) ?? null, [products, selectedProductId]);
 
+  // Estimasi HPP langsung (tanpa perlu klik tombol / menyimpan dulu).
+  const live = useMemo(() => {
+    let base = 0;
+    let withWaste = 0;
+    const missing: string[] = [];
+    for (const it of items) {
+      const q = Number(it.quantity) || 0;
+      if (q <= 0) continue;
+      const c = costMap.get(it.ingredient_id) ?? 0;
+      const w = Number(it.wastage_percentage) || 0;
+      base += q * c;
+      withWaste += q * (1 + w / 100) * c;
+      if (c <= 0) {
+        const nm = ingredients.find((i) => i.id === it.ingredient_id)?.name;
+        if (nm && !missing.includes(nm)) missing.push(nm);
+      }
+    }
+    const y = Math.max(1, Number(yieldQty || 1));
+    const perPortion = base / y;
+    const price = Number(selectedProduct?.price ?? 0);
+    const margin = price > 0 ? ((price - perPortion) / price) * 100 : null;
+    // Saran harga: harga jual agar margin kotor 40%, dibulatkan ke atas per Rp 500.
+    const suggested = perPortion > 0 ? Math.ceil(perPortion / 0.6 / 500) * 500 : 0;
+    return { perPortion, perPortionWaste: withWaste / y, missing, price, margin, suggested, hasItems: items.some((it) => Number(it.quantity) > 0) };
+  }, [items, costMap, yieldQty, ingredients, selectedProduct]);
+
   if (loading) {
     return (
       <div className="space-y-6">
@@ -283,10 +320,10 @@ export default function RecipesPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-bold text-neutral-900 flex items-center gap-2">
-          <ChefHat size={20} className="text-primary-dark" /> Resep & HPP
+          <ChefHat size={20} className="text-primary-dark" /> Resep & HPP Menu
         </h1>
         {isDemo && <DemoBadge />}
-        <p className="text-sm text-neutral-500">Susun resep bahan baku per menu/varian — HPP dihitung otomatis dari harga bahan.</p>
+        <p className="text-sm text-neutral-500">Pilih menu, masukkan bahan & takarannya — HPP dan margin langsung terhitung otomatis dari harga beli bahan.</p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -407,7 +444,10 @@ export default function RecipesPage() {
                           className="input-field w-20 text-sm"
                         />
                         <span className="text-xs text-neutral-400">% waste</span>
-                        <button onClick={() => setItems(items.filter((_, i) => i !== idx))} type="button" className="text-neutral-400 hover:text-urgent ml-auto">
+                        <span className="text-xs text-neutral-500 ml-auto">
+                          {formatRupiah((Number(it.quantity) || 0) * (costMap.get(it.ingredient_id) ?? 0))}
+                        </span>
+                        <button onClick={() => setItems(items.filter((_, i) => i !== idx))} type="button" className="text-neutral-400 hover:text-urgent">
                           <Trash2 size={14} />
                         </button>
                       </div>
@@ -416,6 +456,35 @@ export default function RecipesPage() {
                   {items.length === 0 && <p className="text-neutral-400 text-sm">Belum ada bahan di resep ini.</p>}
                 </div>
               </div>
+
+              {live.hasItems && (
+                <div className="rounded-xl bg-primary-light/40 border border-primary/20 p-3 space-y-1">
+                  <p className="text-sm text-neutral-700">
+                    Estimasi HPP per porsi: <span className="font-bold text-neutral-900">{formatRupiah(live.perPortion)}</span>
+                    {live.perPortionWaste > live.perPortion + 0.5 && (
+                      <span className="text-xs text-neutral-500"> (≈ {formatRupiah(live.perPortionWaste)} jika waste ikut dihitung)</span>
+                    )}
+                  </p>
+                  {live.price > 0 && live.margin !== null && (
+                    <p className="text-xs text-neutral-600">
+                      Harga jual {formatRupiah(live.price)} → untung kotor {formatRupiah(live.price - live.perPortion)} per porsi (margin{" "}
+                      <span className={cx("font-semibold", live.margin < 30 ? "text-urgent" : "text-primary-dark")}>{Math.round(live.margin)}%</span>)
+                    </p>
+                  )}
+                  {live.suggested > 0 && live.missing.length === 0 && (
+                    <p className="text-xs text-neutral-600">
+                      Saran: harga jual <span className="font-semibold">{formatRupiah(live.suggested)}</span> untuk margin sekitar 40%
+                      {live.price > 0 && live.price < live.suggested ? " — harga sekarang masih di bawah saran." : "."}
+                    </p>
+                  )}
+                  {live.missing.length > 0 && (
+                    <p className="text-xs text-warning">
+                      Harga belum diisi untuk: {live.missing.join(", ")}. HPP akan terlalu rendah —{" "}
+                      <Link href="/dashboard/ingredients" className="underline font-medium">isi di Bahan Baku & Harga Beli</Link>.
+                    </p>
+                  )}
+                </div>
+              )}
 
               <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-neutral-100">
                 <button
@@ -429,7 +498,7 @@ export default function RecipesPage() {
                 {activeRecipe && (
                   <button onClick={previewCost} disabled={calculating} className="btn-outline flex items-center gap-2 text-sm">
                     {calculating ? <Loader2 className="animate-spin" size={16} /> : <Calculator size={16} />}
-                    Hitung HPP
+                    Cek HPP tersimpan
                   </button>
                 )}
                 {costPreview !== null && (

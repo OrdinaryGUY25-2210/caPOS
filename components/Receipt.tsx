@@ -2,6 +2,7 @@
 
 import { formatRupiah } from "@/lib/utils";
 import type { CartItem } from "@/lib/types";
+import { useHideBranding } from "@/lib/useHideBranding";
 
 export interface ReceiptData {
   cafeName: string;
@@ -23,6 +24,18 @@ export interface ReceiptData {
   /** Teks custom di footer, sebelum baris "powered by caPOS" — diatur di /dashboard/settings/receipt. */
   footerText?: string | null;
   width: "58mm" | "80mm";
+  /** Sembunyikan watermark caPOS. Kosongkan untuk otomatis dari pengaturan tenant (hanya Supreme). */
+  hideBranding?: boolean;
+  /** Biaya layanan & pajak (opsional; kosong = tidak ditampilkan). */
+  serviceAmount?: number;
+  servicePct?: number;
+  taxAmount?: number;
+  taxPct?: number;
+  /** true = pajak sudah termasuk di harga (hanya dipecah di struk). */
+  taxInclusive?: boolean;
+  /** Nama kustom biaya (mis. "PPN", "PB1"); kosong = "Service"/"Pajak". */
+  serviceLabel?: string;
+  taxLabel?: string;
   /** Uang diterima & kembalian (khusus metode "cash") — Requirement 2. */
   cashReceived?: number;
   changeDue?: number;
@@ -30,6 +43,7 @@ export interface ReceiptData {
 
 export default function Receipt({ data }: { data: ReceiptData }) {
   const subtotal = data.items.reduce((sum, i) => sum + (i.unitPrice ?? i.price) * i.qty, 0);
+  const hideBranding = useHideBranding(data.hideBranding);
 
   return (
     <div
@@ -78,10 +92,27 @@ export default function Receipt({ data }: { data: ReceiptData }) {
           <span>-{formatRupiah(data.discount)}</span>
         </div>
       )}
+      {(data.serviceAmount ?? 0) > 0 && (
+        <div className="flex justify-between">
+          <span>{data.serviceLabel || "Service"}{data.servicePct ? ` ${data.servicePct}%` : ""}</span>
+          <span>{formatRupiah(data.serviceAmount ?? 0)}</span>
+        </div>
+      )}
+      {(data.taxAmount ?? 0) > 0 && !data.taxInclusive && (
+        <div className="flex justify-between">
+          <span>{data.taxLabel || "Pajak"}{data.taxPct ? ` ${data.taxPct}%` : ""}</span>
+          <span>{formatRupiah(data.taxAmount ?? 0)}</span>
+        </div>
+      )}
       <div className="flex justify-between font-bold text-sm mt-1">
         <span>TOTAL</span>
         <span>{formatRupiah(data.total)}</span>
       </div>
+      {(data.taxAmount ?? 0) > 0 && data.taxInclusive && (
+        <p className="text-[10px] mt-0.5">
+          Sudah termasuk {(data.taxLabel || "Pajak").toLowerCase() === "pajak" ? "pajak" : data.taxLabel}{data.taxPct ? ` ${data.taxPct}%` : ""}: {formatRupiah(data.taxAmount ?? 0)}
+        </p>
+      )}
       <p className="mt-1">Bayar: {data.paymentMethod.toUpperCase()}</p>
       {typeof data.cashReceived === "number" && (
         <div className="flex justify-between">
@@ -109,7 +140,7 @@ export default function Receipt({ data }: { data: ReceiptData }) {
         </>
       )}
 
-      <p className="text-center mt-2 text-[9px]">powered by caPOS — Studio D13</p>
+      {!hideBranding && <p className="text-center mt-2 text-[9px]">powered by caPOS — Studio D13</p>}
     </div>
   );
 }

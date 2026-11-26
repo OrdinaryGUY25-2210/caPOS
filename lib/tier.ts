@@ -30,6 +30,8 @@ export const FREE_TIER_LIMITS = {
   maxCashiers: 2,
   maxMenu: 10,
   historyDays: 14,
+  /** Export laporan (PDF/CSV) untuk Free Trial dibatasi 1 hari (hari ini saja). */
+  exportDays: 1,
 };
 
 /** Batas riwayat (hari) per tier — dipakai halaman Riwayat Transaksi & Laporan. */

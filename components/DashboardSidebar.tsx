@@ -86,20 +86,21 @@ const NAV_GROUPS: { label: string; items: { href: string; label: string; icon: a
     ],
   },
   {
-    label: "Katalog Produk",
+    // Urutan mengikuti alur setup: isi bahan → buat menu → susun resep (HPP).
+    label: "Menu & Resep",
     items: [
-      { href: "/dashboard/menu", label: "Kelola Menu & Stok", icon: Coffee },
-      { href: "/dashboard/variants", label: "Varian Produk", icon: Layers },
-      { href: "/dashboard/modifiers", label: "Modifier", icon: SlidersHorizontal },
-      { href: "/dashboard/recipes", label: "Resep & HPP", icon: ChefHat },
-      { href: "/dashboard/ingredients", label: "Bahan Baku", icon: Wheat },
+      { href: "/dashboard/ingredients", label: "Bahan Baku & Harga Beli", icon: Wheat },
+      { href: "/dashboard/menu", label: "Daftar Menu", icon: Coffee },
+      { href: "/dashboard/recipes", label: "Resep & HPP Menu", icon: ChefHat },
+      { href: "/dashboard/variants", label: "Varian (Ukuran/Penyajian)", icon: Layers },
+      { href: "/dashboard/modifiers", label: "Topping & Pilihan Tambahan", icon: SlidersHorizontal },
     ],
   },
   {
     label: "Inventori",
     items: [
-      { href: "/dashboard/stock", label: "Stok & HPP", icon: PackageSearch },
-      { href: "/dashboard/stock-opname", label: "Stok Opname", icon: ClipboardList },
+      { href: "/dashboard/stock", label: "Stok Produk Jadi", icon: PackageSearch },
+      { href: "/dashboard/stock-opname", label: "Hitung Stok Fisik (Opname)", icon: ClipboardList },
     ],
   },
   {
